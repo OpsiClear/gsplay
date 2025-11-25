@@ -1,0 +1,481 @@
+"""
+Event handlers and callback management for the Universal GSPlay.
+
+This module handles all UI event callbacks, debouncing logic, and
+handler registration.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+from typing import TYPE_CHECKING
+
+from src.gsplay.interaction.events import EventBus, EventType
+
+if TYPE_CHECKING:
+    from src.gsplay.nerfview import GSPlay
+    from src.gsplay.config.settings import UIHandles
+    from src.gsplay.interaction.playback import PlaybackController
+
+logger = logging.getLogger(__name__)
+
+
+class HandlerManager:
+    """
+    Manages event handlers and debounced callbacks for the viewer.
+
+    This class centralizes all callback logic and provides debouncing
+    for smooth user interaction. It translates UI events into Domain Events.
+    """
+
+    def __init__(self, event_bus: EventBus):
+        """
+        Initialize handler manager.
+
+        Parameters
+        ----------
+        event_bus : EventBus
+            Event bus for emitting events
+        """
+        self.event_bus = event_bus
+
+        # Debouncing timers
+        self._rerender_timer: threading.Timer | None = None
+        self._mouse_rerender_timer: threading.Timer | None = None
+        self._last_mouse_time: float = 0.0
+
+        # Playback controller reference (for direct control)
+        self.playback_controller: PlaybackController | None = None
+
+        # GSPlay reference (for direct rerender if needed, though prefer events)
+        self.viewer: GSPlay | None = None
+
+        logger.debug("HandlerManager initialized")
+
+    def set_viewer(self, viewer: GSPlay) -> None:
+        """Set the viewer instance."""
+        self.viewer = viewer
+        logger.debug("GSPlay set in HandlerManager")
+
+    def set_playback_controller(self, controller: PlaybackController) -> None:
+        """Set the playback controller."""
+        self.playback_controller = controller
+        logger.debug("PlaybackController set in HandlerManager")
+
+    def trigger_rerender(self, delay_ms: float = 200.0) -> None:
+        """
+        Trigger debounced rerender via event bus.
+
+        Parameters
+        ----------
+        delay_ms : float
+            Delay in milliseconds before rerendering (default 200ms)
+        """
+        # Update edit history (this is a bit implicit, ideally should be an event too)
+        # But for now we assume the App listens to RERENDER_REQUESTED and updates history
+
+        # Cancel any pending rerender
+        if self._rerender_timer is not None:
+            self._rerender_timer.cancel()
+
+        # Schedule new rerender after delay
+        def do_rerender():
+            self.event_bus.emit(EventType.RERENDER_REQUESTED, source="handler_manager")
+
+        self._rerender_timer = threading.Timer(delay_ms / 1000.0, do_rerender)
+        self._rerender_timer.start()
+
+        logger.debug(f"Scheduled rerender request with {delay_ms}ms delay")
+
+    def trigger_immediate_rerender(self) -> None:
+        """
+        Trigger immediate rerender (no debouncing).
+
+        Used for volume filtering for real-time response.
+        """
+        # Cancel any pending rerender
+        if self._rerender_timer is not None:
+            self._rerender_timer.cancel()
+
+        # Immediate rerender
+        self.event_bus.emit(EventType.RERENDER_REQUESTED, source="handler_manager")
+
+        logger.debug("Triggered immediate rerender request")
+
+    def _setup_slider_group(
+        self, sliders: list, group_name: str, immediate: bool = False
+    ) -> None:
+        """
+        Setup callbacks for a group of sliders with identical behavior.
+
+        Parameters
+        ----------
+        sliders : list
+            List of slider handles (may contain None)
+        group_name : str
+            Name of the slider group for logging
+        immediate : bool
+            If True, use immediate rerender; otherwise use debounced rerender
+        """
+
+        def callback(_):
+            if immediate:
+                self.trigger_immediate_rerender()
+            else:
+                self.trigger_rerender()
+
+        active_count = 0
+        for slider in sliders:
+            if slider is not None:
+                slider.on_update(callback)
+                active_count += 1
+
+        logger.debug(f"Registered {active_count} {group_name} slider callbacks")
+
+    def setup_time_slider_callback(self, ui: UIHandles) -> None:
+        """
+        Setup time slider callback for immediate frame updates.
+
+        Parameters
+        ----------
+        ui : UIHandles
+            UI handles
+        """
+        if ui.time_slider is not None:
+
+            @ui.time_slider.on_update
+            def _(_) -> None:
+                # Use playback controller to set frame
+                if self.playback_controller:
+                    self.playback_controller.set_frame(ui.time_slider.value)
+                else:
+                    # Fallback
+                    self.event_bus.emit(
+                        EventType.RERENDER_REQUESTED, source="time_slider"
+                    )
+
+            logger.debug("Time slider callback registered")
+
+    def setup_color_callbacks(self, ui: UIHandles) -> None:
+        """
+        Setup callbacks for all color adjustment sliders.
+
+        Parameters
+        ----------
+        ui : UIHandles
+            UI handles
+        """
+        color_sliders = [
+            ui.temperature_slider,
+            ui.tint_slider,
+            ui.brightness_slider,
+            ui.contrast_slider,
+            ui.saturation_slider,
+            ui.vibrance_slider,
+            ui.hue_shift_slider,
+            ui.gamma_slider,
+            ui.shadows_slider,
+            ui.highlights_slider,
+            ui.fade_slider,
+            ui.shadow_tint_hue_slider,
+            ui.shadow_tint_sat_slider,
+            ui.highlight_tint_hue_slider,
+            ui.highlight_tint_sat_slider,
+            ui.alpha_scaler_slider,
+        ]
+
+        self._setup_slider_group(color_sliders, "color")
+
+    def setup_transform_callbacks(self, ui: UIHandles) -> None:
+        """
+        Setup callbacks for transform sliders.
+
+        Parameters
+        ----------
+        ui : UIHandles
+            UI handles
+        """
+        transform_sliders = [
+            ui.translation_x_slider,
+            ui.translation_y_slider,
+            ui.translation_z_slider,
+            ui.global_scale_slider,
+            ui.rotation_x_slider,
+            ui.rotation_y_slider,
+            ui.rotation_z_slider,
+        ]
+
+        self._setup_slider_group(transform_sliders, "transform")
+
+    def setup_animation_callbacks(self, ui: UIHandles) -> None:
+        """
+        Setup callbacks for animation controls.
+
+        Parameters
+        ----------
+        ui : UIHandles
+            UI handles
+        """
+        if ui.play_speed is not None:
+
+            def update_fps(_):
+                if self.playback_controller:
+                    self.playback_controller.set_fps(ui.play_speed.value)
+                else:
+                    self.trigger_rerender()
+
+            ui.play_speed.on_update(update_fps)
+
+        if ui.auto_play is not None:
+            # Use PlaybackButtons wrapper interface
+            def toggle_playback(_):
+                if self.playback_controller:
+                    self.playback_controller.toggle_play()
+                else:
+                    self.trigger_rerender()
+
+            ui.auto_play.on_click(toggle_playback)
+
+        if ui.render_quality is not None:
+
+            def update_quality(_):
+                # Sync quality slider with nerfview's viewer_res
+                if self.viewer and hasattr(self.viewer, "render_tab_state"):
+                    self.viewer.render_tab_state.viewer_res = int(
+                        ui.render_quality.value
+                    )
+                self.trigger_rerender()
+
+            ui.render_quality.on_update(update_quality)
+
+        if ui.jpeg_quality_slider is not None:
+
+            def update_jpeg_quality(_):
+                # Update JPEG quality for streamed images (both static and move)
+                if self.viewer:
+                    quality = int(ui.jpeg_quality_slider.value)
+                    self.viewer.jpeg_quality_static = quality
+                    self.viewer.jpeg_quality_move = quality
+                    logger.info(f"JPEG quality updated to {quality}")
+                self.trigger_rerender()
+
+            ui.jpeg_quality_slider.on_update(update_jpeg_quality)
+
+        logger.debug("Animation callbacks registered")
+
+    def setup_volume_filter_callbacks(self, ui: UIHandles) -> None:
+        """
+        Setup callbacks for volume filtering controls.
+
+        Uses immediate rerender for real-time response.
+
+        Parameters
+        ----------
+        ui : UIHandles
+            UI handles
+        """
+        filter_controls = [
+            # Basic opacity/scale
+            ui.min_opacity_slider,
+            ui.max_opacity_slider,
+            ui.min_scale_slider,
+            ui.max_scale_slider,
+            # Sphere filter
+            ui.sphere_center_x,
+            ui.sphere_center_y,
+            ui.sphere_center_z,
+            ui.sphere_radius,
+            # Box filter
+            ui.box_min_x,
+            ui.box_min_y,
+            ui.box_min_z,
+            ui.box_max_x,
+            ui.box_max_y,
+            ui.box_max_z,
+            # Ellipsoid filter
+            ui.ellipsoid_center_x,
+            ui.ellipsoid_center_y,
+            ui.ellipsoid_center_z,
+            ui.ellipsoid_radius_x,
+            ui.ellipsoid_radius_y,
+            ui.ellipsoid_radius_z,
+            # Frustum filter
+            ui.frustum_fov,
+            ui.frustum_aspect,
+            ui.frustum_near,
+            ui.frustum_far,
+            # Other
+            ui.use_cpu_filtering_checkbox,
+        ]
+
+        self._setup_slider_group(filter_controls, "volume filter", immediate=True)
+
+    def setup_filter_type_callback(
+        self,
+        ui: UIHandles,
+        initial_scene_bounds: dict | None = None,
+    ) -> None:
+        """
+        Setup callback for spatial filter type dropdown.
+
+        Handles filter initialization and rerender triggering.
+        Visibility is handled by the dropdown's own callback in layout.py.
+
+        Parameters
+        ----------
+        ui : UIHandles
+            UI handles
+        initial_scene_bounds : dict | None
+            Initial scene bounds for centering filters
+        """
+        if ui.spatial_filter_type is None:
+            return
+
+        @ui.spatial_filter_type.on_update
+        def _(event):
+            spatial_type = ui.spatial_filter_type.value
+            logger.info(f"Spatial filter type changed to: {spatial_type}")
+
+            # Initialize filter defaults when activated
+            if spatial_type == "Sphere" and ui.sphere_radius is not None:
+                # Set reasonable default radius if not set
+                if ui.sphere_radius.value < 0.1:
+                    ui.sphere_radius.value = 10.0
+            elif spatial_type == "Box":
+                # Set reasonable default box bounds if not set
+                if ui.box_min_x is not None and ui.box_min_x.value == ui.box_max_x.value:
+                    ui.box_min_x.value = -5.0
+                    ui.box_min_y.value = -5.0
+                    ui.box_min_z.value = -5.0
+                    ui.box_max_x.value = 5.0
+                    ui.box_max_y.value = 5.0
+                    ui.box_max_z.value = 5.0
+            elif spatial_type == "Ellipsoid":
+                # Set reasonable default radii if not set
+                if ui.ellipsoid_radius_x is not None and ui.ellipsoid_radius_x.value < 0.1:
+                    ui.ellipsoid_radius_x.value = 5.0
+                    ui.ellipsoid_radius_y.value = 5.0
+                    ui.ellipsoid_radius_z.value = 5.0
+
+            # Trigger rerender
+            self.event_bus.emit(EventType.RERENDER_REQUESTED, source="spatial_filter_type")
+
+        logger.debug("Spatial filter type callback registered")
+
+    def setup_processing_mode_callback(self, ui: UIHandles) -> None:
+        """
+        Setup callback for processing mode dropdown.
+
+        Parameters
+        ----------
+        ui : UIHandles
+            UI handles
+        """
+        if ui.processing_mode_dropdown is None:
+            return
+
+        @ui.processing_mode_dropdown.on_update
+        def _(event):
+            from src.infrastructure.processing_mode import ProcessingMode
+
+            mode_str = ui.processing_mode_dropdown.value
+            logger.info(f"Processing mode changed to: {mode_str}")
+
+            # Convert UI string to mode value for config
+            try:
+                mode = ProcessingMode.from_string(mode_str)
+
+                # Log detailed processing path info
+                filter_device = "CPU" if mode.filter_on_cpu else "GPU"
+                color_device = "CPU" if mode.color_on_cpu else "GPU"
+                transform_device = "CPU" if mode.transform_on_cpu else "GPU"
+
+                logger.info(
+                    f"Processing path enabled: Filter={filter_device}, "
+                    f"Color={color_device}, Transform={transform_device}, "
+                    f"CPU->GPU transfers={mode.transfer_count}"
+                )
+
+                logger.debug(f"Processing mode enum: {mode.value}")
+            except ValueError as e:
+                logger.error(f"Invalid processing mode: {mode_str}, error: {e}")
+
+            # Trigger immediate rerender
+            self.trigger_immediate_rerender()
+
+        logger.debug("Processing mode callback registered")
+
+    def setup_button_callbacks(self, ui: UIHandles) -> None:
+        """
+        Setup callbacks for all buttons.
+
+        Parameters
+        ----------
+        ui : UIHandles
+            UI handles
+        """
+        button_mappings = [
+            (ui.export_ply_button, EventType.EXPORT_REQUESTED, {}),
+            (ui.reset_colors_button, EventType.RESET_COLORS_REQUESTED, {}),
+            (ui.reset_colors_advanced_button, EventType.RESET_COLORS_REQUESTED, {}),
+            (ui.reset_pose_button, EventType.RESET_TRANSFORM_REQUESTED, {}),
+            (ui.reset_filter_button, EventType.RESET_FILTER_REQUESTED, {}),
+        ]
+
+        for button, event_type, event_data in button_mappings:
+            if button is not None:
+                button.on_click(
+                    lambda _, et=event_type, ed=event_data: self.event_bus.emit(
+                        et, **ed
+                    )
+                )
+
+        # Load data button (special case - needs path from input)
+        if ui.load_data_button is not None and ui.data_path_input is not None:
+
+            @ui.load_data_button.on_click
+            def _(event):
+                path = ui.data_path_input.value
+                logger.info(f"Requesting load data from: {path}")
+                self.event_bus.emit(EventType.LOAD_DATA_REQUESTED, path=path)
+
+        logger.debug("Button callbacks registered")
+
+    def setup_all_callbacks(
+        self, ui: UIHandles, initial_scene_bounds: dict | None = None
+    ) -> None:
+        """
+        Setup all UI callbacks.
+
+        Parameters
+        ----------
+        ui : UIHandles
+            UI handles
+        initial_scene_bounds : dict | None
+            Initial scene bounds for filter initialization
+        """
+        logger.debug("Setting up all UI callbacks")
+
+        self.setup_time_slider_callback(ui)
+        self.setup_color_callbacks(ui)
+        self.setup_transform_callbacks(ui)
+        self.setup_animation_callbacks(ui)
+        self.setup_volume_filter_callbacks(ui)
+        self.setup_filter_type_callback(ui, initial_scene_bounds)
+        self.setup_processing_mode_callback(ui)
+        self.setup_button_callbacks(ui)
+
+        logger.debug("All UI callbacks registered successfully")
+
+    def cleanup(self) -> None:
+        """Cancel any pending timers and cleanup resources."""
+        if self._rerender_timer is not None:
+            self._rerender_timer.cancel()
+            self._rerender_timer = None
+
+        if self._mouse_rerender_timer is not None:
+            self._mouse_rerender_timer.cancel()
+            self._mouse_rerender_timer = None
+
+        logger.debug("HandlerManager cleanup complete")

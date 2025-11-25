@@ -1,0 +1,9 @@
+@echo off
+echo Installing dependencies...
+uv sync
+echo Setting up MSVC compiler environment...
+call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+echo Installing gsplat with CUDA compilation...
+uv pip install gsplat --force-reinstall --no-cache-dir
+echo Done!
+pause

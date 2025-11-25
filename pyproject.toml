@@ -1,0 +1,94 @@
+[project]
+name = "gsplay"
+version = "0.1.0"
+description = "A real-time player for dynamic 4D Gaussian Splatting scenes (PLY and GIFStream)."
+authors = [{ name = "", email = "opsiclear@gmail.com" }]
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+    # Core Framework
+    "torch>=2.0.0", # Deep learning framework (required by gsplat and GIFStream)
+    "numpy>=1.24.0", # Numerical computing
+    "packaging>=21.0", # Version parsing for gsplat backend
+    # UI & Interaction
+    "viser>=0.2.0", # 3D UI interface
+    "tyro>=0.8.0", # CLI argument parsing
+    # Gaussian Splatting Rendering
+    "gsplat>=1.3.0", # CUDA rasterization (pre-built wheels with CUDA support)
+    "gsmod>=0.1.2",  # LUT operations and filtering (local path override via uv sources)
+
+    # GIFStream Support
+    "pyyaml>=6.0",  # Config file parsing
+
+    # Launcher (local)
+    "gsplay-launcher",
+
+    # Spatial Operations
+    "scipy>=1.10.0",  # KDTree for KNN
+    "tqdm>=4.66.0",  # Progress bars for console output
+]
+
+[project.optional-dependencies]
+# Development & Testing
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+]
+
+# Cloud Storage (optional - for loading PLY files from cloud)
+cloud = [
+    "fsspec>=2024.1.0",  # Universal filesystem interface
+]
+s3 = [
+    "fsspec>=2024.1.0",
+    "s3fs>=2024.1.0",  # AWS S3
+]
+gcs = [
+    "fsspec>=2024.1.0",
+    "gcsfs>=2024.1.0",  # Google Cloud Storage
+]
+azure = [
+    "fsspec>=2024.1.0",
+    "adlfs>=2024.1.0",  # Azure Blob Storage
+]
+cloud-all = [
+    "fsspec>=2024.1.0",
+    "s3fs>=2024.1.0",
+    "gcsfs>=2024.1.0",
+    "adlfs>=2024.1.0",
+]
+
+[project.scripts]
+gsplay = "src.gsplay.core.main:cli"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+gsmod = { path = "../gslut" }
+gsplay-launcher = { path = "./launcher" }
+
+[tool.ruff]
+target-version = "py312"
+exclude = [
+    ".venv",
+    "__pycache__",
+    "**/site-packages/**",
+]
+
+[tool.ruff.lint]
+ignore = [
+    "F821",  # Undefined name (handled by target-version for built-ins)
+]

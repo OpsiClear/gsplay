@@ -1,0 +1,1 @@
+"""Models layer - Application implementations."""
