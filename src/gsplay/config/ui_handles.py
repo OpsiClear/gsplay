@@ -751,7 +751,6 @@ def _matrix_to_quaternion(R: np.ndarray) -> tuple[float, float, float, float]:
     return (w / norm, x / norm, y / norm, z / norm)
 
 
-# Flip matrix from camera frame (+Z forward) to frustum frame (-Z forward).
-# Keep Y as-is because viser camera quaternions already follow a Y-up world,
-# so only the forward axis needs to be inverted for filter math (-Z forward).
-_CAMERA_CONVENTION_FLIP = np.diag([1.0, 1.0, -1.0])
+# Flip matrix from OpenCV camera frame (+Z forward, +Y down) to frustum frame
+# (-Z forward, +Y up). Invert both Y and Z.
+_CAMERA_CONVENTION_FLIP = np.diag([1.0, -1.0, -1.0])
