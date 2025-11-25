@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== Universal 4D Viewer Installation (JIT Compile) ===" -ForegroundColor Cyan
+Write-Host "=== gsplay Installation (Windows) ===" -ForegroundColor Cyan
 Write-Host ""
 
 # Step 1: Setup MSVC compiler environment

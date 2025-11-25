@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo -e "\033[0;36m=== Universal 4D Viewer Installation (Linux) ===\033[0m"
+echo -e "\033[0;36m=== gsplay Installation (Linux) ===\033[0m"
 echo ""
 
 # Step 1: Check for uv

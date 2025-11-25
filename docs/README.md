@@ -1,6 +1,6 @@
 # Documentation Index
 
-Welcome to the Universal 4D Viewer documentation!
+Welcome to the gsplay documentation!
 
 ## For Users
 
@@ -56,4 +56,4 @@ This documentation is organized into logical categories for easy navigation. All
 - For usage questions, start with the [main README](../README.md)
 - For architecture questions, see [architecture/](architecture/)
 - For development setup, see [CONTRIBUTING.md](CONTRIBUTING.md)
-- For issues, visit [GitHub Issues](https://github.com/OpsiClear/universal_4d_viewer/issues)
+- For issues, visit [GitHub Issues](https://github.com/opsiclear/gsplay/issues)

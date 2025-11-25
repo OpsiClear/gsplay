@@ -1,11 +1,11 @@
 <div align="center">
 
-# Universal 4D Viewer
+# gsplay
 
 ### Real-Time Viewing & Rendering for Dynamic 4D Gaussian Splatting Scenes
 
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C.svg)](https://pytorch.org/)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.9%2B-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -17,7 +17,7 @@
 
 ## Overview
 
-**Universal 4D Viewer** is a high-performance, real-time viewer for rendering dynamic 4D Gaussian Splatting scenes. Supports PLY files and GIFStream checkpoint-based models for viewing complex, dynamic 3D content.
+**gsplay** is a high-performance, real-time viewer for rendering dynamic 4D Gaussian Splatting scenes. Supports PLY files and GIFStream checkpoint-based models for viewing complex, dynamic 3D content.
 
 **Key Capabilities:**
 - **Jellyfin Integration**: Stream pre-compressed 4D scenes from standard Jellyfin media servers
@@ -43,40 +43,41 @@
 
 ### Prerequisites
 
-- **Python 3.10+**
-- **CUDA-capable GPU** (NVIDIA GPU with CUDA 11.8+ or 12.x)
-- **Visual Studio** with C++ build tools (required for compiling native extensions)
+- **Python 3.12** (3.13 not yet supported)
+- **CUDA-capable GPU** (NVIDIA GPU with CUDA 12.8)
+- **Visual Studio 2022** with C++ build tools (Windows only, required for compiling gsplat)
 - **uv** package manager ([Install uv](https://github.com/astral-sh/uv))
 
 ### 1. Clone the Repository
 
-This project includes the `third_party/compression` submodule (nerfview is now embedded under `src/viewer/nerfview`). Clone recursively:
-
 ```bash
-git clone https://github.com/OpsiClear/universal_4d_viewer.git --recursive
-cd universal_4d_viewer
+git clone https://github.com/opsiclear/gsplay.git
+cd gsplay
 ```
 
-### 2. Build in Visual Studio Developer Console
+### 2. Run Installation Script
 
-Open **Developer Command Prompt for Visual Studio** (or **Developer PowerShell for Visual Studio**) and navigate to the project directory:
-
-```bash
-# Sync all dependencies and create virtual environment
-uv sync
-
-# Install gsplat separately
-uv pip install gsplat
+**Windows:**
+```powershell
+.\install.ps1
 ```
 
-This will:
-- Create a virtual environment in `.venv/`
-- Install all dependencies from `pyproject.toml`
-- Install `compression` library from `third_party/compression`
-- Install the embedded viewer utilities (vendored from nerfview) inside `src/viewer/nerfview`
-- Install PyTorch with appropriate CUDA support
-- Set up the `src` package for development
-- Install `gsplat` for Gaussian splatting rendering (requires Visual Studio C++ compiler)
+**Linux:**
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+The installation script will:
+1. Set up MSVC compiler environment (Windows only)
+2. Run `uv sync` to install all dependencies from `pyproject.toml`
+3. Install `gsplat` from GitHub with JIT compilation for CUDA 12.8
+4. Verify the installation
+
+This creates a virtual environment in `.venv/` with:
+- PyTorch 2.9.1 with CUDA 12.8 support
+- JIT-compiled `gsplat` for optimal performance
+- All other dependencies including `viser`, `gsmod`, etc.
 
 ---
 
@@ -85,11 +86,11 @@ This will:
 ### Local PLY Files (Simplest)
 
 ```bash
-# Direct folder path
-viewer --config ./path/to/ply/folder
+# Using the CLI command
+uv run gsplay --config ./path/to/ply/folder
 
-# Or with Python
-uv run src/viewer/main.py --config ./path/to/ply/folder
+# Or directly with Python
+uv run python -m gsplay.core.main --config ./path/to/ply/folder
 ```
 
 ### Jellyfin Streaming
@@ -99,7 +100,7 @@ uv run src/viewer/main.py --config ./path/to/ply/folder
 3. **Run the viewer:**
 
 ```bash
-viewer --config ./module_config/gif_elly.json
+uv run gsplay --config ./module_config/gif_elly.json
 ```
 
 ### Configuration Examples
@@ -230,28 +231,26 @@ Viewer (viewer/main.py)
 ## Project Structure
 
 ```
-universal_4d_viewer/
+gsplay/
 ├── README.md                   # You are here
+├── install.ps1                 # Windows installation script
+├── install.sh                  # Linux installation script
 ├── src/                        # Main source code
-│   ├── domain/                 # Core business logic
+│   ├── gsplay/                 # Main application package
+│   │   ├── core/               # Core application logic
+│   │   ├── rendering/          # Rendering engine
+│   │   ├── ui/                 # User interface
+│   │   └── interaction/        # User interaction handlers
+│   ├── domain/                 # Domain models and services
 │   ├── infrastructure/         # External dependencies & I/O
-│   ├── models/                 # Application layer
-│   ├── viewer/                 # Presentation layer
-│   └── shared/                 # Cross-cutting utilities
+│   ├── models/                 # Data models
+│   ├── plugins/                # Plugin system
+│   └── shared/                 # Shared utilities
+├── launcher/                   # Launcher application
 ├── tests/                      # Unit and integration tests
-├── docs/                       # Documentation (see section above)
-│   ├── GUIDE.md                # User guide and configuration
-│   ├── CONTRIBUTING.md         # Developer guide
-│   ├── CHANGELOG.md            # Version history
-│   └── archive/                # Historical development docs
-├── third_party/                # Git submodules
-│   ├── compression/            # Video compression/decompression (submodule)
-│   └── MLEntropy/              # ML entropy encoding utilities
-├── datasets/                   # Dataset loaders
-├── gsplat_utils/               # Custom gsplat utilities
-├── module_config/              # Runtime configuration examples
+├── docs/                       # Documentation
 ├── pyproject.toml              # Package configuration
-└── CLAUDE.md                   # Project development guidelines
+└── uv.lock                     # Locked dependencies
 ```
 
 ---
@@ -342,11 +341,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 If you use this work in your research, please cite:
 
 ```bibtex
-@software{universal_4d_viewer,
-  title={Universal 4D Viewer: Real-Time Streaming for Dynamic Gaussian Splatting},
+@software{gsplay,
+  title={gsplay: Real-Time Viewing for Dynamic 4D Gaussian Splatting},
   author={OpsiClear},
-  year={2024},
-  url={https://github.com/OpsiClear/universal_4d_viewer}
+  year={2024-2025},
+  url={https://github.com/opsiclear/gsplay}
 }
 ```
 
@@ -356,6 +355,6 @@ If you use this work in your research, please cite:
 
 **Made with Python, PyTorch, and CUDA**
 
-[Report Bug](https://github.com/OpsiClear/universal_4d_viewer/issues) | [Request Feature](https://github.com/OpsiClear/universal_4d_viewer/issues)
+[Report Bug](https://github.com/opsiclear/gsplay/issues) | [Request Feature](https://github.com/opsiclear/gsplay/issues)
 
 </div>

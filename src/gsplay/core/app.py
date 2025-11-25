@@ -17,7 +17,11 @@ import viser
 from gsmod import ColorValues, FilterValues, TransformValues
 
 from src.domain.entities import GSTensor
-from src.domain.interfaces import ModelInterface, DataLoaderInterface, DataSourceProtocol
+from src.domain.interfaces import (
+    ModelInterface,
+    DataLoaderInterface,
+    DataSourceProtocol,
+)
 from src.infrastructure.processing_mode import ProcessingMode
 from src.infrastructure.io.path_io import UniversalPath
 from src.gsplay.config.settings import GSPlayConfig, UIHandles, VolumeFilter
@@ -110,7 +114,6 @@ class UniversalGSPlay:
 
         # Programmatic API (initialized after setup_viewer)
         self.api: GSPlayAPI | None = None
-
 
     @property
     def model(self) -> ModelInterface | None:
@@ -555,43 +558,63 @@ class UniversalGSPlay:
 
         # Register callbacks for sphere filter
         for control in [
-            self.ui.sphere_center_x, self.ui.sphere_center_y,
-            self.ui.sphere_center_z, self.ui.sphere_radius,
+            self.ui.sphere_center_x,
+            self.ui.sphere_center_y,
+            self.ui.sphere_center_z,
+            self.ui.sphere_radius,
         ]:
             if control:
                 control.on_update(on_filter_change)
 
         # Register callbacks for box filter
         for control in [
-            self.ui.box_min_x, self.ui.box_min_y, self.ui.box_min_z,
-            self.ui.box_max_x, self.ui.box_max_y, self.ui.box_max_z,
-            self.ui.box_rot_x, self.ui.box_rot_y, self.ui.box_rot_z,
+            self.ui.box_min_x,
+            self.ui.box_min_y,
+            self.ui.box_min_z,
+            self.ui.box_max_x,
+            self.ui.box_max_y,
+            self.ui.box_max_z,
+            self.ui.box_rot_x,
+            self.ui.box_rot_y,
+            self.ui.box_rot_z,
         ]:
             if control:
                 control.on_update(on_filter_change)
 
         # Register callbacks for ellipsoid filter
         for control in [
-            self.ui.ellipsoid_center_x, self.ui.ellipsoid_center_y,
-            self.ui.ellipsoid_center_z, self.ui.ellipsoid_radius_x,
-            self.ui.ellipsoid_radius_y, self.ui.ellipsoid_radius_z,
-            self.ui.ellipsoid_rot_x, self.ui.ellipsoid_rot_y, self.ui.ellipsoid_rot_z,
+            self.ui.ellipsoid_center_x,
+            self.ui.ellipsoid_center_y,
+            self.ui.ellipsoid_center_z,
+            self.ui.ellipsoid_radius_x,
+            self.ui.ellipsoid_radius_y,
+            self.ui.ellipsoid_radius_z,
+            self.ui.ellipsoid_rot_x,
+            self.ui.ellipsoid_rot_y,
+            self.ui.ellipsoid_rot_z,
         ]:
             if control:
                 control.on_update(on_filter_change)
 
         # Register callbacks for frustum filter
         for control in [
-            self.ui.frustum_fov, self.ui.frustum_aspect,
-            self.ui.frustum_near, self.ui.frustum_far,
-            self.ui.frustum_pos_x, self.ui.frustum_pos_y, self.ui.frustum_pos_z,
-            self.ui.frustum_rot_x, self.ui.frustum_rot_y, self.ui.frustum_rot_z,
+            self.ui.frustum_fov,
+            self.ui.frustum_aspect,
+            self.ui.frustum_near,
+            self.ui.frustum_far,
+            self.ui.frustum_pos_x,
+            self.ui.frustum_pos_y,
+            self.ui.frustum_pos_z,
+            self.ui.frustum_rot_x,
+            self.ui.frustum_rot_y,
+            self.ui.frustum_rot_z,
         ]:
             if control:
                 control.on_update(on_filter_change)
 
         # Register "Use Current Camera" button callback
         if self.ui.frustum_use_camera:
+
             @self.ui.frustum_use_camera.on_click
             def on_use_camera_click(_) -> None:
                 self._copy_camera_to_frustum()
@@ -605,6 +628,7 @@ class UniversalGSPlay:
 
         # Register "Auto Fit" button callback
         if self.ui.auto_fit_button:
+
             @self.ui.auto_fit_button.on_click
             def on_auto_fit(_) -> None:
                 self._auto_fit_colors()
@@ -640,7 +664,9 @@ class UniversalGSPlay:
 
             # Convert frame index to normalized time
             total_frames = self.model.get_total_frames()
-            normalized_time = frame_idx / max(1, total_frames - 1) if total_frames > 1 else 0.0
+            normalized_time = (
+                frame_idx / max(1, total_frames - 1) if total_frames > 1 else 0.0
+            )
 
             gaussians = self.model.get_gaussians_at_normalized_time(normalized_time)
             if gaussians is None:
@@ -684,17 +710,24 @@ class UniversalGSPlay:
             elif learn_level == "full":
                 # 8 params - tonal + white balance + range
                 norm_params = [
-                    "brightness", "contrast", "gamma",  # Core tonal
-                    "temperature", "tint",              # White balance
-                    "shadows", "highlights",            # Tonal range
-                    "fade",                             # Lifted blacks
+                    "brightness",
+                    "contrast",
+                    "gamma",  # Core tonal
+                    "temperature",
+                    "tint",  # White balance
+                    "shadows",
+                    "highlights",  # Tonal range
+                    "fade",  # Lifted blacks
                 ]
                 n_epochs, lr = 200, 0.015
             else:  # standard
                 # 5 params - tonal + white balance
                 norm_params = [
-                    "brightness", "contrast", "gamma",  # Core tonal
-                    "temperature", "tint",              # White balance
+                    "brightness",
+                    "contrast",
+                    "gamma",  # Core tonal
+                    "temperature",
+                    "tint",  # White balance
                 ]
                 n_epochs, lr = 150, 0.02
 
@@ -740,6 +773,7 @@ class UniversalGSPlay:
     def _get_preset_values(self, profile: str) -> ColorValues:
         """Get preset color adjustments for a profile (relative to neutral)."""
         from src.gsplay.core.handlers.color_presets import get_preset_values
+
         return get_preset_values(profile)
 
     def _compose_color_values(
@@ -747,6 +781,7 @@ class UniversalGSPlay:
     ) -> ColorValues:
         """Compose two ColorValues: apply base normalization, then style adjustments."""
         from src.gsplay.core.handlers.color_presets import compose_color_values
+
         return compose_color_values(base, style)
 
     def _update_filter_visualization(self) -> None:
@@ -755,7 +790,9 @@ class UniversalGSPlay:
             return
 
         # Get current filter type
-        filter_type = self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
+        filter_type = (
+            self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
+        )
 
         # Get current filter values from UI
         filter_values = self.ui.get_filter_values()
@@ -794,7 +831,9 @@ class UniversalGSPlay:
         self._update_filter_visualization()
         logger.debug("Copied camera state to frustum filter")
 
-    def _get_camera_state(self) -> tuple[
+    def _get_camera_state(
+        self,
+    ) -> tuple[
         tuple[float, float, float] | None,
         tuple[float, float, float, float] | None,
     ]:
@@ -882,6 +921,7 @@ class UniversalGSPlay:
 
         # Build format map from registry (display name -> registry key)
         from src.infrastructure.registry import register_defaults, DataSinkRegistry
+
         register_defaults()
 
         format_map = {}
@@ -1099,7 +1139,9 @@ class UniversalGSPlay:
 
         # Fall back to legacy API
         total_frames = self.model.get_total_frames()
-        normalized_time = frame_idx / max(1, total_frames - 1) if total_frames > 1 else 0.0
+        normalized_time = (
+            frame_idx / max(1, total_frames - 1) if total_frames > 1 else 0.0
+        )
         gaussians = self.model.get_gaussians_at_normalized_time(normalized_time)
 
         if gaussians is None:
@@ -1201,9 +1243,7 @@ class UniversalGSPlay:
             # Use ModelComponent to load from path
             # This will emit MODEL_LOADED event, which triggers _on_model_loaded
             # and UIController._on_model_loaded
-            model, data_loader, metadata = self.model_component.load_from_path(
-                path
-            )
+            model, data_loader, metadata = self.model_component.load_from_path(path)
 
             # Track current config/model path for future sessions
             self.config.model_config_path = UniversalPath(path)
