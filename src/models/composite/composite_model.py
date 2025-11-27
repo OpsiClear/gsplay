@@ -60,7 +60,7 @@ class CompositeModel(ModelInterface):
             layer_configs: Dictionary mapping layer_id to layer config:
                 {
                     "layer_id": {
-                        "type": "ply" | "streaming" | "gifstream",
+                        "type": "ply",
                         "config": {...},  # Type-specific config
                         "visible": bool,  # Default visibility
                         "z_order": int,   # Rendering order
@@ -179,18 +179,8 @@ class CompositeModel(ModelInterface):
                 enable_quality_filtering=enable_quality_filtering,
             )
 
-        elif model_type == "streaming":
-            from src.models.streaming.model import LiveStreamModel
-
-            return LiveStreamModel(config=model_config, device=device)
-
-        elif model_type == "gifstream":
-            from src.models.gifstream.model import GIFStreamModel
-
-            return GIFStreamModel(config=model_config, device=device)
-
         else:
-            raise ValueError(f"Unknown model type: {model_type}")
+            raise ValueError(f"Unknown model type: {model_type}. Supported: 'ply'")
 
     def _create_layer_viewer_config(self, config: dict[str, Any]) -> Any:
         """

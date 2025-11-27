@@ -252,15 +252,38 @@ class HandlerManager:
         if ui.jpeg_quality_slider is not None:
 
             def update_jpeg_quality(_):
-                # Update JPEG quality for streamed images (both static and move)
+                # Update JPEG quality for streamed images
                 if self.viewer:
                     quality = int(ui.jpeg_quality_slider.value)
                     self.viewer.jpeg_quality_static = quality
-                    self.viewer.jpeg_quality_move = quality
+                    # Movement quality is 67% of static when auto-quality is on
+                    if getattr(self.viewer, "auto_quality_enabled", False):
+                        self.viewer.jpeg_quality_move = max(30, int(quality * 0.67))
+                    else:
+                        self.viewer.jpeg_quality_move = quality
                     logger.info(f"JPEG quality updated to {quality}")
                 self.trigger_rerender()
 
             ui.jpeg_quality_slider.on_update(update_jpeg_quality)
+
+        if ui.auto_quality_checkbox is not None:
+
+            def update_auto_quality(_):
+                # Toggle adaptive quality during camera movement
+                if self.viewer:
+                    self.viewer.auto_quality_enabled = ui.auto_quality_checkbox.value
+                    # Also update the JPEG move quality based on new setting
+                    if ui.jpeg_quality_slider is not None:
+                        quality = int(ui.jpeg_quality_slider.value)
+                        if self.viewer.auto_quality_enabled:
+                            self.viewer.jpeg_quality_move = max(30, int(quality * 0.67))
+                        else:
+                            self.viewer.jpeg_quality_move = quality
+                    logger.info(
+                        f"Auto quality {'enabled' if self.viewer.auto_quality_enabled else 'disabled'}"
+                    )
+
+            ui.auto_quality_checkbox.on_update(update_auto_quality)
 
         logger.debug("Animation callbacks registered")
 
@@ -425,11 +448,11 @@ class HandlerManager:
 
         for button, event_type, event_data in button_mappings:
             if button is not None:
-                button.on_click(
-                    lambda _, et=event_type, ed=event_data: self.event_bus.emit(
-                        et, **ed
-                    )
-                )
+                def make_callback(et, ed):
+                    def callback(_):
+                        self.event_bus.emit(et, **ed)
+                    return callback
+                button.on_click(make_callback(event_type, event_data))
 
         # Load data button (special case - needs path from input)
         if ui.load_data_button is not None and ui.data_path_input is not None:
@@ -439,6 +462,14 @@ class HandlerManager:
                 path = ui.data_path_input.value
                 logger.info(f"Requesting load data from: {path}")
                 self.event_bus.emit(EventType.LOAD_DATA_REQUESTED, path=path)
+
+        # Terminate button
+        if ui.terminate_button is not None:
+
+            @ui.terminate_button.on_click
+            def _(event):
+                logger.info("Terminate instance requested")
+                self.event_bus.emit(EventType.TERMINATE_REQUESTED)
 
         logger.debug("Button callbacks registered")
 

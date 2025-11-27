@@ -3,11 +3,19 @@ Embedded nerfview viewer implementation.
 
 Adapted from the upstream nerfview project so that we can customize behavior
 alongside the rest of the viewer without a third-party dependency.
+
+Synchronized Viewing
+--------------------
+All connected clients share the same view:
+- Single renderer broadcasts to ALL clients via server.scene
+- When any client moves the camera, all others follow
+- UI operations affect all clients simultaneously
 """
 
 from __future__ import annotations
 
 import dataclasses
+import logging
 import time
 from pathlib import Path
 from threading import Lock
@@ -18,8 +26,10 @@ from numpy.typing import NDArray
 import viser
 import viser.transforms as vt
 
-from ._renderer import Renderer, RenderTask
+from ._renderer import SharedRenderer, RenderTask
 from .render_panel import RenderTabState
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -53,20 +63,18 @@ def with_viewer_lock(fn: Callable) -> Callable:
 
 
 class GSPlay(object):
-    """This is the main class for working with nerfview viewer.
+    """Main viewer class with synchronized multi-client support.
 
-    On instantiation, it (a) binds to a viser server and (b) creates a set of
-    GUIs depending on its mode. After user connecting to the server, viewer
-    renders and servers images in the background based on the camera movement.
+    All connected clients share the same view - when any client moves the
+    camera, all others follow. A single renderer broadcasts frames to all
+    clients via server.scene.set_background_image().
 
     Args:
-        server (viser.ViserServer): The viser server object to bind to.
-        render_fn (Callable): A function that takes a camera state and image
-            resolution as input and returns an image as a uint8 numpy array.
-            Optionally, it can return a tuple of two images, where the second image
-            is a float32 numpy depth map.
-        mode (Literal["training", "rendering"]): The mode of the viewer.
-            Support rendering and training. Defaults to "rendering".
+        server: The viser server object to bind to.
+        render_fn: Function that takes (camera_state, render_tab_state) and
+            returns an image as a float32 numpy array [H,W,3] in range [0,1].
+            Optionally returns (image, depth) tuple.
+        mode: "rendering" or "training" mode.
     """
 
     def __init__(
@@ -82,7 +90,7 @@ class GSPlay(object):
         jpeg_quality_static: int = 90,
         jpeg_quality_move: int = 60,
     ):
-        # Public states.
+        # Public states
         self.time_enabled = time_enabled
         self.server = server
         self.render_fn = render_fn
@@ -95,14 +103,15 @@ class GSPlay(object):
         self.universal_viewer = universal_viewer
         self.jpeg_quality_static = jpeg_quality_static
         self.jpeg_quality_move = jpeg_quality_move
+        self.auto_quality_enabled: bool = True
 
-        # Private states.
-        self._renderers: dict[int, Renderer] = {}
+        # Private states
+        self._renderer: SharedRenderer | None = None
         self._step: int = 0
         self._last_update_step: int = 0
         self._last_move_time: float = 0.0
 
-        # Initialize and populate GUIs.
+        # Initialize GUIs
         server.scene.set_global_visibility(True)
         server.on_client_disconnect(self._disconnect_client)
         server.on_client_connect(self._connect_client)
@@ -117,6 +126,11 @@ class GSPlay(object):
             self._populate_training_tab()
         self.render_tab_state = RenderTabState()
         self.state = mode
+
+        # Start the shared renderer
+        self._renderer = SharedRenderer(viewer=self, lock=self.lock)
+        self._renderer.start()
+        logger.info("Viewer started (synchronized mode)")
 
     def _init_training_tab(self):
         self._training_tab_handles = {}
@@ -166,30 +180,38 @@ class GSPlay(object):
         }
 
     def rerender(self, _):
-        clients = self.server.get_clients()
-        for client_id in clients:
-            camera_state = self.get_camera_state(clients[client_id])
-            assert camera_state is not None
-            self._renderers[client_id].submit(RenderTask("rerender", camera_state))
+        """Trigger a re-render (called when UI settings change)."""
+        if self._renderer is not None:
+            camera_state = self._renderer.get_camera_state()
+            if camera_state is not None:
+                self._renderer.submit(RenderTask("rerender", camera_state))
 
     def _disconnect_client(self, client: viser.ClientHandle):
+        """Handle client disconnection."""
         client_id = client.client_id
-        self._renderers[client_id].running = False
-        self._renderers.pop(client_id)
+        logger.debug(f"Client {client_id} disconnected")
 
     def _connect_client(self, client: viser.ClientHandle):
+        """Handle new client connection."""
         client_id = client.client_id
-        self._renderers[client_id] = Renderer(
-            viewer=self, client=client, lock=self.lock
-        )
-        self._renderers[client_id].start()
+        logger.debug(f"Client {client_id} connected")
+
+        # Initialize shared camera from first client's position
+        if self._renderer is not None:
+            if self._renderer.get_camera_state() is None:
+                initial_camera = self.get_camera_state(client)
+                self._renderer.update_camera(initial_camera)
+                logger.debug(f"Initialized shared camera from client {client_id}")
 
         @client.camera.on_update
         def _(_: viser.CameraHandle):
             self._last_move_time = time.perf_counter()
+
             with self.server.atomic():
                 camera_state = self.get_camera_state(client)
-                self._renderers[client_id].submit(RenderTask("move", camera_state))
+                if self._renderer is not None:
+                    self._renderer.update_camera(camera_state)
+                    self._renderer.submit(RenderTask("move", camera_state))
 
     def get_camera_state(self, client: viser.ClientHandle) -> CameraState:
         camera = client.camera
@@ -209,19 +231,21 @@ class GSPlay(object):
         )
 
     def update(self, step: int, num_train_rays_per_step: int):
+        """Update viewer during training (training mode only)."""
         if self.mode == "rendering":
             raise ValueError("`update` method is only available in training mode.")
-        # Skip updating the viewer for the first few steps to allow
-        # `num_train_rays_per_sec` and `num_view_rays_per_sec` to stabilize.
         if step < 5:
             return
         self._step = step
         self._training_tab_handles["step_number"].value = step
-        if len(self._renderers) == 0:
+
+        if self._renderer is None:
             return
-        # Stop training while user moves camera to make viewing smoother.
+
+        # Stop training while user moves camera to make viewing smoother
         while time.perf_counter() - self._last_move_time < 0.1:
             time.sleep(0.05)
+
         if (
             self.state == "training"
             and self._training_tab_handles["train_util_slider"].value != 1
@@ -241,13 +265,9 @@ class GSPlay(object):
             )
             if step > self._last_update_step + update_every:
                 self._last_update_step = step
-                clients = self.server.get_clients()
-                for client_id in clients:
-                    camera_state = self.get_camera_state(clients[client_id])
-                    assert camera_state is not None
-                    self._renderers[client_id].submit(
-                        RenderTask("update", camera_state)
-                    )
+                camera_state = self._renderer.get_camera_state()
+                if camera_state is not None:
+                    self._renderer.submit(RenderTask("update", camera_state))
 
     def _after_render(self):
         # This function will be called each time render_fn is called.

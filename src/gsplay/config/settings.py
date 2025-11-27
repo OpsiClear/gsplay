@@ -130,6 +130,7 @@ class GSPlayConfig:
     # Network
     port: int = 6019
     host: str = "0.0.0.0"  # Bind to all interfaces for external access
+    stream_port: int = -1  # WebSocket stream port (-1 = auto on viser_port+1, 0 = disabled)
 
     # Device
     device: str = "cuda"  # Will be auto-detected if cuda unavailable
@@ -176,6 +177,7 @@ class GSPlayConfig:
         data = {
             "port": self.port,
             "host": self.host,
+            "stream_port": self.stream_port,
             "device": self.device,
             "model_config_path": (
                 str(self.model_config_path) if self.model_config_path else None

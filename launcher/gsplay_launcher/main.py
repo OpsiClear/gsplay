@@ -63,6 +63,10 @@ def main(
         str | None,
         tyro.conf.arg(help="External base URL for proxy access (e.g., https://gsplay.4dgst.win)"),
     ] = None,
+    view_only: Annotated[
+        bool,
+        tyro.conf.arg(help="Force all instances to launch in view-only mode (hides data loader UI)"),
+    ] = False,
 ) -> None:
     """GSPlay Launcher - Manage Gaussian Splatting GSPlay instances.
 
@@ -110,6 +114,7 @@ def main(
         browse_path=browse_path_resolved,
         custom_ip=custom_ip,
         external_url=external_url.rstrip('/') if external_url else None,
+        view_only=view_only,
     )
 
     # Validate configuration
@@ -138,6 +143,8 @@ def main(
         logger.info("  External URL: %s", external_url)
     else:
         logger.info("  External URL: disabled (use --external-url to enable)")
+    if view_only:
+        logger.info("  View-only mode: enabled (all instances will hide data loader)")
 
     # Set config and create app
     set_config(config)

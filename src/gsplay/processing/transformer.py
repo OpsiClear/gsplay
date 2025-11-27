@@ -67,20 +67,30 @@ class DefaultSceneTransformer(SceneTransformer):
         if neutral:
             return gaussians
 
-        # Convert to GSTensorPro if needed
-        # Use from_gsdata to ensure proper gsply normalization (same as CPU path)
+        # Convert to GSTensorPro if needed - avoid CPU round-trips
         source_format = getattr(gaussians, '_format', None)
 
         if isinstance(gaussians, GSTensorPro):
             tensor_pro = gaussians
-        else:
-            # First convert GSTensor to GSData if needed, then to GSTensorPro
-            if isinstance(gaussians, GSTensor):
-                gsdata = gaussians.to_gsdata()
-            else:
-                gsdata = gaussians
-            tensor_pro = GSTensorPro.from_gsdata(gsdata, device=device)
+        elif isinstance(gaussians, GSTensor):
+            # Direct GPU wrapping - no CPU transfer needed
+            current_device = str(gaussians.means.device)
+            if current_device != device:
+                gaussians = gaussians.to(device)
+            tensor_pro = GSTensorPro(
+                means=gaussians.means,
+                scales=gaussians.scales,
+                quats=gaussians.quats,
+                opacities=gaussians.opacities,
+                sh0=gaussians.sh0,
+                shN=gaussians.shN,
+            )
             # Preserve format tracking from source
+            if source_format is not None:
+                tensor_pro._format = source_format.copy()
+        else:
+            # GSData path - single CPU->GPU transfer
+            tensor_pro = GSTensorPro.from_gsdata(gaussians, device=device)
             if source_format is not None:
                 tensor_pro._format = source_format.copy()
 

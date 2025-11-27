@@ -2,6 +2,7 @@
 Filter visualization helpers for the viewer.
 
 Renders wireframe gizmos for spatial filters (sphere, box, ellipsoid, frustum).
+Applies scene transformation so visualizations match transformed Gaussian positions.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     import viser
-    from gsmod.config.values import FilterValues
+    from gsmod.config.values import FilterValues, TransformValues
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,11 @@ def _create_wireframe_frustum(
 
 
 class FilterVisualizer:
-    """Manages 3D visualizations for spatial filters."""
+    """Manages 3D visualizations for spatial filters.
+
+    Visualizations are transformed by the scene transformation so they
+    appear in the correct position relative to the transformed Gaussians.
+    """
 
     # Colors for different filter types (RGB, 0-255) - as numpy arrays
     SPHERE_COLOR = np.array([66, 135, 245], dtype=np.uint8)    # Blue
@@ -173,6 +178,7 @@ class FilterVisualizer:
         self._server = server
         self._visible = False
         self._current_type: str | None = None
+        self._transform_values: TransformValues | None = None
 
         # Scene handles for each filter type
         self._sphere_handle = None
@@ -217,9 +223,26 @@ class FilterVisualizer:
         if self._frustum_handle is not None:
             self._frustum_handle.visible = self._visible and self._current_type == "Frustum"
 
-    def update(self, filter_type: str, filter_values: FilterValues) -> None:
-        """Update visualization based on current filter settings."""
+    def update(
+        self,
+        filter_type: str,
+        filter_values: FilterValues,
+        transform_values: TransformValues | None = None,
+    ) -> None:
+        """Update visualization based on current filter settings.
+
+        Parameters
+        ----------
+        filter_type : str
+            Type of filter ("Sphere", "Box", "Ellipsoid", "Frustum", or "None")
+        filter_values : FilterValues
+            Filter parameters
+        transform_values : TransformValues | None
+            Scene transformation to apply to visualization so it matches
+            the transformed Gaussian positions
+        """
         self._current_type = filter_type
+        self._transform_values = transform_values
 
         try:
             if filter_type == "Sphere":
@@ -242,6 +265,9 @@ class FilterVisualizer:
 
         # Scale vertices by radius and translate to center
         verts = self._sphere_verts * radius + np.array(center, dtype=np.float32)
+
+        # Apply scene transformation so visualization matches transformed Gaussians
+        verts = self._apply_scene_transform(verts)
 
         # Remove old handle if exists
         self._remove_handle("_sphere_handle")
@@ -267,12 +293,15 @@ class FilterVisualizer:
         # Scale and translate vertices
         verts = self._box_verts * size + center
 
-        # Apply rotation if present
+        # Apply box rotation if present
         if fv.box_rot is not None:
             quat = _axis_angle_to_quaternion(fv.box_rot)
             # For line segments, we need to rotate around center
             verts_centered = verts - center
             verts = self._rotate_points(verts_centered, quat) + center
+
+        # Apply scene transformation so visualization matches transformed Gaussians
+        verts = self._apply_scene_transform(verts)
 
         # Remove old handle if exists
         self._remove_handle("_box_handle")
@@ -296,13 +325,16 @@ class FilterVisualizer:
         # Scale sphere vertices by radii
         verts = self._sphere_verts * radii
 
-        # Apply rotation if present
+        # Apply ellipsoid rotation if present
         if fv.ellipsoid_rot is not None:
             quat = _axis_angle_to_quaternion(fv.ellipsoid_rot)
             verts = self._rotate_points(verts, quat)
 
         # Translate to center
         verts = verts + center
+
+        # Apply scene transformation so visualization matches transformed Gaussians
+        verts = self._apply_scene_transform(verts)
 
         # Remove old handle if exists
         self._remove_handle("_ellipsoid_handle")
@@ -330,13 +362,16 @@ class FilterVisualizer:
             far=viz_far,
         )
 
-        # Apply rotation if present
+        # Apply frustum rotation if present
         if fv.frustum_rot is not None:
             quat = _axis_angle_to_quaternion(fv.frustum_rot)
             verts = self._rotate_points(verts, quat)
 
         # Translate to position
         verts = verts + np.array(fv.frustum_pos, dtype=np.float32)
+
+        # Apply scene transformation so visualization matches transformed Gaussians
+        verts = self._apply_scene_transform(verts)
 
         # Remove old handle if exists
         self._remove_handle("_frustum_handle")
@@ -375,6 +410,73 @@ class FilterVisualizer:
         ], dtype=np.float32)
 
         return points @ R.T
+
+    def _apply_scene_transform(self, verts: np.ndarray) -> np.ndarray:
+        """Apply scene transformation to visualization vertices.
+
+        The transformation order matches how Gaussians are transformed:
+        1. Scale (uniform)
+        2. Rotate (quaternion)
+        3. Translate
+
+        Parameters
+        ----------
+        verts : np.ndarray
+            Vertices in filter space (N, 3)
+
+        Returns
+        -------
+        np.ndarray
+            Vertices transformed to display space (N, 3)
+        """
+        if self._transform_values is None:
+            return verts
+
+        tv = self._transform_values
+
+        # Check if transform is neutral (no-op)
+        if hasattr(tv, 'is_neutral') and tv.is_neutral():
+            return verts
+
+        # Get translation - handle both attribute names
+        translate = getattr(tv, 'translate', None)
+        if translate is None:
+            translate = getattr(tv, 'translation', (0.0, 0.0, 0.0))
+        if translate is None:
+            translate = (0.0, 0.0, 0.0)
+        translate = np.array(translate, dtype=np.float32)
+
+        # Get scale
+        scale = getattr(tv, 'scale', 1.0)
+        if scale is None:
+            scale = 1.0
+        if hasattr(scale, '__len__'):
+            scale = float(scale[0])  # Use first element if vector
+
+        # Get rotation quaternion - handle both attribute names
+        rotate = getattr(tv, 'rotate', None)
+        if rotate is None:
+            rotate = getattr(tv, 'rotation', (1.0, 0.0, 0.0, 0.0))
+        if rotate is None:
+            rotate = (1.0, 0.0, 0.0, 0.0)
+
+        # Apply transformations: scale -> rotate -> translate
+        result = verts.copy()
+
+        # 1. Scale
+        if abs(scale - 1.0) > 1e-6:
+            result = result * scale
+
+        # 2. Rotate (if not identity quaternion)
+        w, x, y, z = rotate
+        if abs(w - 1.0) > 1e-6 or abs(x) > 1e-6 or abs(y) > 1e-6 or abs(z) > 1e-6:
+            result = self._rotate_points(result, rotate)
+
+        # 3. Translate
+        if np.any(np.abs(translate) > 1e-6):
+            result = result + translate
+
+        return result
 
     def clear(self) -> None:
         """Remove all visualizations."""

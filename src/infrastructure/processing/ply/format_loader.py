@@ -105,6 +105,8 @@ class FormatAwarePlyLoader:
             PlyFrameEncoding.UNKNOWN: UncompressedPlyLoader(),
         }
         self._format_cache: dict[str, tuple[PlyFrameEncoding, int | None]] = {}
+        # Folder-level default format (bypasses per-file detection when set)
+        self._default_format: tuple[PlyFrameEncoding, int | None] | None = None
 
     def register_strategy(
         self,
@@ -118,12 +120,39 @@ class FormatAwarePlyLoader:
         """Update the target device for downstream loaders."""
         self.device = device
 
+    def set_default_format(self, encoding: PlyFrameEncoding, sh_degree: int | None) -> None:
+        """Set folder-level default format to bypass per-file detection.
+
+        Call this after summarize_folder() confirms a homogeneous sequence.
+        Saves ~0.1ms per frame by skipping file header inspection.
+        """
+        self._default_format = (encoding, sh_degree)
+        logger.debug(
+            "[FormatAwarePlyLoader] Default format set: %s (sh=%s)",
+            encoding.value,
+            sh_degree,
+        )
+
+    def clear_default_format(self) -> None:
+        """Clear the folder-level default format."""
+        self._default_format = None
+
     def detect_format(self, file_path: UniversalPath) -> tuple[PlyFrameEncoding, int | None]:
-        """Detect encoding + SH degree for a single PLY file (cached)."""
+        """Detect encoding + SH degree for a single PLY file.
+
+        Uses folder-level default if set (fastest), then per-file cache,
+        then actual file inspection (slowest).
+        """
+        # Fast path: use folder-level default if set
+        if self._default_format is not None:
+            return self._default_format
+
+        # Check per-file cache
         cache_key = str(file_path)
         if cache_key in self._format_cache:
             return self._format_cache[cache_key]
 
+        # Inspect file header (slowest path)
         encoding = PlyFrameEncoding.UNKNOWN
         sh_degree: int | None = None
         try:

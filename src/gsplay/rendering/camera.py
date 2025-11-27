@@ -26,6 +26,8 @@ from src.gsplay.rendering.camera_state import CameraState
 from src.gsplay.rendering.camera_ui import (
     create_view_controls,
     create_render_controls,
+    create_fps_control,
+    create_quality_controls,
     create_playback_controls,
     create_supersplat_camera_controls,
     PlaybackButton,
@@ -39,6 +41,8 @@ __all__ = [
     "SuperSplatCamera",
     "create_view_controls",
     "create_render_controls",
+    "create_fps_control",
+    "create_quality_controls",
     "create_playback_controls",
     "create_supersplat_camera_controls",
     "PlaybackButton",
@@ -92,6 +96,10 @@ class SuperSplatCamera:
         self._last_camera_state = {}  # Track camera state per client
         self._intercept_thread: threading.Thread | None = None
         self._intercept_active = False
+
+        # Hysteresis/cooldown for boundary push (prevents oscillation)
+        self._last_push_time: dict[int, float] = {}  # Per-client cooldown tracking
+        self._push_cooldown = 0.25  # 250ms cooldown after push
 
         # Explicit camera state (single source of truth)
         self.state: CameraState | None = None
@@ -182,9 +190,15 @@ class SuperSplatCamera:
         float
             Roll angle in degrees (-180 to 180)
         """
+        # Normalize up direction first (defensive)
+        up_direction = up_direction / (np.linalg.norm(up_direction) + 1e-8)
+
         # Calculate view direction
         view_dir = look_at - camera_pos
-        view_dir = view_dir / (np.linalg.norm(view_dir) + 1e-8)
+        view_norm = np.linalg.norm(view_dir)
+        if view_norm < 1e-6:
+            return 0.0  # Camera at look_at point - no valid roll
+        view_dir = view_dir / view_norm
 
         # Determine expected base up (without roll) based on elevation
         if abs(elevation) > 85:  # Near poles
@@ -201,13 +215,23 @@ class SuperSplatCamera:
         actual_up_proj = up_direction - view_dir * np.dot(up_direction, view_dir)
         base_up_proj = base_up - view_dir * np.dot(base_up, view_dir)
 
+        # Check projection magnitudes (near-zero indicates degenerate case)
+        actual_mag = np.linalg.norm(actual_up_proj)
+        base_mag = np.linalg.norm(base_up_proj)
+        if actual_mag < 1e-6 or base_mag < 1e-6:
+            return 0.0  # Degenerate case - up aligned with view
+
         # Normalize projections
-        actual_up_norm = actual_up_proj / (np.linalg.norm(actual_up_proj) + 1e-8)
-        base_up_norm = base_up_proj / (np.linalg.norm(base_up_proj) + 1e-8)
+        actual_up_norm = actual_up_proj / actual_mag
+        base_up_norm = base_up_proj / base_mag
 
         # Calculate roll angle using dot product (gives angle magnitude)
         cos_roll = np.clip(np.dot(actual_up_norm, base_up_norm), -1.0, 1.0)
         roll = np.degrees(np.arccos(cos_roll))
+
+        # Apply deadband for small roll values (reduces jitter)
+        if abs(roll) < 0.5:
+            return 0.0
 
         # Determine roll sign using cross product
         cross = np.cross(base_up_norm, actual_up_norm)
@@ -433,11 +457,26 @@ class SuperSplatCamera:
 
         def intercept_loop():
             """Monitor camera changes and reapply with unlimited elevation."""
+            cleanup_counter = 0
             while self._intercept_active:
                 try:
                     if self.scene_bounds is None or "center" not in self.scene_bounds:
                         time.sleep(0.1)
                         continue
+
+                    # Periodic cleanup of stale client entries (every ~5 seconds)
+                    cleanup_counter += 1
+                    if cleanup_counter >= 100:  # 100 iterations * 50ms = 5s
+                        cleanup_counter = 0
+                        active_ids = {id(c) for c in self.server.get_clients().values()}
+                        stale_ids = [
+                            cid
+                            for cid in self._last_camera_state
+                            if cid not in active_ids
+                        ]
+                        for cid in stale_ids:
+                            del self._last_camera_state[cid]
+                            self._last_push_time.pop(cid, None)
 
                     for client in self.server.get_clients().values():
                         client_id = id(client)
@@ -460,11 +499,14 @@ class SuperSplatCamera:
                         last_state = self._last_camera_state[client_id]
 
                         # Check if camera changed (user dragged with mouse)
+                        # Use relative tolerance for large distances to avoid jitter
+                        distance_from_origin = np.linalg.norm(current_pos)
+                        atol = max(0.01, distance_from_origin * 0.0005)  # 0.05% of distance
                         pos_changed = not np.allclose(
-                            current_pos, last_state["position"], atol=0.01
+                            current_pos, last_state["position"], atol=atol
                         )
                         lookat_changed = not np.allclose(
-                            current_lookat, last_state["lookat"], atol=0.01
+                            current_lookat, last_state["lookat"], atol=atol
                         )
 
                         if pos_changed or lookat_changed:
@@ -484,12 +526,12 @@ class SuperSplatCamera:
                                 off_axis = np.sqrt(
                                     current_up[0] ** 2 + current_up[1] ** 2
                                 )
-                                has_roll = off_axis > 0.1
+                                has_roll = off_axis > 0.15  # Increased threshold for noise
                             else:  # Away from poles
                                 off_axis = np.sqrt(
                                     current_up[0] ** 2 + current_up[2] ** 2
                                 )
-                                has_roll = off_axis > 0.1
+                                has_roll = off_axis > 0.15  # Increased threshold for noise
 
                             if has_roll:
                                 # Roll is present - don't interfere with orbit intercept
@@ -519,42 +561,62 @@ class SuperSplatCamera:
                             needs_push = False
                             new_elevation = elevation
 
-                            # Case 1: Near ±90° poles (top/bottom)
-                            if abs(abs(elevation) - 90) < 2:  # Within 2° of pole
-                                if abs(elevation) > 88 and abs(elevation_delta) < 0.5:
-                                    # User is stuck at pole - push them over
-                                    new_elevation = 92 if elevation > 0 else -92
+                            # Check cooldown first - skip if recently pushed
+                            current_time = time.time()
+                            in_cooldown = (
+                                client_id in self._last_push_time
+                                and current_time - self._last_push_time[client_id]
+                                < self._push_cooldown
+                            )
+
+                            if not in_cooldown:
+                                # Case 1: Near ±90° poles (top/bottom)
+                                # Detect at 3° but push to 96° (past detection zone)
+                                if abs(abs(elevation) - 90) < 3:  # Within 3° of pole
+                                    if abs(elevation) > 87 and abs(elevation_delta) < 0.8:
+                                        # User is stuck at pole - push them over
+                                        new_elevation = 96 if elevation > 0 else -96
+                                        needs_push = True
+
+                                # Case 2: Near ±180° boundary (upside-down horizon)
+                                # This happens when elevation is near 180 or -180 (flipped at horizon)
+                                elif (
+                                    abs(abs(elevation) - 180) < 3
+                                ):  # Within 3° of flipped horizon
+                                    # Check if camera is flipped (up.y is negative)
+                                    if current_up[1] < -0.5 and abs(elevation_delta) < 0.8:
+                                        # User is stuck at 180/-180 boundary - push through
+                                        if elevation > 0:
+                                            new_elevation = -176  # Push to negative side
+                                        else:
+                                            new_elevation = 176  # Push to positive side
+                                        needs_push = True
+
+                                # Case 3: Near 0° but flipped (shouldn't normally happen, but handle it)
+                                elif (
+                                    abs(elevation) < 3
+                                    and current_up[1] < -0.5
+                                    and abs(elevation_delta) < 0.8
+                                ):
+                                    # Stuck at flipped zero - push to either side based on direction
+                                    new_elevation = 4 if elevation_delta >= 0 else -4
                                     needs_push = True
 
-                            # Case 2: Near ±180° boundary (upside-down horizon)
-                            # This happens when elevation is near 180 or -180 (flipped at horizon)
-                            elif (
-                                abs(abs(elevation) - 180) < 2
-                            ):  # Within 2° of flipped horizon
-                                # Check if camera is flipped (up.y is negative)
-                                if current_up[1] < -0.5 and abs(elevation_delta) < 0.5:
-                                    # User is stuck at 180/-180 boundary - push through
-                                    if elevation > 0:
-                                        new_elevation = -178  # Push to negative side
-                                    else:
-                                        new_elevation = 178  # Push to positive side
-                                    needs_push = True
-
-                            # Case 3: Near 0° but flipped (shouldn't normally happen, but handle it)
-                            elif (
-                                abs(elevation) < 2
-                                and current_up[1] < -0.5
-                                and abs(elevation_delta) < 0.5
-                            ):
-                                # Stuck at flipped zero - push to either side based on direction
-                                new_elevation = 2 if elevation_delta >= 0 else -2
-                                needs_push = True
+                            if needs_push:
+                                # Double-check camera hasn't moved since calculation
+                                check_pos = np.array(client.camera.position)
+                                if not np.allclose(check_pos, current_pos, atol=0.02):
+                                    # Camera moved during calculation - skip push
+                                    needs_push = False
 
                             if needs_push:
                                 # Apply push with wraparound
                                 logger.debug(
                                     f"Pushing camera past boundary: {elevation:.1f}° -> {new_elevation:.1f}°"
                                 )
+
+                                # Record cooldown time
+                                self._last_push_time[client_id] = current_time
 
                                 # Update state first, then apply to camera
                                 if self.state is not None:
@@ -887,11 +949,12 @@ class SuperSplatCamera:
             # Normal orientation
             base_up = np.array([0, -1, 0]) if flipped_up else np.array([0, 1, 0])
 
-        # Apply roll rotation
-        if abs(roll) > 0.1:  # Only apply if roll is significant
+        # Apply roll rotation with improved thresholds
+        # Use 0.5° deadband to prevent jitter from numerical noise
+        if abs(roll) > 0.5:
             # Calculate view direction
             view_dir = center - target_pos
-            view_dir = view_dir / np.linalg.norm(view_dir)
+            view_dir = view_dir / (np.linalg.norm(view_dir) + 1e-8)
 
             # Rotate up vector around view direction by roll angle
             roll_rad = np.radians(roll)
@@ -903,6 +966,8 @@ class SuperSplatCamera:
                 + np.cross(view_dir, base_up) * sin_roll
                 + view_dir * np.dot(view_dir, base_up) * (1 - cos_roll)
             )
+            # Normalize to ensure unit vector (numerical stability)
+            up_dir = up_dir / (np.linalg.norm(up_dir) + 1e-8)
         else:
             up_dir = base_up
 
@@ -961,19 +1026,20 @@ class SuperSplatCamera:
             # Roll is present if up vector has significant off-axis components
             # Near poles: check X and Y components (up should be along Z)
             # Away from poles: check X and Z components (up should be along Y)
+            # Use 0.15 threshold to filter numerical noise
             has_roll = False
             if abs(abs(elevation) - 90) < 5:  # Near poles
                 # Up should be purely along Z axis [0, 0, ±1]
                 off_axis_magnitude = np.sqrt(
                     up_direction[0] ** 2 + up_direction[1] ** 2
                 )
-                has_roll = off_axis_magnitude > 0.1
+                has_roll = off_axis_magnitude > 0.15
             else:  # Away from poles
                 # Up should be purely along Y axis [0, ±1, 0]
                 off_axis_magnitude = np.sqrt(
                     up_direction[0] ** 2 + up_direction[2] ** 2
                 )
-                has_roll = off_axis_magnitude > 0.1
+                has_roll = off_axis_magnitude > 0.15
 
             # Only apply flip detection if roll is not present
             # (Roll rotates the up vector, making flip detection unreliable)

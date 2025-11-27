@@ -103,6 +103,7 @@ class GSPlayInstance:
     config_path: str = ""
     port: int = 6020
     host: str = "0.0.0.0"  # Bind to all interfaces for external access
+    stream_port: int = -1  # WebSocket stream port (-1 = auto-assign to viser_port+1, 0 = disabled)
     gpu: int | None = None
     cache_size: int = 100
     view_only: bool = False
@@ -128,9 +129,35 @@ class GSPlayInstance:
         return f"http://{self.host}:{self.port}"
 
     @property
+    def stream_url(self) -> str | None:
+        """Get the WebSocket stream URL if streaming is enabled.
+
+        Stream port convention:
+        - stream_port == 0: Streaming disabled
+        - stream_port != 0: Streaming enabled, actual port = viser_port + 1
+
+        This ensures viser uses even ports and stream uses odd ports.
+        """
+        if self.stream_port == 0:
+            return None
+        # Actual stream port is always viser_port + 1
+        actual_stream_port = self.port + 1
+        # Use custom IP if provided, otherwise auto-detect
+        if self.custom_ip:
+            return f"http://{self.custom_ip}:{actual_stream_port}/view"
+        # Use machine IP for external access when bound to 0.0.0.0
+        if self.host == "0.0.0.0":
+            return f"http://{_get_machine_ip()}:{actual_stream_port}/view"
+        return f"http://{self.host}:{actual_stream_port}/view"
+
+    @property
     def is_active(self) -> bool:
-        """Check if instance is in an active state."""
-        return self.status in (InstanceStatus.STARTING, InstanceStatus.RUNNING)
+        """Check if instance is in an active state (process may be running)."""
+        return self.status in (
+            InstanceStatus.STARTING,
+            InstanceStatus.RUNNING,
+            InstanceStatus.ORPHANED,
+        )
 
     def to_cli_args(self) -> list[str]:
         """Convert to CLI argument list for subprocess.
@@ -151,6 +178,10 @@ class GSPlayInstance:
             "--log-level",
             self.log_level,
         ]
+
+        # Any non-zero value enables streaming (gsplay will use viser_port + 1)
+        if self.stream_port != 0:
+            args.extend(["--stream-port", str(self.stream_port)])
 
         if self.gpu is not None:
             args.extend(["--gpu", str(self.gpu)])

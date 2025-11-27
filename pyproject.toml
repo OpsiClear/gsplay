@@ -15,7 +15,7 @@ dependencies = [
     "tyro>=0.8.0", # CLI argument parsing
     # Gaussian Splatting Rendering
     # gsplat is installed via install.ps1/install.sh with --no-build-isolation
-    "gsmod>=0.1.2", # LUT operations and filtering
+    "gsmod==0.1.3", # LUT operations and filtering
     # GIFStream Support
     "pyyaml>=6.0", # Config file parsing
     # Launcher (local)
@@ -23,6 +23,8 @@ dependencies = [
     # Spatial Operations
     "scipy>=1.10.0", # KDTree for KNN
     "tqdm>=4.66.0", # Progress bars for console output
+    "nvidia-nvimgcodec-cu12>=0.6.1.37",
+    "websockets>=15.0.1",
 ]
 
 [project.optional-dependencies]
@@ -54,6 +56,21 @@ cloud-all = [
     "s3fs>=2024.1.0",
     "gcsfs>=2024.1.0",
     "adlfs>=2024.1.0",
+]
+
+# WebSocket streaming (optional - lightweight low-latency streaming)
+# Recommended for internet streaming: single dependency, ~100-150ms latency
+websocket = [
+    "websockets>=12.0",  # Async WebSocket server (lightweight)
+]
+
+# WebRTC streaming (optional - lowest latency but heavy dependencies)
+# Use only if you need sub-100ms latency
+webrtc = [
+    "aiortc>=1.9.0",  # WebRTC for Python
+    "aiohttp>=3.9.0",  # Async HTTP server for signaling
+    "av>=12.0.0",  # Video frame handling
+    "pillow>=10.0.0",  # Image processing
 ]
 
 [project.scripts]

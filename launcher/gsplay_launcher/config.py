@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
+import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _generate_url_secret() -> str:
+    """Generate a random URL secret for ID encoding."""
+    return secrets.token_hex(16)
 
 
 @dataclass
@@ -53,6 +61,8 @@ class LauncherConfig:
     browse_path: Path | None = None  # Root for file browser (None = disabled)
     custom_ip: str | None = None  # Default custom IP for URLs (None = auto)
     external_url: str | None = None  # External base URL for proxy access (e.g., https://gsplay.4dgst.win)
+    view_only: bool = False  # Force all instances to launch in view-only mode
+    url_secret: str = field(default_factory=_generate_url_secret)  # Secret for encoding instance IDs in URLs
 
     @property
     def state_file(self) -> Path:
@@ -78,6 +88,15 @@ class LauncherConfig:
         if self.port < 1 or self.port > 65535:
             msg = f"Invalid launcher port: {self.port}"
             raise ValueError(msg)
+
+        # Ensure port start is even (convention: even ports for viser, odd for stream)
+        if self.gsplay_port_start % 2 != 0:
+            logger.warning(
+                "gsplay_port_start=%d is odd; adjusting to %d for even/odd port convention",
+                self.gsplay_port_start,
+                self.gsplay_port_start + 1,
+            )
+            self.gsplay_port_start += 1
 
         if not self.gsplay_script.exists():
             logger.warning(

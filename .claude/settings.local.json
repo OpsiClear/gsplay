@@ -107,7 +107,10 @@
       "Bash(journalctl:*)",
       "Bash(systemctl:*)",
       "Bash(timeout:*)",
-      "Bash(.venv/bin/ruff:*)"
+      "Bash(.venv/bin/ruff:*)",
+      "Bash(.venv/bin/gsplay_launcher:*)",
+      "Bash(git grep:*)",
+      "WebFetch(domain:docs.nvidia.com)"
     ],
     "deny": [],
     "ask": []

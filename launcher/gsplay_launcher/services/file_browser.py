@@ -36,6 +36,7 @@ class DirectoryEntry:
     is_ply_folder: bool = False
     ply_count: int = 0
     total_size_mb: float = 0.0
+    subfolder_count: int = 0  # Number of subdirectories (for non-PLY folders)
     modified_at: str | None = None
 
 
@@ -104,8 +105,8 @@ class FileBrowserService:
 
         return target
 
-    def _detect_ply_folder(self, directory: Path) -> tuple[bool, int, float]:
-        """Detect if a directory contains PLY files.
+    def _detect_ply_folder(self, directory: Path) -> tuple[bool, int, float, int]:
+        """Detect if a directory contains PLY files and count subfolders.
 
         Parameters
         ----------
@@ -114,22 +115,25 @@ class FileBrowserService:
 
         Returns
         -------
-        tuple[bool, int, float]
-            (is_ply_folder, ply_count, total_size_mb)
+        tuple[bool, int, float, int]
+            (is_ply_folder, ply_count, total_size_mb, subfolder_count)
         """
         try:
             ply_files = list(directory.glob("*.ply"))
+            # Count immediate subdirectories
+            subfolder_count = sum(1 for item in directory.iterdir() if item.is_dir() and not item.name.startswith("."))
+
             if not ply_files:
-                return False, 0, 0.0
+                return False, 0, 0.0, subfolder_count
 
             total_size = sum(f.stat().st_size for f in ply_files)
             total_size_mb = total_size / (1024 * 1024)
-            return True, len(ply_files), round(total_size_mb, 2)
+            return True, len(ply_files), round(total_size_mb, 2), subfolder_count
         except PermissionError:
-            return False, 0, 0.0
+            return False, 0, 0.0, 0
         except Exception as e:
             logger.warning("Error scanning directory %s: %s", directory, e)
-            return False, 0, 0.0
+            return False, 0, 0.0, 0
 
     def _build_breadcrumbs(self, relative_path: str) -> list[dict[str, str]]:
         """Build breadcrumb navigation trail.
@@ -210,7 +214,7 @@ class FileBrowserService:
                     continue
 
                 if item.is_dir():
-                    is_ply, ply_count, total_size = self._detect_ply_folder(item)
+                    is_ply, ply_count, total_size, subfolder_count = self._detect_ply_folder(item)
                     entries.append(
                         DirectoryEntry(
                             name=item.name,
@@ -219,6 +223,7 @@ class FileBrowserService:
                             is_ply_folder=is_ply,
                             ply_count=ply_count,
                             total_size_mb=total_size,
+                            subfolder_count=subfolder_count,
                             modified_at=self._get_modified_time(item),
                         )
                     )

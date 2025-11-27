@@ -324,38 +324,27 @@ def create_view_controls(
     return (zoom_slider, azimuth_slider, elevation_slider, roll_slider, setup_camera_sync)
 
 
-def create_render_controls(
-    server: viser.ViserServer, camera: SuperSplatCamera, config=None
-) -> tuple:
+def create_fps_control(server: viser.ViserServer, config=None):
     """
-    Create Render controls (FPS, Quality, JPEG).
+    Create FPS slider for playback speed.
 
     Parameters
     ----------
     server : viser.ViserServer
         Viser server instance
-    camera : SuperSplatCamera
-        Camera controller instance
     config : GSPlayConfig | None
         GSPlay configuration for animation settings
 
     Returns
     -------
-    tuple
-        (play_speed, render_quality, jpeg_quality_slider)
+    viser.GuiSliderHandle
+        FPS slider handle
     """
-    # Get initial values from config
     initial_fps = 30.0
-    initial_quality = 1280
-    initial_jpeg = 90
+    if config is not None and hasattr(config, "animation"):
+        initial_fps = config.animation.play_speed_fps
 
-    if config is not None:
-        if hasattr(config, "animation"):
-            initial_fps = config.animation.play_speed_fps
-        if hasattr(config, "render_settings"):
-            initial_jpeg = config.render_settings.jpeg_quality_static
-
-    play_speed = server.gui.add_slider(
+    return server.gui.add_slider(
         "FPS",
         min=1.0,
         max=120.0,
@@ -363,6 +352,29 @@ def create_render_controls(
         initial_value=initial_fps,
         hint="Playback frames per second",
     )
+
+
+def create_quality_controls(server: viser.ViserServer, config=None) -> tuple:
+    """
+    Create Quality controls (Quality, JPEG, Auto Quality) for Config tab.
+
+    Parameters
+    ----------
+    server : viser.ViserServer
+        Viser server instance
+    config : GSPlayConfig | None
+        GSPlay configuration for render settings
+
+    Returns
+    -------
+    tuple
+        (render_quality, jpeg_quality_slider, auto_quality_checkbox)
+    """
+    initial_quality = 1280
+    initial_jpeg = 90
+
+    if config is not None and hasattr(config, "render_settings"):
+        initial_jpeg = config.render_settings.jpeg_quality_static
 
     render_quality = server.gui.add_slider(
         "Quality",
@@ -382,7 +394,42 @@ def create_render_controls(
         hint="JPEG compression quality for streamed images",
     )
 
-    return (play_speed, render_quality, jpeg_quality_slider)
+    auto_quality_checkbox = server.gui.add_checkbox(
+        "Auto Quality",
+        initial_value=True,
+        hint="Reduce quality during camera movement for smoother navigation",
+    )
+
+    return (render_quality, jpeg_quality_slider, auto_quality_checkbox)
+
+
+def create_render_controls(
+    server: viser.ViserServer, camera: SuperSplatCamera, config=None
+) -> tuple:
+    """
+    Create Render controls (FPS, Quality, JPEG, Auto Quality).
+
+    DEPRECATED: Use create_fps_control and create_quality_controls separately.
+
+    Parameters
+    ----------
+    server : viser.ViserServer
+        Viser server instance
+    camera : SuperSplatCamera
+        Camera controller instance
+    config : GSPlayConfig | None
+        GSPlay configuration for animation settings
+
+    Returns
+    -------
+    tuple
+        (play_speed, render_quality, jpeg_quality_slider, auto_quality_checkbox)
+    """
+    play_speed = create_fps_control(server, config)
+    render_quality, jpeg_quality_slider, auto_quality_checkbox = create_quality_controls(
+        server, config
+    )
+    return (play_speed, render_quality, jpeg_quality_slider, auto_quality_checkbox)
 
 
 def create_playback_controls(server: viser.ViserServer, config=None):

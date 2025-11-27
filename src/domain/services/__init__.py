@@ -1,12 +1,11 @@
 """
 Domain service exports.
 
-This package splits the previous monolithic `services.py` module into focused
-submodules while keeping backward-compatible import paths for existing code.
+This package contains domain services for scene geometry calculations.
+Color and transform processing is delegated to gsmod.
 """
 
-from .color_adjustment import ColorAdjustmentService
 from .transform import TransformService
 
-__all__ = ["ColorAdjustmentService", "TransformService"]
+__all__ = ["TransformService"]
 

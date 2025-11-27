@@ -61,15 +61,3 @@ class VolumeFilter:
             or self.min_scale > 0.0
             or self.max_scale < 100.0
         )
-
-    def get_effective_sphere_radius(self) -> float:
-        """Get sphere radius accounting for factor."""
-        return self.sphere_radius * self.sphere_radius_factor
-
-    def get_effective_cuboid_size(self) -> tuple[float, float, float]:
-        """Get cuboid size accounting for factors."""
-        return (
-            self.cuboid_size[0] * self.cuboid_size_factor_x,
-            self.cuboid_size[1] * self.cuboid_size_factor_y,
-            self.cuboid_size[2] * self.cuboid_size_factor_z,
-        )

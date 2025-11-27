@@ -40,15 +40,6 @@ logger = logging.getLogger(__name__)
 # --- End of Imports ---
 
 
-# --- Constants ---
-# These now come from centralized GaussianConstants
-OPACITY_THRESHOLD = 0.01
-# This filters out gaussians that are too small to contribute meaningfully.
-# Inspired by gifstream_model.py, but adjusted for PLY data ranges.
-SCALE_THRESHOLD = 1e-7
-# Tolerance for checking if opacities are outside the [0,1] linear range
-OPACITY_RANGE_TOLERANCE = 0.01
-
 # --- Model Implementation ---
 
 class OptimizedPlyModel(ModelInterface):
@@ -80,10 +71,7 @@ class OptimizedPlyModel(ModelInterface):
         self.total_frames = len(ply_files)
 
         # Processing configuration (unified with VolumeFilter modes)
-        self.processing_mode = processing_mode
-        self.opacity_threshold = opacity_threshold
-        self.scale_threshold = scale_threshold
-        self.enable_quality_filtering = enable_quality_filtering
+        self._processing_mode = processing_mode
 
         # Track last loaded frame for info display
         self._last_loaded_filename: str | None = None
@@ -107,6 +95,13 @@ class OptimizedPlyModel(ModelInterface):
         self._throughput_observer = FrameThroughputObserver(logger=logger)
         self._profiling_bus.subscribe(self._throughput_observer)
         self._last_requested_frame: int | None = None
+
+        # Cached folder-level format (avoids per-file detection for homogeneous sequences)
+        self._cached_folder_format: tuple[PlyFrameEncoding, int | None] | None = None
+
+        # Current frame cache - avoids disk reload on camera rotation
+        self._cached_frame_idx: int | None = None
+        self._cached_frame_data: GSData | GSTensor | None = None
 
         if self.enable_concurrent_prefetch:
             from concurrent.futures import ThreadPoolExecutor
@@ -139,6 +134,23 @@ class OptimizedPlyModel(ModelInterface):
             return 0.0
         return frame_idx / (self.total_frames - 1)
 
+    @property
+    def processing_mode(self) -> str:
+        """Get current processing mode."""
+        return self._processing_mode
+
+    @processing_mode.setter
+    def processing_mode(self, value: str) -> None:
+        """Set processing mode and invalidate frame cache if changed."""
+        if value != self._processing_mode:
+            self._processing_mode = value
+            self.invalidate_frame_cache()
+
+    def invalidate_frame_cache(self) -> None:
+        """Clear the cached frame data, forcing reload on next request."""
+        self._cached_frame_idx = None
+        self._cached_frame_data = None
+
     def get_recommended_max_scale(self) -> float:
         """
         Get the recommended max_scale value based on percentile of first frame.
@@ -167,7 +179,7 @@ class OptimizedPlyModel(ModelInterface):
 
 
     def _log_folder_format_hint(self) -> None:
-        """Emit a one-time log summarizing the detected folder encoding."""
+        """Emit a one-time log summarizing the detected folder encoding and cache it."""
         if not self.ply_files:
             return
 
@@ -181,16 +193,22 @@ class OptimizedPlyModel(ModelInterface):
             )
             return
 
+        # Cache folder-level format to skip per-file detection
+        self._cached_folder_format = hint
         encoding, sh_degree = hint
+
+        # Set default format on loader to bypass per-file detection in load_for_gpu
+        self._format_loader.set_default_format(encoding, sh_degree)
+
         if encoding == PlyFrameEncoding.COMPRESSED:
             logger.info(
-                "[OptimizedPlyModel] Detected compressed Gaussian PLYs in %s",
+                "[OptimizedPlyModel] Detected compressed Gaussian PLYs in %s (cached for all frames)",
                 folder,
             )
         else:
             sh_msg = f"SH degree {sh_degree}" if sh_degree is not None else "SH degree unknown"
             logger.info(
-                "[OptimizedPlyModel] Detected uncompressed Gaussian PLYs (%s) in %s",
+                "[OptimizedPlyModel] Detected uncompressed Gaussian PLYs (%s) in %s (cached for all frames)",
                 sh_msg,
                 folder,
             )
@@ -347,6 +365,11 @@ class OptimizedPlyModel(ModelInterface):
         """
         frame_idx = int(round(normalized_time * (self.total_frames - 1)))
         frame_idx = max(0, min(frame_idx, self.total_frames - 1))
+
+        # Fast path: return cached data if same frame (e.g., camera rotation)
+        if frame_idx == self._cached_frame_idx and self._cached_frame_data is not None:
+            return self._cached_frame_data
+
         previous_frame_idx = self._last_requested_frame
         self._last_requested_frame = frame_idx
         ply_path = self.ply_files[frame_idx]
@@ -357,7 +380,12 @@ class OptimizedPlyModel(ModelInterface):
         filename = ply_path.name
         self._last_loaded_filename = filename
         self._last_loaded_frame_index = frame_idx
-        frame_encoding, sh_degree = self._format_loader.detect_format(ply_path)
+
+        # Use cached folder format if available (skips per-file detection overhead)
+        if self._cached_folder_format is not None:
+            frame_encoding, sh_degree = self._cached_folder_format
+        else:
+            frame_encoding, sh_degree = self._format_loader.detect_format(ply_path)
         sh_info = f"sh={sh_degree}" if sh_degree is not None else "sh=unknown"
         encoding_label = frame_encoding.value
 
@@ -475,6 +503,11 @@ class OptimizedPlyModel(ModelInterface):
             )
             if is_cpu_mode:
                 self._schedule_cpu_prefetch(frame_idx, previous_frame_idx)
+
+            # Cache the loaded frame for fast retrieval on camera rotation
+            self._cached_frame_idx = frame_idx
+            self._cached_frame_data = processed_data
+
             return processed_data
 
         except Exception as e:

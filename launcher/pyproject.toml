@@ -9,6 +9,9 @@ dependencies = [
     "uvicorn[standard]>=0.27.0",
     "tyro>=0.8.0",
     "psutil>=5.9.0",
+    "sse-starlette>=1.6.0",
+    "websockets>=12.0",
+    "httpx>=0.26.0",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +22,7 @@ dev = [
 
 [project.scripts]
 gsplay_launcher = "gsplay_launcher.main:cli"
+clear_instances = "gsplay_launcher.cli.cleanup:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]

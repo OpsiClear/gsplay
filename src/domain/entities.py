@@ -10,20 +10,20 @@ Extended with gsmod Pro types for enhanced processing:
 - GSTensorPro: GPU processing with optimized color/transform/filter methods
 """
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
+
 import gsply
+from gsmod import GSDataPro
+from gsmod.torch import GSTensorPro
 
 # Re-export gsply containers for convenience
 # Use GSData for CPU operations, GSTensor for GPU operations
 GSData = gsply.GSData
 GSTensor = gsply.GSTensor
 
-# Import gsmod Pro types for enhanced processing
-from gsmod import GSDataPro
-from gsmod.torch import GSTensorPro
-
-# Import gsmod configuration values
-from gsmod.config.values import ColorValues, FilterValues, TransformValues
+# Spherical Harmonics degree mapping: K coefficients -> SH degree
+# K = (degree+1)^2 - 1: degree 1 -> K=3, degree 2 -> K=8, degree 3 -> K=15
+SH_DEGREE_MAP: dict[int, int] = {3: 1, 8: 2, 15: 3}
 
 
 @dataclass
@@ -46,26 +46,6 @@ class SceneBounds:
 #   - All other fields are standard Gaussian parameters
 # For concatenation: Use native GSTensor.add() or sum([gstensor1, gstensor2, ...])
 # For slicing: Use gstensor[mask] with boolean torch.Tensor masks (same device)
-
-
-def get_sh_degree(gaussian_data: GSTensor) -> int | None:
-    """
-    Get the spherical harmonics degree from a GSTensor (GSTensor).
-
-    Args:
-        gaussian_data: GSTensor containing Gaussian data
-
-    Returns:
-        SH degree (0, 1, 2, 3) or None if no higher-order SH
-    """
-    if gaussian_data.shN is None or gaussian_data.shN.numel() == 0:
-        return None
-
-    # Degree is derived from shN shape: [N, K, 3] where K = (degree+1)^2 - 1
-    # degree 1: K=3, degree 2: K=8, degree 3: K=15
-    K = gaussian_data.shN.shape[1]
-    degree_map = {3: 1, 8: 2, 15: 3}
-    return degree_map.get(K, None)
 
 
 @dataclass
@@ -146,20 +126,3 @@ class CompositeGSTensor:
         # Use native GSTensor concatenation (GPU-optimized with _base support)
         # sum() uses __radd__ which calls .add() for efficient merging
         return sum(processed_layers)
-
-    def get_layer(self, layer_id: str) -> GaussianLayer | None:
-        """Get a layer by its ID."""
-        for layer in self.layers:
-            if layer.layer_id == layer_id:
-                return layer
-        return None
-
-    def set_layer_visibility(self, layer_id: str, visible: bool) -> None:
-        """Set the visibility of a specific layer."""
-        layer = self.get_layer(layer_id)
-        if layer:
-            layer.visible = visible
-
-    def get_layer_ids(self) -> list[str]:
-        """Get all layer IDs in order."""
-        return [layer.layer_id for layer in self.layers]

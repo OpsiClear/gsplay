@@ -56,6 +56,7 @@ class PortAllocator:
         self,
         exclude: set[int] | None = None,
         start_hint: int | None = None,
+        even_only: bool = True,
     ) -> int | None:
         """Find first available port in range.
 
@@ -65,6 +66,9 @@ class PortAllocator:
             Ports to exclude from search.
         start_hint : int | None
             Port to start searching from (optimization hint).
+        even_only : bool
+            If True, only return even ports (default). This reserves odd ports
+            for stream servers (stream_port = viser_port + 1).
 
         Returns
         -------
@@ -78,17 +82,29 @@ class PortAllocator:
         if start < self.start_port or start >= self.end_port:
             start = self.start_port
 
+        # If even_only, ensure start is even
+        if even_only and start % 2 != 0:
+            start += 1
+
         # Search from start to end
-        for port in range(start, self.end_port):
+        port = start
+        while port < self.end_port:
             if port not in exclude and self.is_available(port):
-                logger.debug("Found available port: %d", port)
-                return port
+                # Also check that port+1 is available for streaming
+                if not even_only or self.is_available(port + 1):
+                    logger.debug("Found available port: %d", port)
+                    return port
+            port += 2 if even_only else 1
 
         # Wrap around: search from beginning to start
-        for port in range(self.start_port, start):
+        port = self.start_port if not even_only or self.start_port % 2 == 0 else self.start_port + 1
+        while port < start:
             if port not in exclude and self.is_available(port):
-                logger.debug("Found available port (wrapped): %d", port)
-                return port
+                # Also check that port+1 is available for streaming
+                if not even_only or self.is_available(port + 1):
+                    logger.debug("Found available port (wrapped): %d", port)
+                    return port
+            port += 2 if even_only else 1
 
         logger.warning(
             "No available ports in range [%d, %d)",

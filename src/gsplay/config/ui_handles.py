@@ -40,6 +40,7 @@ class UIHandles:
     play_speed: viser.GuiSliderHandle | None = None
     render_quality: viser.GuiSliderHandle | None = None
     jpeg_quality_slider: viser.GuiSliderHandle | None = None
+    auto_quality_checkbox: viser.GuiCheckboxHandle | None = None
 
     # Color adjustment controls
     temperature_slider: viser.GuiSliderHandle | None = None
@@ -141,6 +142,9 @@ class UIHandles:
     # Config menu controls
     config_path_input: viser.GuiTextHandle | None = None
     config_buttons: viser.GuiButtonGroupHandle | None = None
+
+    # Instance control
+    terminate_button: viser.GuiButtonHandle | None = None
 
     def get_color_values(self) -> ColorValues:
         """Extract current color values from UI with proper mapping."""
@@ -575,28 +579,47 @@ class UIHandles:
 def _camera_to_frustum_quaternion(
     camera_rotation: tuple[float, float, float, float],
 ) -> tuple[float, float, float, float]:
-    """Convert viser camera-to-world quaternion to frustum (world-to-camera, Y-up) quaternion."""
-    # Build camera-to-world rotation matrix from quaternion
-    R_c2w = _quaternion_to_matrix(camera_rotation)
-    # World-to-camera in OpenCV frame (transpose) then flip to -Z forward, +Y up
-    R_f = _CAMERA_CONVENTION_FLIP @ R_c2w.T
-    return _matrix_to_quaternion(R_f)
+    """Convert camera quaternion to frustum rotation quaternion.
+
+    Viser's camera.wxyz is camera-to-world rotation. Apply 180° rotation
+    around X (quaternion 0,1,0,0) to flip viewing direction from +Z to -Z.
+    """
+    w, x, y, z = camera_rotation
+    # q_camera * q_flip where q_flip = (0, 1, 0, 0) for 180° around X
+    # Result: (-x, w, z, -y)
+    return (-x, w, z, -y)
 
 
 def _camera_to_frustum_axis_angle(
     camera_rotation: tuple[float, float, float, float],
 ) -> tuple[float, float, float]:
-    """Convert camera quaternion to axis-angle in frustum frame."""
-    R_f = _CAMERA_CONVENTION_FLIP @ _quaternion_to_matrix(camera_rotation).T
-    return _matrix_to_axis_angle(R_f)
+    """Convert camera quaternion to axis-angle for frustum rotation.
+
+    Viser's camera.wxyz is camera-to-world rotation. The frustum is created
+    looking along -Z, but viser's camera convention has +Z as the look direction
+    in local space. Apply 180° rotation around X to flip the viewing direction.
+    """
+    R_c2w = _quaternion_to_matrix(camera_rotation)
+    # Flip Y and Z (180° around X) to correct viewing direction
+    FLIP_X = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]])
+    R_frustum = R_c2w @ FLIP_X
+    return _matrix_to_axis_angle(R_frustum)
 
 
 def _camera_to_frustum_euler_deg(
     camera_rotation: tuple[float, float, float, float],
 ) -> tuple[float, float, float]:
-    """Convert camera quaternion to Euler XYZ in degrees in frustum frame."""
-    R_f = _CAMERA_CONVENTION_FLIP @ _quaternion_to_matrix(camera_rotation).T
-    return _matrix_to_euler_deg(R_f)
+    """Convert camera quaternion to Euler XYZ in degrees for frustum rotation.
+
+    Viser's camera.wxyz is camera-to-world rotation. The frustum is created
+    looking along -Z, but viser's camera convention has +Z as the look direction
+    in local space. Apply 180° rotation around X to flip the viewing direction.
+    """
+    R_c2w = _quaternion_to_matrix(camera_rotation)
+    # Flip Y and Z (180° around X) to correct viewing direction
+    FLIP_X = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]])
+    R_frustum = R_c2w @ FLIP_X
+    return _matrix_to_euler_deg(R_frustum)
 
 
 def _euler_deg_to_axis_angle(
@@ -751,6 +774,3 @@ def _matrix_to_quaternion(R: np.ndarray) -> tuple[float, float, float, float]:
     return (w / norm, x / norm, y / norm, z / norm)
 
 
-# Flip matrix from OpenCV camera frame (+Z forward, +Y down) to frustum frame
-# (-Z forward, +Y up). Invert both Y and Z.
-_CAMERA_CONVENTION_FLIP = np.diag([1.0, -1.0, -1.0])

@@ -11,7 +11,6 @@ from src.infrastructure.processing_mode import ProcessingMode
 from src.shared.perf import PerfMonitor
 
 from .context import EditContext, ProcessingResult
-from .volume_filter import is_filter_active
 
 
 class ProcessingStrategy(Protocol):
@@ -54,25 +53,14 @@ class AllGpuStrategy(_BaseStrategy, ProcessingStrategy):
         )
         monitor.record("transfer_ms", transfer_ms)
 
-        # GPU filtering - filter_gpu checks internally if filtering is active
+        # GPU filtering - filter_gpu uses gsmod's GSTensorPro.filter()
+        # which handles all filter types (sphere, box, ellipsoid, frustum, etc.)
         with monitor.track("filter_ms"):
-            mask = context.volume_filter.filter_gpu(
+            filtered = context.volume_filter.filter_gpu(
                 tensor, context.config, scene_bounds
             )
-            if mask is not None:
-                # Preserve format tracking through slicing
-                # (GSTensor.__getitem__ may return plain GSTensor)
-                source = tensor  # Keep reference for format copy
-                tensor = tensor[mask]
-                # Restore format if lost during slicing using public API
-                if hasattr(tensor, "copy_format_from"):
-                    result_format = getattr(tensor, "_format", None)
-                    if not result_format:
-                        tensor.copy_format_from(source)
-                elif hasattr(source, "_format"):
-                    result_format = getattr(tensor, "_format", None)
-                    if not result_format:
-                        tensor._format = source._format
+            if filtered is not None:
+                tensor = filtered
 
         with monitor.track("transform_ms"):
             tensor = context.scene_transformer.apply_gpu(
@@ -155,10 +143,8 @@ class ColorTransformGpuStrategy(_BaseStrategy, ProcessingStrategy):
             context.volume_filter.filter_cpu(data, context.config, scene_bounds)
 
         with monitor.track("transfer_ms"):
-            # Always create CPU tensors first, then transfer to GPU if needed
-            tensor = GSTensor.from_gsdata(data, device="cpu")
-            if context.device != "cpu":
-                tensor = tensor.to(context.device)
+            # Transfer directly to target device - avoid CPU intermediate
+            tensor = GSTensor.from_gsdata(data, device=context.device)
 
         with monitor.track("transform_ms"):
             tensor = context.scene_transformer.apply_gpu(
@@ -212,10 +198,8 @@ class TransformGpuStrategy(_BaseStrategy, ProcessingStrategy):
             )
 
         with monitor.track("transfer_ms"):
-            # Always create CPU tensors first, then transfer to GPU if needed
-            tensor = GSTensor.from_gsdata(data, device="cpu")
-            if context.device != "cpu":
-                tensor = tensor.to(context.device)
+            # Transfer directly to target device - avoid CPU intermediate
+            tensor = GSTensor.from_gsdata(data, device=context.device)
 
         with monitor.track("transform_ms"):
             tensor = context.scene_transformer.apply_gpu(
@@ -250,10 +234,8 @@ class ColorGpuStrategy(_BaseStrategy, ProcessingStrategy):
             )
 
         with monitor.track("transfer_ms"):
-            # Always create CPU tensors first, then transfer to GPU if needed
-            tensor = GSTensor.from_gsdata(data, device="cpu")
-            if context.device != "cpu":
-                tensor = tensor.to(context.device)
+            # Transfer directly to target device - avoid CPU intermediate
+            tensor = GSTensor.from_gsdata(data, device=context.device)
 
         with monitor.track("color_ms"):
             tensor = context.color_processor.apply_gpu(

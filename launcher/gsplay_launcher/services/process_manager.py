@@ -14,6 +14,87 @@ from gsplay_launcher.models import GSPlayInstance
 logger = logging.getLogger(__name__)
 
 
+def stop_process(pid: int, force: bool = False, timeout: float = 10.0) -> bool:
+    """Stop a process by PID.
+
+    This is the unified process termination function used by both
+    ProcessManager and the cleanup utilities.
+
+    Parameters
+    ----------
+    pid : int
+        Process ID to stop.
+    force : bool
+        If True, force kill immediately without graceful shutdown.
+    timeout : float
+        Timeout for graceful shutdown before force kill.
+
+    Returns
+    -------
+    bool
+        True if process was stopped successfully.
+    """
+    try:
+        proc = psutil.Process(pid)
+
+        if force:
+            # Force kill immediately
+            logger.info("Force killing process %d", pid)
+            _force_kill_process(proc)
+            return True
+
+        # Graceful termination
+        logger.info("Terminating process %d", pid)
+        proc.terminate()
+
+        try:
+            proc.wait(timeout=timeout)
+            logger.info("Process %d terminated gracefully", pid)
+            return True
+        except psutil.TimeoutExpired:
+            logger.warning("Process %d did not terminate, force killing", pid)
+            _force_kill_process(proc)
+            return True
+
+    except psutil.NoSuchProcess:
+        logger.debug("Process %d already dead", pid)
+        return True
+    except psutil.AccessDenied:
+        logger.error("Access denied for process %d", pid)
+        return False
+    except Exception as e:
+        logger.error("Failed to stop process %d: %s", pid, e)
+        return False
+
+
+def _force_kill_process(proc: psutil.Process) -> None:
+    """Force kill process and all children.
+
+    Parameters
+    ----------
+    proc : psutil.Process
+        Process to kill.
+    """
+    try:
+        # Kill children first
+        children = proc.children(recursive=True)
+        for child in children:
+            try:
+                child.kill()
+            except psutil.NoSuchProcess:
+                pass
+
+        # Kill main process
+        proc.kill()
+        proc.wait(timeout=5.0)
+        logger.info("Process %d force killed", proc.pid)
+
+    except psutil.NoSuchProcess:
+        pass
+    except psutil.TimeoutExpired:
+        logger.error("Process %d could not be killed", proc.pid)
+
+
 class ProcessManager:
     """Manages gsplay process lifecycle.
 
@@ -96,69 +177,22 @@ class ProcessManager:
             logger.error("Failed to start gsplay: %s", e)
             raise ProcessStartError(str(e)) from e
 
-    def stop(self, pid: int) -> bool:
+    def stop(self, pid: int, force: bool = False) -> bool:
         """Stop a process gracefully, with force kill fallback.
 
         Parameters
         ----------
         pid : int
             Process ID to stop.
+        force : bool
+            If True, force kill immediately without graceful shutdown.
 
         Returns
         -------
         bool
             True if process was stopped.
         """
-        try:
-            proc = psutil.Process(pid)
-
-            # Try graceful termination first
-            logger.info("Terminating process %d", pid)
-            proc.terminate()
-
-            try:
-                proc.wait(timeout=self.stop_timeout)
-                logger.info("Process %d terminated gracefully", pid)
-                return True
-            except psutil.TimeoutExpired:
-                # Force kill
-                logger.warning("Process %d did not terminate, force killing", pid)
-                self._force_kill(proc)
-                return True
-
-        except psutil.NoSuchProcess:
-            logger.debug("Process %d already dead", pid)
-            return True
-        except Exception as e:
-            logger.error("Failed to stop process %d: %s", pid, e)
-            return False
-
-    def _force_kill(self, proc: psutil.Process) -> None:
-        """Force kill process and all children.
-
-        Parameters
-        ----------
-        proc : psutil.Process
-            Process to kill.
-        """
-        try:
-            # Kill children first
-            children = proc.children(recursive=True)
-            for child in children:
-                try:
-                    child.kill()
-                except psutil.NoSuchProcess:
-                    pass
-
-            # Kill main process
-            proc.kill()
-            proc.wait(timeout=5.0)
-            logger.info("Process %d force killed", proc.pid)
-
-        except psutil.NoSuchProcess:
-            pass
-        except psutil.TimeoutExpired:
-            logger.error("Process %d could not be killed", proc.pid)
+        return stop_process(pid, force=force, timeout=self.stop_timeout)
 
     def is_running(self, pid: int) -> bool:
         """Check if a process is running.

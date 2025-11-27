@@ -45,21 +45,6 @@ class DefaultGSBridge(GSBridge):
             return gsdata
         return gaussians
 
-    def ensure_gsdata_pro(self, gaussians: GSData | GSTensor) -> GSDataPro:
-        """
-        Return GSDataPro representation of the provided container.
-
-        Converts any input type to GSDataPro for gsmod processing.
-        """
-        if isinstance(gaussians, GSDataPro):
-            return gaussians
-        if isinstance(gaussians, GSTensor):
-            gsdata = gaussians.to_gsdata()
-            return GSDataPro.from_gsdata(gsdata)
-        if isinstance(gaussians, GSData):
-            return GSDataPro.from_gsdata(gaussians)
-        raise TypeError(f"Unsupported type: {type(gaussians)}")
-
     def ensure_tensor_on_device(
         self,
         gaussians: GSData | GSTensor,
@@ -99,68 +84,6 @@ class DefaultGSBridge(GSBridge):
             else:
                 # Standard GSData to GSTensor conversion
                 tensor = GSTensor.from_gsdata(gaussians, device=device)
-
-        timings, _ = monitor.stop()
-        return tensor, timings.get("transfer_ms", 0.0)
-
-    def ensure_tensor_pro_on_device(
-        self,
-        gaussians: GSData | GSTensor,
-        device: str,
-    ) -> Tuple[GSTensorPro, float]:
-        """
-        Return a GSTensorPro located on the requested device along with transfer timing.
-
-        Always returns GSTensorPro for gsmod GPU processing support.
-        """
-        monitor = PerfMonitor("transfer")
-        with monitor.track("transfer_ms"):
-            if isinstance(gaussians, GSTensorPro):
-                tensor = gaussians
-                current_device_str = str(tensor.means.device)
-                if current_device_str != device:
-                    source = gaussians  # Keep reference for format copy
-                    tensor = tensor.to(device)
-                    # Wrap in GSTensorPro if to() returned plain GSTensor
-                    if not isinstance(tensor, GSTensorPro):
-                        tensor = GSTensorPro(
-                            means=tensor.means,
-                            scales=tensor.scales,
-                            quats=tensor.quats,
-                            opacities=tensor.opacities,
-                            sh0=tensor.sh0,
-                            shN=tensor.shN,
-                        )
-                        # Preserve format tracking using public API
-                        if hasattr(tensor, "copy_format_from"):
-                            tensor.copy_format_from(source)
-                        elif hasattr(source, "_format"):
-                            tensor._format = source._format.copy()
-            elif isinstance(gaussians, GSTensor):
-                # Convert GSTensor to GSTensorPro
-                source = gaussians  # Keep reference for format copy
-                current_device_str = str(gaussians.means.device)
-                if current_device_str != device:
-                    gaussians = gaussians.to(device)
-                tensor = GSTensorPro(
-                    means=gaussians.means,
-                    scales=gaussians.scales,
-                    quats=gaussians.quats,
-                    opacities=gaussians.opacities,
-                    sh0=gaussians.sh0,
-                    shN=gaussians.shN,
-                )
-                # Preserve format tracking using public API
-                if hasattr(tensor, "copy_format_from"):
-                    tensor.copy_format_from(source)
-                elif hasattr(source, "_format"):
-                    tensor._format = source._format.copy()
-            elif isinstance(gaussians, GSDataPro):
-                # Direct conversion from GSDataPro
-                tensor = GSTensorPro.from_gsdata(gaussians, device=device)
-            else:
-                # Convert GSData to GSTensorPro
-                tensor = GSTensorPro.from_gsdata(gaussians, device=device)
 
         timings, _ = monitor.stop()
         return tensor, timings.get("transfer_ms", 0.0)
@@ -232,47 +155,3 @@ class DefaultGSBridge(GSBridge):
         from src.domain.data import GaussianData
 
         return GaussianData.from_gstensor(tensor, source_path=source_path)
-
-    def gaussian_data_to_gsdata_pro(
-        self,
-        data: GaussianData,
-    ) -> GSDataPro:
-        """Convert GaussianData to GSDataPro for CPU processing.
-
-        Parameters
-        ----------
-        data : GaussianData
-            Unified data container
-
-        Returns
-        -------
-        GSDataPro
-            CPU processing container
-        """
-        gsdata = data.to_gsdata()
-        return GSDataPro.from_gsdata(gsdata)
-
-    def gsdata_pro_to_gaussian_data(
-        self,
-        gsdata: GSDataPro,
-        source_path: str | None = None,
-    ) -> GaussianData:
-        """Convert GSDataPro back to GaussianData for export.
-
-        Parameters
-        ----------
-        gsdata : GSDataPro
-            Processed CPU data
-        source_path : str | None
-            Optional source path for metadata
-
-        Returns
-        -------
-        GaussianData
-            Unified data container
-        """
-        from src.domain.data import GaussianData
-
-        # GSDataPro inherits from GSData, so this works
-        return GaussianData.from_gsdata(gsdata, source_path=source_path)
-

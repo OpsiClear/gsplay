@@ -1,4 +1,4 @@
-"""GPU information service using nvidia-smi."""
+"""GPU and system information services."""
 
 from __future__ import annotations
 
@@ -6,7 +6,31 @@ import logging
 import subprocess
 from dataclasses import dataclass
 
+import psutil
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SystemStats:
+    """System CPU and memory statistics."""
+
+    cpu_percent: float
+    memory_used_gb: float
+    memory_total_gb: float
+    memory_percent: float
+
+
+def get_system_stats() -> SystemStats:
+    """Get current system CPU and memory stats."""
+    cpu_percent = psutil.cpu_percent(interval=None)
+    mem = psutil.virtual_memory()
+    return SystemStats(
+        cpu_percent=cpu_percent,
+        memory_used_gb=round(mem.used / (1024**3), 1),
+        memory_total_gb=round(mem.total / (1024**3), 1),
+        memory_percent=mem.percent,
+    )
 
 
 @dataclass(frozen=True)

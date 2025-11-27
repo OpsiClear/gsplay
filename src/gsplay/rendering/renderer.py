@@ -15,6 +15,7 @@ import numpy as np
 import torch
 from gsplat.rendering import rasterization as _rasterization
 
+from src.domain.entities import SH_DEGREE_MAP
 from src.infrastructure.processing_mode import ProcessingMode
 from src.gsplay.nerfview import CameraState, RenderTabState
 from src.gsplay.interaction.events import EventBus, EventType
@@ -59,9 +60,6 @@ def create_render_function(
         Render function with signature (camera_state, render_tab_state) -> np.ndarray
     """
 
-    # Cache for optimization
-    _last_rendered_frame: np.ndarray | None = None
-
     # CUDA stream for this render function instance (provides isolation between instances)
     _cuda_stream = torch.cuda.Stream() if device.startswith("cuda") else None
 
@@ -86,8 +84,6 @@ def create_render_function(
         np.ndarray
             Rendered image [H, W, 3] in range [0, 1]
         """
-        nonlocal _last_rendered_frame
-
         # Performance profiling
         _frame_start = time.perf_counter()
         _t_load = _t_render = 0.0
@@ -233,8 +229,7 @@ def create_render_function(
             # Use SH coefficients if available, otherwise RGB colors
             sh_degree = None
             if getattr(render_gaussians, "shN", None) is not None:
-                degree_map = {3: 1, 8: 2, 15: 3}
-                sh_degree = degree_map.get(render_gaussians.shN.shape[1])
+                sh_degree = SH_DEGREE_MAP.get(render_gaussians.shN.shape[1])
 
             if sh_degree is not None:
                 render_kwargs["colors"] = render_gaussians.shN
@@ -243,17 +238,19 @@ def create_render_function(
                 render_kwargs["colors"] = render_gaussians.sh0
             _t_prep = (time.perf_counter() - _checkpoint_prep) * 1000
 
-            # Actual rasterization
+            # Actual rasterization - use dedicated stream to isolate from other instances
             _checkpoint_rasterize = time.perf_counter()
-            render_colors, render_alphas, _ = _rasterization(**render_kwargs)
+            if _cuda_stream is not None:
+                with torch.cuda.stream(_cuda_stream):
+                    render_colors, render_alphas, _ = _rasterization(**render_kwargs)
+                # Sync before accessing results to ensure rasterization is complete
+                _cuda_stream.synchronize()
+            else:
+                render_colors, render_alphas, _ = _rasterization(**render_kwargs)
             
-            # CRITICAL: Synchronize GPU immediately after rasterization to prevent
-            # partial frame rendering during camera movement. This ensures all GPU
-            # work completes before we proceed to post-processing and data transfer.
-            # Without this, InterruptRenderException can cause incomplete GPU buffers
-            # to be transferred, resulting in half-updated images in the browser.
-            if device.startswith("cuda"):
-                torch.cuda.synchronize()
+            # Note: Stream sync above already ensures rasterization is complete.
+            # No additional global sync needed here - using stream-based isolation
+            # allows multiple instances to run concurrently without blocking each other.
             
             # Normalize output layout to channels-last for downstream math
             if render_colors.dim() == 4 and render_colors.shape[-1] not in (3, 4) and render_colors.shape[1] in (3, 4):
@@ -273,15 +270,13 @@ def create_render_function(
 
             # Post-processing: GPU upscaling + async transfer
             _checkpoint_post = time.perf_counter()
-            result_gpu = torch.clamp(render_colors[0], 0.0, 1.0)
 
             # Use alpha channel to mask uncovered pixels to black
             # render_alphas is [N, H, W, 1], so render_alphas[0] is [H, W, 1]
-            alpha_mask = render_alphas[0]
-
             # Composite: rgb * alpha (uncovered pixels become black)
-            # This prevents uninitialized GPU memory from showing through
-            result_gpu = torch.clamp(result_gpu * alpha_mask, 0.0, 1.0)
+            # Single clamp after multiplication - avoids redundant kernel launch
+            alpha_mask = render_alphas[0]
+            result_gpu = torch.clamp(render_colors[0] * alpha_mask, 0.0, 1.0)
 
             # GPU-based upscaling (if needed) - faster than CPU
             _checkpoint_upscale = time.perf_counter()
@@ -313,17 +308,37 @@ def create_render_function(
                     # that causes "stripes" or corruption when converted to numpy/image.
                     result_gpu = result_gpu.contiguous()
 
-                    # Synchronous copy to ensure data is ready before returning
-                    result = result_gpu.cpu().numpy()
-                # Ensure the stream is fully synced before returning
+                    # Convert to uint8 on GPU (once) for both viser and streaming
+                    # This avoids redundant float32→uint8 conversion in viser/PIL
+                    gpu_frame_uint8 = (result_gpu * 255).clamp(0, 255).to(torch.uint8)
+
+                    # Transfer uint8 to CPU (4x smaller than float32, no redundant conversion)
+                    result = gpu_frame_uint8.cpu().numpy()
+
+                # CRITICAL: Sync stream BEFORE caching GPU frame for streaming
+                # This ensures the tensor data is complete and prevents corruption
+                # if encode_from_cache is called before we return
                 _cuda_stream.synchronize()
+
+                # Cache for zero-copy JPEG encoding (streaming)
+                # Only cache AFTER sync to guarantee data integrity
+                from src.gsplay.rendering.jpeg_encoder import set_gpu_frame
+                set_gpu_frame(gpu_frame_uint8)
             else:
                 # Fallback for non-CUDA devices
-                result = result_gpu.contiguous().detach().cpu().numpy()
+                result_gpu = result_gpu.contiguous()
+
+                # Convert to uint8 (once) for both viser and streaming
+                gpu_frame_uint8 = (result_gpu * 255).clamp(0, 255).to(torch.uint8)
+
+                # Transfer uint8 to CPU (4x smaller, no redundant conversion)
+                result = gpu_frame_uint8.detach().cpu().numpy()
+
+                # Cache for zero-copy JPEG encoding (streaming)
+                from src.gsplay.rendering.jpeg_encoder import set_gpu_frame
+                set_gpu_frame(gpu_frame_uint8)
 
             _t_post = (time.perf_counter() - _checkpoint_post) * 1000
-
-            _last_rendered_frame = result.copy()
 
             # Performance logging
             _t_render = (time.perf_counter() - _checkpoint_render) * 1000  # ms

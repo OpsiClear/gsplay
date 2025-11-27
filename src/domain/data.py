@@ -10,11 +10,14 @@ The viewer converts to/from gsply types for processing.
 
 from __future__ import annotations
 
+import copy
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+from src.domain.entities import SH_DEGREE_MAP
 
 if TYPE_CHECKING:
     import torch
@@ -129,8 +132,7 @@ class GaussianData:
         sh_degree = None
         if gsdata.shN is not None and gsdata.shN.size > 0:
             k = gsdata.shN.shape[1] if len(gsdata.shN.shape) > 1 else 0
-            degree_map = {3: 1, 8: 2, 15: 3}
-            sh_degree = degree_map.get(k)
+            sh_degree = SH_DEGREE_MAP.get(k)
         format_info.sh_degree = sh_degree
 
         return cls(
@@ -178,8 +180,7 @@ class GaussianData:
         sh_degree = None
         if gstensor.shN is not None and gstensor.shN.numel() > 0:
             k = gstensor.shN.shape[1] if len(gstensor.shN.shape) > 1 else 0
-            degree_map = {3: 1, 8: 2, 15: 3}
-            sh_degree = degree_map.get(k)
+            sh_degree = SH_DEGREE_MAP.get(k)
         format_info.sh_degree = sh_degree
 
         device = str(gstensor.means.device)
@@ -319,8 +320,6 @@ class GaussianData:
         GaussianData
             New independent GaussianData instance
         """
-        import copy
-
         return GaussianData(
             means=self.means.copy() if self.means is not None else None,
             scales=self.scales.copy() if self.scales is not None else None,

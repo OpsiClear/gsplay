@@ -110,6 +110,7 @@ class InstanceManager:
         name: str = "",
         port: int | None = None,
         host: str | None = None,
+        stream_port: int = 0,
         gpu: int | None = None,
         cache_size: int = 100,
         view_only: bool = False,
@@ -129,6 +130,8 @@ class InstanceManager:
             Port number (auto-assigned if None).
         host : str | None
             Host to bind to (uses config.gsplay_host if None).
+        stream_port : int
+            WebSocket stream port (0 = disabled).
         gpu : int | None
             GPU device number.
         cache_size : int
@@ -161,13 +164,26 @@ class InstanceManager:
 
         # Determine port
         if port is not None:
-            # User specified port - check availability
+            # User specified port - must be even (odd ports reserved for streaming)
+            if port % 2 != 0:
+                logger.warning(
+                    "Requested odd port %d adjusted to %d (odd ports reserved for streaming)",
+                    port,
+                    port - 1,
+                )
+                port = port - 1
+            # Check availability of both the viser port and stream port (port+1)
             if not self._port_allocator.is_available(port):
                 existing = self._find_instance_by_port(port)
                 raise PortInUseError(port, existing.id if existing else None)
+            if not self._port_allocator.is_available(port + 1):
+                raise PortInUseError(
+                    port + 1,
+                    f"Port {port + 1} (stream port for {port}) is not available",
+                )
             assigned_port = port
         else:
-            # Auto-assign port
+            # Auto-assign port (allocator returns even ports with port+1 available)
             used_ports = {
                 inst.port
                 for inst in self._state.instances.values()
@@ -179,7 +195,8 @@ class InstanceManager:
             )
             if assigned_port is None:
                 raise PortInUseError(0, "No available ports in range")
-            self._state.next_port_hint = assigned_port + 1
+            # Hint for next allocation: skip to next even port (+2)
+            self._state.next_port_hint = assigned_port + 2
 
         # Determine host (use config default if not specified)
         assigned_host = host if host is not None else self.config.gsplay_host
@@ -190,6 +207,7 @@ class InstanceManager:
             config_path=str(path.resolve()),
             port=assigned_port,
             host=assigned_host,
+            stream_port=stream_port,
             gpu=gpu,
             cache_size=cache_size,
             view_only=view_only,

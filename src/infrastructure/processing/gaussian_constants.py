@@ -13,16 +13,6 @@ class SphericalHarmonics:
     C0: float = 0.28209479177387814
     """SH normalization constant: sqrt(1/(4*pi))"""
 
-    @classmethod
-    def sh2rgb(cls, sh):
-        """Convert SH coefficients to RGB colors."""
-        return sh * cls.C0 + 0.5
-
-    @classmethod
-    def rgb2sh(cls, rgb):
-        """Convert RGB colors to SH coefficients."""
-        return (rgb - 0.5) / cls.C0
-
 
 @dataclass(frozen=True)
 class FormatDetection:

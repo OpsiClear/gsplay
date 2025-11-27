@@ -56,6 +56,7 @@ def main(
     config: Annotated[Path, tyro.conf.Positional],
     port: int = 6019,
     host: str = "0.0.0.0",
+    stream_port: int = -1,
     log_level: str = "INFO",
     gpu: int | None = None,
     cache_size: int = 100,
@@ -73,6 +74,9 @@ def main(
         Viser server port (default: 6019)
     host : str
         Host to bind to (default: 0.0.0.0 for external access, use 127.0.0.1 for localhost only)
+    stream_port : int
+        WebSocket stream port for view-only access. Default: -1 (auto-assign to viser_port+1).
+        Set to 0 to disable streaming.
     log_level : str
         Logging level: DEBUG, INFO, WARNING, ERROR (default: INFO)
     gpu : int | None
@@ -123,12 +127,15 @@ def main(
     logger.info(f"Config: {config}")
     logger.info(f"Host: {host}")
     logger.info(f"Port: {port}")
+    if stream_port != 0:
+        logger.info(f"Stream port: {port + 1} (auto)")
     logger.info(f"Device: {device}")
 
     # Create viewer config
     viewer_config = GSPlayConfig(
         port=port,
         host=host,
+        stream_port=stream_port,
         device=device,
         model_config_path=config,
         view_only=view_only,

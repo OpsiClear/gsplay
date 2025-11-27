@@ -18,14 +18,13 @@ Public API:
 
 **Utilities**:
 - sh2rgb(), rgb2sh()      - Spherical harmonics conversion
-- sort_gaussians_by_morton() - Spatial sorting for cache coherence
 
 Architecture:
 -------------
 ```
 loader.py          - Unified loader using gsply (auto-detects format)
 writer.py          - Unified writer using gsply (standard/compressed)
-utils.py           - SH conversion, Morton codes (not in gsply)
+utils.py           - SH conversion utilities
 ```
 
 Example Usage:
@@ -74,7 +73,6 @@ from src.infrastructure.processing.ply.utils import (
     rgb2sh,
     sh2rgb_np,
     rgb2sh_np,
-    sort_gaussians_by_morton,
     SH_C0,
 )
 
@@ -93,6 +91,5 @@ __all__ = [
     "rgb2sh",
     "sh2rgb_np",
     "rgb2sh_np",
-    "sort_gaussians_by_morton",
     "SH_C0",
 ]

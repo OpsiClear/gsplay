@@ -13,12 +13,15 @@ import logging
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, status
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
+from sse_starlette.sse import EventSourceResponse
 
 from gsplay_launcher.api.schemas import (
     BrowseConfigResponse,
     BrowseLaunchRequest,
     BrowseResponse,
+    CleanupResponse,
+    CleanupStopRequest,
     CreateInstanceRequest,
     DirectoryEntryResponse,
     ErrorResponse,
@@ -27,7 +30,10 @@ from gsplay_launcher.api.schemas import (
     HealthResponse,
     InstanceListResponse,
     InstanceResponse,
+    LogResponse,
     PortInfoResponse,
+    ProcessInfo,
+    SystemStatsResponse,
 )
 from gsplay_launcher.models import InstanceStatus
 from gsplay_launcher.services.file_browser import (
@@ -35,7 +41,8 @@ from gsplay_launcher.services.file_browser import (
     PathNotFoundError,
     PathSecurityError,
 )
-from gsplay_launcher.services.gpu_info import get_gpu_service
+from gsplay_launcher.services.gpu_info import get_gpu_service, get_system_stats
+from gsplay_launcher.services.log_service import get_log_service
 from gsplay_launcher.services.instance_manager import (
     ConfigPathError,
     InstanceManager,
@@ -43,6 +50,7 @@ from gsplay_launcher.services.instance_manager import (
     PortInUseError,
 )
 from gsplay_launcher.services.process_manager import ProcessStartError
+from gsplay_launcher.services.id_encoder import decode_instance_id
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +103,11 @@ def set_file_browser(browser: FileBrowserService) -> None:
     _file_browser = browser
 
 
+def _get_external_url(manager: InstanceManager) -> str | None:
+    """Get external URL from manager config."""
+    return manager.config.external_url
+
+
 # =============================================================================
 # Instance Management Routes
 # =============================================================================
@@ -128,8 +141,9 @@ def list_instances(
 ) -> InstanceListResponse:
     """List all GSPlay instances."""
     instances = manager.list_all()
+    external_url = _get_external_url(manager)
     return InstanceListResponse(
-        instances=[InstanceResponse.from_instance(i) for i in instances],
+        instances=[InstanceResponse.from_instance(i, external_url) for i in instances],
         total=len(instances),
     )
 
@@ -147,7 +161,7 @@ def get_instance(
     """Get a specific instance by ID."""
     try:
         instance = manager.get(instance_id)
-        return InstanceResponse.from_instance(instance)
+        return InstanceResponse.from_instance(instance, _get_external_url(manager))
     except InstanceNotFoundError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
 
@@ -174,6 +188,7 @@ def create_instance(
             name=body.name,
             port=body.port,
             host=body.host,
+            stream_port=body.stream_port,
             gpu=body.gpu,
             cache_size=body.cache_size,
             view_only=body.view_only,
@@ -181,7 +196,7 @@ def create_instance(
             log_level=body.log_level,
             custom_ip=body.custom_ip,
         )
-        return InstanceResponse.from_instance(instance)
+        return InstanceResponse.from_instance(instance, _get_external_url(manager))
     except ConfigPathError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
     except PortInUseError as e:
@@ -203,7 +218,7 @@ def stop_instance(
     """Stop a running instance."""
     try:
         instance = manager.stop(instance_id)
-        return InstanceResponse.from_instance(instance)
+        return InstanceResponse.from_instance(instance, _get_external_url(manager))
     except InstanceNotFoundError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
 
@@ -279,6 +294,22 @@ def get_gpu_info() -> GpuInfoResponse:
     )
 
 
+@router.get(
+    "/system",
+    response_model=SystemStatsResponse,
+    summary="Get system CPU/memory stats",
+)
+def get_system_info() -> SystemStatsResponse:
+    """Get system CPU and memory statistics."""
+    stats = get_system_stats()
+    return SystemStatsResponse(
+        cpu_percent=stats.cpu_percent,
+        memory_used_gb=stats.memory_used_gb,
+        memory_total_gb=stats.memory_total_gb,
+        memory_percent=stats.memory_percent,
+    )
+
+
 # =============================================================================
 # File Browser Routes
 # =============================================================================
@@ -298,12 +329,14 @@ def get_browse_config(
         return BrowseConfigResponse(
             enabled=False,
             external_url=manager.config.external_url,
+            view_only=manager.config.view_only,
         )
     return BrowseConfigResponse(
         enabled=True,
         root_path=str(browser.root),
         default_custom_ip=manager.config.custom_ip,
         external_url=manager.config.external_url,
+        view_only=manager.config.view_only,
     )
 
 
@@ -340,6 +373,7 @@ def browse_directory(path: str = "") -> BrowseResponse:
                     is_ply_folder=e.is_ply_folder,
                     ply_count=e.ply_count,
                     total_size_mb=e.total_size_mb,
+                    subfolder_count=e.subfolder_count,
                     modified_at=e.modified_at,
                 )
                 for e in result.entries
@@ -387,13 +421,14 @@ def launch_from_browser(
             config_path=str(absolute_path),
             name=body.name,
             port=body.port,
+            stream_port=body.stream_port,
             gpu=body.gpu,
             cache_size=body.cache_size,
             view_only=body.view_only,
             compact=body.compact,
             custom_ip=body.custom_ip,
         )
-        return InstanceResponse.from_instance(instance)
+        return InstanceResponse.from_instance(instance, _get_external_url(manager))
     except PathSecurityError as e:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
     except PathNotFoundError as e:
@@ -404,6 +439,157 @@ def launch_from_browser(
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
     except ProcessStartError as e:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e))
+
+
+# =============================================================================
+# Log Routes
+# =============================================================================
+
+
+@router.get(
+    "/instances/{instance_id}/logs",
+    response_model=LogResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Get instance logs",
+)
+def get_instance_logs(
+    instance_id: str,
+    lines: int = 200,
+    offset: int = 0,
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> LogResponse:
+    """Get log lines from an instance.
+
+    Parameters
+    ----------
+    instance_id : str
+        Instance ID.
+    lines : int
+        Number of lines to return (from the end).
+    offset : int
+        Line offset from the end (0 = most recent).
+    """
+    try:
+        instance = manager.get(instance_id)
+    except InstanceNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+
+    log_service = get_log_service()
+    chunk = log_service.read_logs(instance.port, lines=lines, offset=offset)
+
+    return LogResponse(
+        lines=chunk.lines,
+        total_lines=chunk.total_lines,
+        offset=chunk.offset,
+        has_more=chunk.has_more,
+    )
+
+
+@router.get(
+    "/instances/{instance_id}/logs/stream",
+    summary="Stream instance logs (SSE)",
+)
+async def stream_instance_logs(
+    instance_id: str,
+    manager: InstanceManager = Depends(get_instance_manager),
+):
+    """Stream log lines from an instance via Server-Sent Events.
+
+    Parameters
+    ----------
+    instance_id : str
+        Instance ID.
+
+    Returns
+    -------
+    EventSourceResponse
+        SSE stream of log lines.
+    """
+    try:
+        instance = manager.get(instance_id)
+    except InstanceNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+
+    log_service = get_log_service()
+
+    async def event_generator():
+        async for line in log_service.stream_logs(instance.port):
+            yield {"event": "log", "data": line}
+
+    return EventSourceResponse(event_generator())
+
+
+# =============================================================================
+# Cleanup Routes - Discover and stop orphaned GSPlay processes
+# =============================================================================
+
+
+@router.get(
+    "/cleanup",
+    response_model=CleanupResponse,
+    summary="Discover GSPlay processes",
+)
+def discover_processes() -> CleanupResponse:
+    """Discover all running GSPlay processes (including orphaned ones)."""
+    from gsplay_launcher.cli.cleanup import find_gsplay_processes
+
+    processes = find_gsplay_processes()
+    return CleanupResponse(
+        processes=[
+            ProcessInfo(
+                pid=p.pid,
+                port=p.port,
+                config_path=p.config_path,
+                memory_mb=round(p.memory_mb, 1),
+                status=p.status,
+            )
+            for p in processes
+        ],
+        total=len(processes),
+    )
+
+
+@router.post(
+    "/cleanup/stop",
+    response_model=CleanupResponse,
+    summary="Stop GSPlay processes",
+)
+def stop_processes(body: CleanupStopRequest) -> CleanupResponse:
+    """Stop discovered GSPlay processes.
+
+    Parameters
+    ----------
+    body : CleanupStopRequest
+        Stop options (force, pid).
+    """
+    from gsplay_launcher.cli.cleanup import find_gsplay_processes
+    from gsplay_launcher.services.process_manager import stop_process
+
+    processes = find_gsplay_processes()
+
+    # Filter by PID if specified
+    if body.pid is not None:
+        processes = [p for p in processes if p.pid == body.pid]
+
+    # Stop processes using the unified stop_process function
+    for proc in processes:
+        stop_process(proc.pid, force=body.force)
+
+    # Return remaining processes
+    remaining = find_gsplay_processes()
+    return CleanupResponse(
+        processes=[
+            ProcessInfo(
+                pid=p.pid,
+                port=p.port,
+                config_path=p.config_path,
+                memory_mb=round(p.memory_mb, 1),
+                status=p.status,
+            )
+            for p in remaining
+        ],
+        total=len(remaining),
+    )
 
 
 # =============================================================================
@@ -566,3 +752,207 @@ async def proxy_http_path(
 ) -> Response:
     """Proxy HTTP requests to a GSPlay instance with path."""
     return await _proxy_http_impl(request, instance_id, path, manager)
+
+
+# =============================================================================
+# Stream Proxy Routes - Access WebSocket stream via /s/{token}/
+# Uses encoded instance IDs for security (tokens can't be guessed)
+# =============================================================================
+
+
+async def _proxy_stream_impl(
+    request: Request,
+    token: str,
+    path: str,
+    manager: InstanceManager,
+) -> Response:
+    """Internal implementation for stream HTTP proxy.
+
+    Parameters
+    ----------
+    request : Request
+        FastAPI request object.
+    token : str
+        Encoded instance ID token (from encode_instance_id).
+    path : str
+        Path to proxy (view, status).
+    manager : InstanceManager
+        Instance manager for lookups.
+    """
+    # Decode the token to get instance ID
+    instance_id = decode_instance_id(token)
+    if instance_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invalid stream token")
+
+    try:
+        instance = manager.get(instance_id)
+    except InstanceNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Instance not found")
+
+    # Check if streaming is enabled (any non-zero value means enabled)
+    if instance.stream_port == 0:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Streaming not enabled for this instance",
+        )
+
+    # Check if instance can accept connections
+    if instance.status not in _PROXY_ALLOWED_STATUSES:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Instance not running")
+
+    # Build backend URL
+    # Stream port is always viser_port + 1 (convention: even ports for viser, odd for stream)
+    actual_stream_port = instance.port + 1
+    backend_host = "127.0.0.1" if instance.host == "0.0.0.0" else instance.host
+    backend_url = f"http://{backend_host}:{actual_stream_port}/{path}"
+
+    # Forward query string
+    if request.url.query:
+        backend_url += f"?{request.url.query}"
+
+    # Proxy regular HTTP requests
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.request(
+                method=request.method,
+                url=backend_url,
+                headers={
+                    k: v for k, v in request.headers.items()
+                    if k.lower() not in ("host", "content-length")
+                },
+            )
+
+            content = response.content
+
+            # For view page, rewrite WebSocket URL to use proxy path
+            if path in ("", "view") and b"text/html" in response.headers.get("content-type", "").encode():
+                base_path = f"/s/{token}"
+                # Fix WebSocket connection URL - the client connects to the same host
+                # Replace any ws:// or wss:// URLs that point to the backend
+                content = content.replace(
+                    b"const wsUrl = protocol + '//' + location.host + '/';",
+                    f"const wsUrl = protocol + '//' + location.host + '{base_path}/ws';".encode()
+                )
+
+            return Response(
+                content=content,
+                status_code=response.status_code,
+                headers={
+                    k: v for k, v in response.headers.items()
+                    if k.lower() not in ("content-encoding", "transfer-encoding", "content-length")
+                },
+            )
+
+        except httpx.ConnectError:
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                f"Cannot connect to stream server at port {actual_stream_port}. "
+                f"Make sure the gsplay instance was started with streaming enabled.",
+            )
+        except httpx.TimeoutException:
+            raise HTTPException(
+                status.HTTP_504_GATEWAY_TIMEOUT,
+                f"Stream for instance timed out",
+            )
+
+
+async def _proxy_stream_websocket_impl(
+    websocket: WebSocket,
+    token: str,
+    manager: InstanceManager,
+) -> None:
+    """Internal implementation for stream WebSocket proxy.
+
+    Parameters
+    ----------
+    websocket : WebSocket
+        The incoming WebSocket connection.
+    token : str
+        Encoded instance ID token.
+    manager : InstanceManager
+        Instance manager for lookups.
+    """
+    from gsplay_launcher.services.websocket_proxy import get_proxy
+
+    # Decode the token to get instance ID
+    instance_id = decode_instance_id(token)
+    if instance_id is None:
+        await websocket.close(code=4004, reason="Invalid stream token")
+        return
+
+    try:
+        instance = manager.get(instance_id)
+    except InstanceNotFoundError:
+        await websocket.close(code=4004, reason="Instance not found")
+        return
+
+    # Check if streaming is enabled
+    if instance.stream_port == 0:
+        await websocket.close(code=4003, reason="Streaming not enabled")
+        return
+
+    # Check if instance can accept connections
+    if instance.status not in _PROXY_ALLOWED_STATUSES:
+        await websocket.close(code=4003, reason="Instance not running")
+        return
+
+    # Accept the WebSocket connection
+    await websocket.accept()
+
+    # Proxy to stream port (viser_port + 1)
+    stream_port = instance.port + 1
+    proxy = get_proxy()
+    await proxy.proxy(websocket, instance, port_override=stream_port)
+
+
+@proxy_router.get("/s/{token}/")
+async def proxy_stream_root(
+    request: Request,
+    token: str,
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> Response:
+    """Proxy HTTP requests to stream server (view page).
+
+    The token is an encoded instance ID for security.
+    """
+    return await _proxy_stream_impl(request, token, "", manager)
+
+
+@proxy_router.get("/s/{token}/view")
+async def proxy_stream_view(
+    request: Request,
+    token: str,
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> Response:
+    """Proxy view-only HTML page.
+
+    The token is an encoded instance ID for security.
+    """
+    return await _proxy_stream_impl(request, token, "", manager)
+
+
+@proxy_router.websocket("/s/{token}/ws")
+async def proxy_stream_websocket(
+    websocket: WebSocket,
+    token: str,
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> None:
+    """Proxy WebSocket stream connection.
+
+    The token is an encoded instance ID for security.
+    Binary JPEG frames are sent over this WebSocket.
+    """
+    await _proxy_stream_websocket_impl(websocket, token, manager)
+
+
+@proxy_router.get("/s/{token}/status")
+async def proxy_stream_status(
+    request: Request,
+    token: str,
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> Response:
+    """Proxy stream status endpoint for debugging.
+
+    The token is an encoded instance ID for security.
+    """
+    return await _proxy_stream_impl(request, token, "status", manager)

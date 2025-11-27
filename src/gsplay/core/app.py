@@ -37,6 +37,10 @@ from src.gsplay.core.components import ModelComponent, RenderComponent, ExportCo
 from src.gsplay.interaction.events import EventBus, Event, EventType
 from src.gsplay.ui.controller import UIController
 from src.gsplay.interaction.playback import PlaybackController
+from src.gsplay.streaming import (
+    WebSocketStreamServer as StreamServer,
+    set_websocket_server as set_stream_server,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +118,9 @@ class UniversalGSPlay:
 
         # Programmatic API (initialized after setup_viewer)
         self.api: GSPlayAPI | None = None
+
+        # Stream server for view-only output (WebSocket-based, low latency)
+        self.stream_server: StreamServer | None = None
 
     @property
     def model(self) -> ModelInterface | None:
@@ -379,6 +386,9 @@ class UniversalGSPlay:
         self.event_bus.subscribe(
             EventType.RERENDER_REQUESTED, self._on_rerender_requested
         )
+        self.event_bus.subscribe(
+            EventType.TERMINATE_REQUESTED, self._on_terminate_requested
+        )
 
         # Update time slider if model already loaded
         if self.model:
@@ -445,6 +455,41 @@ class UniversalGSPlay:
         self.api = GSPlayAPI(self)
         logger.debug("Programmatic API initialized")
 
+        # Start stream server if configured
+        self._start_stream_server()
+
+    def _start_stream_server(self) -> None:
+        """Start WebSocket stream server if configured.
+
+        Stream port convention:
+        - stream_port == 0: Streaming disabled
+        - stream_port != 0 (including -1): Enable streaming on viser_port + 1
+
+        WebSocket streaming provides ~100-150ms latency over the internet.
+        """
+        if self.config.stream_port == 0:
+            return  # Streaming disabled
+
+        try:
+            stream_port = self.config.port + 1
+            target_fps = int(self.config.animation.play_speed_fps)
+
+            self.stream_server = StreamServer(
+                port=stream_port,
+                target_fps=target_fps,
+            )
+            actual_port = self.stream_server.start()
+
+            # Register globally so renderer can find it
+            set_stream_server(self.stream_server)
+
+            logger.info(
+                f"Stream server: http://{self.config.host}:{actual_port}/"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to start stream server: {e}")
+            self.stream_server = None
+
     def _on_model_loaded(self, event: Event) -> None:
         """
         Handle model loaded event.
@@ -509,6 +554,12 @@ class UniversalGSPlay:
 
         if self.viewer:
             self.render_component.rerender()
+
+    def _on_terminate_requested(self, event: Event) -> None:
+        """Handle terminate request - gracefully stop the viewer."""
+        logger.info("Terminate requested via UI")
+        if self.playback_controller:
+            self.playback_controller.stop()
 
     def _setup_layer_controls(self) -> None:
         """Setup layer management UI if model supports layers."""
@@ -618,6 +669,24 @@ class UniversalGSPlay:
             @self.ui.frustum_use_camera.on_click
             def on_use_camera_click(_) -> None:
                 self._copy_camera_to_frustum()
+
+        # Callback to update visualization when scene transform changes
+        # This ensures the filter visualization moves with the transformed Gaussians
+        def on_transform_change(_) -> None:
+            self._update_filter_visualization()
+
+        # Register callbacks for scene transformation controls
+        for control in [
+            getattr(self.ui, 'global_scale', None),
+            getattr(self.ui, 'translate_x', None),
+            getattr(self.ui, 'translate_y', None),
+            getattr(self.ui, 'translate_z', None),
+            getattr(self.ui, 'rotate_x', None),
+            getattr(self.ui, 'rotate_y', None),
+            getattr(self.ui, 'rotate_z', None),
+        ]:
+            if control:
+                control.on_update(on_transform_change)
 
         logger.debug("Filter visualizer callbacks registered")
 
@@ -785,7 +854,11 @@ class UniversalGSPlay:
         return compose_color_values(base, style)
 
     def _update_filter_visualization(self) -> None:
-        """Update filter visualization based on current UI state."""
+        """Update filter visualization based on current UI state.
+
+        The visualization is transformed by the scene transformation so it
+        appears in the correct position relative to the transformed Gaussians.
+        """
         if not self.filter_visualizer or not self.ui:
             return
 
@@ -797,39 +870,131 @@ class UniversalGSPlay:
         # Get current filter values from UI
         filter_values = self.ui.get_filter_values()
 
-        # Update visualizer
-        self.filter_visualizer.update(filter_type, filter_values)
+        # Get current transform values to apply to visualization
+        transform_values = self.ui.get_transform_values()
+
+        # Update visualizer with both filter and transform values
+        self.filter_visualizer.update(filter_type, filter_values, transform_values)
 
     def _copy_camera_to_frustum(self) -> None:
-        """Copy current camera position/rotation to frustum UI controls."""
+        """Copy current camera position/rotation to frustum UI controls.
+
+        The camera operates in transformed (viewer) space, but the frustum filter
+        operates on original Gaussian positions. This method applies the inverse
+        scene transformation to convert camera coordinates to world space.
+        """
         if not self.ui:
             return
 
         camera_pos, camera_rot = self._get_camera_state()
+        if not camera_pos or not camera_rot:
+            return
 
-        if camera_pos and self.ui.frustum_pos_x:
-            self.ui.frustum_pos_x.value = camera_pos[0]
+        # Get current scene transformation
+        transform_values = self.ui.get_transform_values()
+
+        # Apply inverse scene transformation to camera position/rotation
+        frustum_pos, frustum_euler_deg = self._inverse_transform_camera(
+            camera_pos, camera_rot, transform_values
+        )
+
+        # Set frustum position
+        if self.ui.frustum_pos_x:
+            self.ui.frustum_pos_x.value = frustum_pos[0]
             if self.ui.frustum_pos_y:
-                self.ui.frustum_pos_y.value = camera_pos[1]
+                self.ui.frustum_pos_y.value = frustum_pos[1]
             if self.ui.frustum_pos_z:
-                self.ui.frustum_pos_z.value = camera_pos[2]
+                self.ui.frustum_pos_z.value = frustum_pos[2]
 
-        if camera_rot and self.ui.frustum_rot_x:
-            import math
-            from src.gsplay.config.ui_handles import _camera_to_frustum_euler_deg
-
-            rx, ry, rz = _camera_to_frustum_euler_deg(camera_rot)
-
-            # Convert to degrees for UI
-            self.ui.frustum_rot_x.value = float(rx)
+        # Set frustum rotation (already in degrees)
+        if self.ui.frustum_rot_x:
+            self.ui.frustum_rot_x.value = float(frustum_euler_deg[0])
             if self.ui.frustum_rot_y:
-                self.ui.frustum_rot_y.value = float(ry)
+                self.ui.frustum_rot_y.value = float(frustum_euler_deg[1])
             if self.ui.frustum_rot_z:
-                self.ui.frustum_rot_z.value = float(rz)
+                self.ui.frustum_rot_z.value = float(frustum_euler_deg[2])
 
         # Trigger visualization update
         self._update_filter_visualization()
-        logger.debug("Copied camera state to frustum filter")
+        logger.debug("Copied camera state to frustum filter (with inverse transform)")
+
+    def _inverse_transform_camera(
+        self,
+        camera_pos: tuple[float, float, float],
+        camera_rot: tuple[float, float, float, float],
+        transform_values,
+    ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+        """Apply inverse scene transformation to camera and convert to frustum frame.
+
+        The scene transformation is applied to Gaussians as: scale -> rotate -> translate
+        So the inverse is: inverse_translate -> inverse_rotate -> inverse_scale
+        """
+        import numpy as np
+        from src.gsplay.config.ui_handles import _camera_to_frustum_euler_deg
+
+        pos = np.array(camera_pos, dtype=np.float64)
+
+        # Check if transform is neutral
+        if transform_values is None or (
+            hasattr(transform_values, "is_neutral") and transform_values.is_neutral()
+        ):
+            euler_deg = _camera_to_frustum_euler_deg(camera_rot)
+            return tuple(pos), euler_deg
+
+        # Get transform components
+        translation = np.array(
+            getattr(transform_values, "translation", (0.0, 0.0, 0.0)), dtype=np.float64
+        )
+        scale = float(getattr(transform_values, "scale", 1.0))
+        scene_rot_quat = getattr(transform_values, "rotation", (1.0, 0.0, 0.0, 0.0))
+
+        # Build scene rotation matrix from quaternion
+        w, x, y, z = scene_rot_quat
+        R_scene = np.array([
+            [1 - 2*(y*y + z*z), 2*(x*y - w*z), 2*(x*z + w*y)],
+            [2*(x*y + w*z), 1 - 2*(x*x + z*z), 2*(y*z - w*x)],
+            [2*(x*z - w*y), 2*(y*z + w*x), 1 - 2*(x*x + y*y)],
+        ], dtype=np.float64)
+
+        # Inverse transform position: pos_world = ((pos_viewer - trans) @ R_scene) / scale
+        pos_world = ((pos - translation) @ R_scene) / scale
+
+        # Build camera rotation matrix from quaternion
+        cw, cx, cy, cz = camera_rot
+        R_cam = np.array([
+            [1 - 2*(cy*cy + cz*cz), 2*(cx*cy - cw*cz), 2*(cx*cz + cw*cy)],
+            [2*(cx*cy + cw*cz), 1 - 2*(cx*cx + cz*cz), 2*(cy*cz - cw*cx)],
+            [2*(cx*cz - cw*cy), 2*(cy*cz + cw*cx), 1 - 2*(cx*cx + cy*cy)],
+        ], dtype=np.float64)
+
+        # Compose: R_world = R_scene @ R_cam
+        R_world = R_scene @ R_cam
+
+        # Convert R_world to quaternion using Shepperd's method
+        trace = R_world[0, 0] + R_world[1, 1] + R_world[2, 2]
+        if trace > 0:
+            s = 0.5 / np.sqrt(trace + 1.0)
+            qw, qx = 0.25 / s, (R_world[2, 1] - R_world[1, 2]) * s
+            qy, qz = (R_world[0, 2] - R_world[2, 0]) * s, (R_world[1, 0] - R_world[0, 1]) * s
+        elif R_world[0, 0] > R_world[1, 1] and R_world[0, 0] > R_world[2, 2]:
+            s = 2.0 * np.sqrt(1.0 + R_world[0, 0] - R_world[1, 1] - R_world[2, 2])
+            qw, qx = (R_world[2, 1] - R_world[1, 2]) / s, 0.25 * s
+            qy, qz = (R_world[0, 1] + R_world[1, 0]) / s, (R_world[0, 2] + R_world[2, 0]) / s
+        elif R_world[1, 1] > R_world[2, 2]:
+            s = 2.0 * np.sqrt(1.0 + R_world[1, 1] - R_world[0, 0] - R_world[2, 2])
+            qw, qx = (R_world[0, 2] - R_world[2, 0]) / s, (R_world[0, 1] + R_world[1, 0]) / s
+            qy, qz = 0.25 * s, (R_world[1, 2] + R_world[2, 1]) / s
+        else:
+            s = 2.0 * np.sqrt(1.0 + R_world[2, 2] - R_world[0, 0] - R_world[1, 1])
+            qw, qx = (R_world[1, 0] - R_world[0, 1]) / s, (R_world[0, 2] + R_world[2, 0]) / s
+            qy, qz = (R_world[1, 2] + R_world[2, 1]) / s, 0.25 * s
+
+        # Normalize and convert to frustum frame
+        norm = np.sqrt(qw*qw + qx*qx + qy*qy + qz*qz)
+        world_rot_quat = (qw/norm, qx/norm, qy/norm, qz/norm)
+        euler_deg = _camera_to_frustum_euler_deg(world_rot_quat)
+
+        return tuple(float(x) for x in pos_world), euler_deg
 
     def _get_camera_state(
         self,
@@ -1065,49 +1230,6 @@ class UniversalGSPlay:
         if self.viewer:
             self.viewer.rerender(None)
 
-    def _clear_all_edits(self) -> None:
-        """Clear all edits."""
-        logger.info("Clearing all edits")
-
-        # Reset config
-        self.config.color_values = ColorValues()
-        self.config.alpha_scaler = 1.0
-        self.config.transform_values = TransformValues()
-        self.config.volume_filter = VolumeFilter()
-        self.config.edits_active = False
-
-        # Clear edit manager cache
-        self.edit_manager.clear_edit_history()
-
-        # Update UI
-        if self.ui:
-            self.ui.set_color_values(
-                self.config.color_values, alpha_scaler=self.config.alpha_scaler
-            )
-            self.ui.set_transform_values(self.config.transform_values)
-            if hasattr(self.ui, "set_volume_filter"):
-                self.ui.set_volume_filter(self.config.volume_filter)
-            elif self.ui.filter_type:
-                self.ui.filter_type.value = "None"
-
-        # Rerender
-        if self.viewer:
-            self.viewer.rerender(None)
-
-    def _recalculate_scene_bounds(self) -> None:
-        """Recalculate scene bounds from current frame."""
-        logger.info("Recalculating scene bounds")
-        self.scene_bounds_manager.calculate_bounds(self.model)
-
-        # Update camera controller with new bounds
-        if self.camera_controller:
-            self.camera_controller.update_scene_bounds(
-                self.scene_bounds_manager.get_bounds()
-            )
-
-        if self.viewer:
-            self.viewer.rerender(None)
-
     # =========================================================================
     # GaussianData API (New Unified Data IO)
     # =========================================================================
@@ -1295,6 +1417,14 @@ class UniversalGSPlay:
             # Cleanup UI controller
             if self.ui_controller:
                 self.ui_controller.cleanup()
+
+            # Stop stream server
+            if self.stream_server:
+                try:
+                    self.stream_server.stop()
+                    logger.debug("Stream server stopped")
+                except Exception as e:
+                    logger.debug(f"Stream server cleanup error (ignored): {e}")
 
             # Give websocket connections time to close gracefully
             # This prevents "cannot schedule new futures after shutdown" errors

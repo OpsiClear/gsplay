@@ -3,6 +3,7 @@ Compressed PLY exporter implementation using gsply.
 
 Exports Gaussian Splatting data to compressed PLY format using chunk-based
 quantization, achieving 16 bytes/splat vs 232 bytes/splat (14.5x compression).
+Uses native gsply GSTensor.save(compressed=True) for reliable export.
 
 Format: PlayCanvas Super-compressed PLY
 Reference: https://github.com/playcanvas/splat-transform
@@ -22,7 +23,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import torch
 from tqdm import tqdm
 
 from src.domain.entities import GSTensor
@@ -36,7 +36,7 @@ class CompressedPlyExporter:
     """
     Export Gaussian data to compressed PLY format using gsply.
 
-    Uses gsply library for consistent PLY I/O architecture.
+    Uses native gsply GSTensor.save(compressed=True) method for reliable export.
     Compressed PLY format stores:
     - Chunk metadata (min/max bounds for position, scale, color)
     - Packed vertex data (32-bit quantized position, rotation, scale, color)
@@ -69,12 +69,13 @@ class CompressedPlyExporter:
         """
         Export single frame of Gaussian data to compressed PLY file.
 
+        Uses native gsply GSTensor.save(compressed=True) method for reliable export.
         Supports local filesystem and cloud storage paths.
 
         Parameters
         ----------
         gaussian_data : GSTensor
-            Gaussian data to export
+            Gaussian data to export (gsply.GSTensor)
         output_path : str | Path | UniversalPath
             Output PLY file path (local or cloud)
         **options : Any
@@ -85,40 +86,37 @@ class CompressedPlyExporter:
         ValueError
             If gaussian_data is empty
         """
-        from src.infrastructure.processing.ply import write_ply
-
         # Validate input
         if len(gaussian_data) == 0:
             raise ValueError("Cannot export empty Gaussian data")
 
-        # Prepare SH coefficients (pad/truncate to 15 bands for PLY compatibility)
-        sh0, shN = self._prepare_sh_for_export(gaussian_data)
-
-        # Create modified GSTensor with prepared SH coefficients
-        # Note: Device is preserved from input gaussian_data (GPU/CPU as requested)
-        # write_ply uses gsply v0.2.5 native save() methods internally
-        # GSTensor.save() respects the device: GPU compression if on GPU, CPU if on CPU
-        export_data = GSTensor(
-            means=gaussian_data.means,
-            scales=gaussian_data.scales,
-            quats=gaussian_data.quats,
-            opacities=gaussian_data.opacities,
-            sh0=sh0.squeeze(1),  # [N, 1, 3] -> [N, 3]
-            shN=shN,
-        )
-
         # Convert to UniversalPath for cloud storage support
         output_path = UniversalPath(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Export using write_ply (uses GSTensor.save() internally)
-        # Device handling: If export_data is on GPU, uses GPU compression; if on CPU, uses CPU
-        write_ply(
-            file_path=output_path,
-            data=export_data,
-            format="compressed",
-        )
+        # Normalize data to PLY format (log scales, logit opacities) if needed
+        # Use inplace=False to avoid modifying original data
+        export_data = gaussian_data.normalize(inplace=False)
 
-        logger.debug(f"Exported compressed PLY: {output_path} ({gaussian_data.means.shape[0]} gaussians)")
+        # Use native gsply save() method with compressed=True
+        # GSTensor.save() respects the device: GPU compression if on GPU, CPU if on CPU
+        # For remote paths, save to temp file first then upload
+        if output_path.is_remote:
+            import tempfile
+            import os
+
+            with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                export_data.save(tmp_path, compressed=True)
+                with open(tmp_path, "rb") as f:
+                    output_path.write_bytes(f.read())
+            finally:
+                os.unlink(tmp_path)
+        else:
+            export_data.save(str(output_path), compressed=True)
+
+        logger.debug(f"Exported compressed PLY: {output_path} ({len(gaussian_data)} gaussians)")
 
     def export_sequence(
         self,
@@ -156,6 +154,9 @@ class CompressedPlyExporter:
         ValueError
             If model has no frames to export
         """
+        # Convert to UniversalPath for cloud storage support
+        output_dir = UniversalPath(output_dir)
+
         total_frames = model.get_total_frames()
 
         if total_frames == 0:
@@ -209,76 +210,4 @@ class CompressedPlyExporter:
 
         return exported_count
 
-    def _prepare_sh_for_export(
-        self, gaussian_data: GSTensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Prepare SH coefficients for PLY export.
-
-        Handles both full SH coefficients and RGB-only data.
-        Ensures all tensors are on the same device as input data.
-
-        Parameters
-        ----------
-        gaussian_data : GSTensor
-            Input Gaussian data
-
-        Returns
-        -------
-        tuple[torch.Tensor, torch.Tensor]
-            sh0 [N, 1, 3] and shN [N, 15, 3] for export (on same device as input)
-        """
-        # Get device and dtype from input data
-        device = gaussian_data.means.device
-        dtype = gaussian_data.means.dtype
-
-        # Check if we have full SH coefficients
-        if hasattr(gaussian_data, "sh_coeffs") and gaussian_data.shN is not None:
-            sh_coeffs = gaussian_data.shN.detach()  # Keep on same device
-
-            # Split into DC (sh0) and higher order (shN)
-            sh0 = sh_coeffs[:, 0:1, :]  # First band [N, 1, 3]
-
-            if sh_coeffs.shape[1] > 1:
-                # We have higher order coefficients
-                shN = sh_coeffs[:, 1:, :]  # Shape [N, K-1, 3]
-
-                # Pad or truncate to 15 bands (gsply expects 16 total: 1 DC + 15 higher)
-                num_higher_bands = shN.shape[1]
-                if num_higher_bands < 15:
-                    # Pad with zeros (on same device)
-                    padding = torch.zeros(
-                        shN.shape[0], 15 - num_higher_bands, 3, dtype=dtype, device=device
-                    )
-                    shN = torch.cat([shN, padding], dim=1)
-                elif num_higher_bands > 15:
-                    # Truncate
-                    shN = shN[:, :15, :]
-            else:
-                # Only DC component, create zeros for higher order (on same device)
-                shN = torch.zeros(sh0.shape[0], 15, 3, dtype=dtype, device=device)
-
-            logger.debug(
-                f"Exporting with full SH: sh_degree={gaussian_data}, "
-                f"sh0={sh0.shape}, shN={shN.shape}, device={device}"
-            )
-
-        else:
-            # Only RGB colors available - convert to SH format using gsply v0.2.5 to_sh() method
-            # Use inplace=True for better performance (we create new GSTensor for export anyway)
-            gstensor_sh = gaussian_data.to_sh(inplace=True)
-            sh0_tensor = gstensor_sh.sh0.detach()  # Keep on same device
-            
-            # Reshape from [N, 3] to [N, 1, 3] for export format
-            sh0 = sh0_tensor.unsqueeze(1)  # Shape: [N, 1, 3]
-
-            # No higher order coefficients (on same device)
-            shN = torch.zeros(sh0.shape[0], 15, 3, dtype=dtype, device=device)
-
-            logger.debug(
-                f"Exporting RGB-to-SH conversion using gsply.to_sh(): colors={gaussian_data.sh0.shape}, "
-                f"sh0={sh0.shape}, shN={shN.shape}, device={device}"
-            )
-
-        return sh0, shN
 

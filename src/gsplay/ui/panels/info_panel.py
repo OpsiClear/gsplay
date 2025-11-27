@@ -28,17 +28,26 @@ class InfoPanel:
         self._gaussian_count = "N/A"
         self._loader_fps = "N/A"
         self._render_fps = "N/A"
+        self._status = None  # Optional status message (e.g., "Idle")
 
         self._update_display()
 
     def _update_display(self) -> None:
         """Update the markdown display with current values."""
         # Compact 2-line format
-        content = (
-            f"**Frame** {self._frame_index}/{self._total_frames} | "
-            f"**Gaussians** {self._gaussian_count}  \n"
-            f"**Render** {self._render_fps} | **Load** {self._loader_fps}"
-        )
+        if self._status:
+            # Show status prominently when set
+            content = (
+                f"**{self._status}**  \n"
+                f"Frame {self._frame_index}/{self._total_frames} | "
+                f"Gaussians {self._gaussian_count}"
+            )
+        else:
+            content = (
+                f"**Frame** {self._frame_index}/{self._total_frames} | "
+                f"**Gaussians** {self._gaussian_count}  \n"
+                f"**Render** {self._render_fps} | **Load** {self._loader_fps}"
+            )
         self._markdown.content = content
 
     def set_frame_index(self, index: int | str, total: int | str | None = None) -> None:
@@ -85,6 +94,17 @@ class InfoPanel:
             self._render_fps = f"{fps:.0f} FPS"
         else:
             self._render_fps = str(fps)
+        self._update_display()
+
+    def set_status(self, status: str | None) -> None:
+        """Set status message (e.g., 'Idle - move to resume').
+
+        Parameters
+        ----------
+        status : str | None
+            Status message to display, or None to clear status
+        """
+        self._status = status
         self._update_display()
 
 

@@ -20,6 +20,7 @@ from gsplay_launcher.api.routes import (
 )
 from gsplay_launcher.config import LauncherConfig
 from gsplay_launcher.services.file_browser import FileBrowserService
+from gsplay_launcher.services.id_encoder import set_config as set_encoder_config
 from gsplay_launcher.services.instance_manager import InstanceManager
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if _config is None:
         raise RuntimeError("Config not set before creating app")
 
+    # Initialize ID encoder for secure URLs
+    set_encoder_config(_config)
+    logger.debug("ID encoder initialized")
+
     # Startup: initialize instance manager
     logger.info("Initializing instance manager...")
     manager = InstanceManager(_config)
@@ -105,7 +110,7 @@ def create_app(config: LauncherConfig | None = None) -> FastAPI:
         set_config(config)
 
     app = FastAPI(
-        title="GSPlay Launcher",
+        title="GSPlay",
         description="Launch and manage Gaussian Splatting GSPlay instances",
         version="0.1.0",
         lifespan=lifespan,

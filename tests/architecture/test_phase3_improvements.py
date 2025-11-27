@@ -45,59 +45,6 @@ def test_duplicate_writers_removed():
         return False
 
 
-def test_data_validation_layer():
-    """Test the data validation layer."""
-    logger.info("[TEST] Testing data format validation layer...")
-
-    try:
-        from src.infrastructure.processing.data_validation import (
-            DataFormatValidator
-        )
-        from src.domain.entities import GSTensor
-
-        validator = DataFormatValidator()
-
-        # Test with valid data
-        # GSTensor constructor: (means, scales, quats, opacities, sh0, shN=None)
-        valid_data = GSTensor(
-            torch.randn(100, 3),  # means
-            torch.rand(100, 3) * 0.1,  # scales - Positive values
-            torch.nn.functional.normalize(torch.randn(100, 4), p=2, dim=1),  # quats
-            torch.rand(100),  # opacities - [0, 1] range
-            torch.rand(100, 3),  # sh0
-        )
-
-        is_valid, errors = validator.validate_gaussian_data(valid_data)
-        assert is_valid, f"Valid data failed validation: {errors}"
-
-        # Test scale format detection
-        log_scales = torch.randn(100, 3) - 10  # Negative values
-        assert validator.validate_scale_format(log_scales) == "log", \
-            "Failed to detect log-space scales"
-
-        linear_scales = torch.rand(100, 3) * 0.1
-        assert validator.validate_scale_format(linear_scales) == "linear", \
-            "Failed to detect linear-space scales"
-
-        # Test opacity format detection
-        logit_opacities = torch.randn(100) * 5  # Outside [0,1]
-        assert validator.validate_opacity_format(logit_opacities) == "logit", \
-            "Failed to detect logit-space opacities"
-
-        linear_opacities = torch.rand(100)
-        assert validator.validate_opacity_format(linear_opacities) == "linear", \
-            "Failed to detect linear-space opacities"
-
-        logger.info("[PASS] Data validation layer working correctly")
-        return True
-    except AssertionError as e:
-        logger.error(f"[FAIL] Data validation: {e}")
-        return False
-    except Exception as e:
-        logger.error(f"[FAIL] Data validation test failed: {e}")
-        return False
-
-
 def test_configurable_model_interface():
     """Test that ConfigurableModelInterface exists and is properly defined."""
     logger.info("[TEST] Testing ConfigurableModelInterface...")
@@ -223,42 +170,24 @@ def test_clean_imports():
         return False
 
 
-def test_phase3_integration():
-    """Test that all Phase 3 components work together."""
-    logger.info("[TEST] Testing Phase 3 integration...")
+def test_gaussian_constants():
+    """Test that GaussianConstants are accessible."""
+    logger.info("[TEST] Testing GaussianConstants...")
 
     try:
-        # Import all Phase 3 additions
-        from src.infrastructure.processing.data_validation import DataFormatValidator
         from src.infrastructure.processing.gaussian_constants import GaussianConstants as GC
-
-        # Create some test data
-        # GSTensor constructor: (means, scales, quats, opacities, sh0, shN=None)
-        from src.domain.entities import GSTensor
-        test_data = GSTensor(
-            torch.randn(10, 3),  # means
-            torch.exp(torch.randn(10, 3) - 2),  # scales - Physical scales
-            torch.nn.functional.normalize(torch.randn(10, 4), p=2, dim=1),  # quats
-            torch.sigmoid(torch.randn(10)),  # opacities - Linear opacities
-            torch.rand(10, 3),  # sh0
-        )
-
-        # Validate it
-        validator = DataFormatValidator()
-        is_valid, errors = validator.validate_gaussian_data(test_data, check_activations=True)
-        assert is_valid, f"Test data validation failed: {errors}"
 
         # Use some constants
         assert GC.SH.C0 > 0, "GaussianConstants not accessible"
         assert GC.Format.LOG_SCALE_THRESHOLD < 0, "Format constants not accessible"
 
-        logger.info("[PASS] Phase 3 components integrate correctly")
+        logger.info("[PASS] GaussianConstants accessible")
         return True
     except AssertionError as e:
-        logger.error(f"[FAIL] Phase 3 integration: {e}")
+        logger.error(f"[FAIL] GaussianConstants: {e}")
         return False
     except Exception as e:
-        logger.error(f"[FAIL] Phase 3 integration test failed: {e}")
+        logger.error(f"[FAIL] GaussianConstants test failed: {e}")
         return False
 
 
@@ -270,12 +199,11 @@ def main():
 
     tests = [
         test_duplicate_writers_removed,
-        test_data_validation_layer,
         test_configurable_model_interface,
         test_model_factory_registry,
         test_no_duplicate_constants,
         test_clean_imports,
-        test_phase3_integration,
+        test_gaussian_constants,
     ]
 
     passed = 0

@@ -1028,22 +1028,23 @@ def setup_ui_layout(
     play_speed = None
     render_quality = None
     jpeg_quality_slider = None
+    auto_quality_checkbox = None
     setup_camera_sync = None
 
-    # Render settings and playback controls (after data loader)
+    # Playback controls (after data loader) - FPS and frame controls at root level
     if camera_controller is not None:
         from src.gsplay.rendering.camera import (
-            create_render_controls,
+            create_fps_control,
+            create_quality_controls,
             create_playback_controls,
             create_view_controls,
         )
 
-        # Spacer before render/playback section
+        # Spacer before playback section
         server.gui.add_markdown(content=" ")
 
-        # Render settings (FPS, Quality, JPEG)
-        render_controls = create_render_controls(server, camera_controller, config)
-        play_speed, render_quality, jpeg_quality_slider = render_controls
+        # FPS control at root level
+        play_speed = create_fps_control(server, config)
 
         # Playback controls (Frame slider + Play/Pause button)
         time_slider, auto_play = create_playback_controls(server, config)
@@ -1051,7 +1052,7 @@ def setup_ui_layout(
     # Spacer before tabs
     server.gui.add_markdown(content=" ")
 
-    # Create tab group for Config/Export/View
+    # Create tab group for View/Config/Convert
     main_tabs = server.gui.add_tab_group()
 
     # Initialize export controls (may be hidden in view-only mode)
@@ -1062,8 +1063,25 @@ def setup_ui_layout(
     config_path_input = None
     config_buttons = None
 
-    # Config tab
+    # View tab (camera controls) - first tab
+    if camera_controller is not None:
+        with main_tabs.add_tab("View", icon=None):
+            view_controls = create_view_controls(server, camera_controller)
+            zoom_slider, azimuth_slider, elevation_slider, roll_slider, setup_camera_sync = view_controls
+
+        # Set up camera sync after all controls are created
+        if setup_camera_sync:
+            setup_camera_sync()
+
+    # Config tab (quality settings + config menu)
     with main_tabs.add_tab("Config", icon=None):
+        # Quality controls (Quality, JPEG, Auto Quality)
+        if camera_controller is not None:
+            render_quality, jpeg_quality_slider, auto_quality_checkbox = create_quality_controls(
+                server, config
+            )
+
+        # Config menu (processing mode, grid, axis, save/load)
         (
             processing_mode_dropdown,
             cfg_path_input,
@@ -1091,17 +1109,6 @@ def setup_ui_layout(
                 export_device,
                 export_ply_button,
             ) = create_export_menu(server, config)
-
-    # View tab (camera controls)
-    if camera_controller is not None:
-        # View tab (includes rotation controls)
-        with main_tabs.add_tab("View", icon=None):
-            view_controls = create_view_controls(server, camera_controller)
-            zoom_slider, azimuth_slider, elevation_slider, roll_slider, setup_camera_sync = view_controls
-
-        # Set up camera sync after all controls are created
-        if setup_camera_sync:
-            setup_camera_sync()
 
     # Spacer between tab groups
     server.gui.add_markdown(content=" ")
@@ -1134,6 +1141,17 @@ def setup_ui_layout(
     with edit_tabs.add_tab("Color+", icon=None):
         color_advanced_controls = create_color_advanced_controls(server, config)
 
+    # Spacer before terminate button
+    server.gui.add_markdown(content=" ")
+
+    # Terminate instance button at the bottom
+    terminate_button = server.gui.add_button(
+        "Terminate Instance",
+        icon=viser.Icon.POWER,
+        color="red",
+        hint="Shut down this viewer instance",
+    )
+
     # Assemble into UIHandles dataclass
     ui = UIHandles(
         # Data loader
@@ -1147,6 +1165,7 @@ def setup_ui_layout(
         play_speed=play_speed,
         render_quality=render_quality,
         jpeg_quality_slider=jpeg_quality_slider,
+        auto_quality_checkbox=auto_quality_checkbox,
         # Color adjustments - basic (from color_controls dict)
         temperature_slider=color_controls["temperature"],
         tint_slider=color_controls["tint"],
@@ -1237,6 +1256,8 @@ def setup_ui_layout(
         # Config menu
         config_path_input=config_path_input,
         config_buttons=config_buttons,
+        # Instance control
+        terminate_button=terminate_button,
     )
 
     logger.debug("UI layout created successfully")

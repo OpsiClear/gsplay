@@ -49,6 +49,7 @@ class WebSocketProxy:
         self,
         client_ws: WebSocket,
         instance: "GSPlayInstance",
+        port_override: int | None = None,
     ) -> None:
         """Proxy WebSocket connection to a GSPlay instance.
 
@@ -58,10 +59,13 @@ class WebSocketProxy:
             The incoming client WebSocket connection.
         instance : GSPlayInstance
             The target GSPlay instance.
+        port_override : int | None
+            Optional port override. If None, uses instance.port.
         """
         # Determine backend URL
         backend_host = "127.0.0.1" if instance.host == "0.0.0.0" else instance.host
-        backend_url = f"ws://{backend_host}:{instance.port}/"
+        port = port_override if port_override is not None else instance.port
+        backend_url = f"ws://{backend_host}:{port}/"
 
         # Get subprotocol from client connection
         subprotocols = client_ws.scope.get("subprotocols", [])
@@ -79,9 +83,17 @@ class WebSocketProxy:
         )
 
         try:
+            # Set Origin and Host headers to match what viser expects (localhost)
+            # This bypasses viser's origin checking for proxied connections
+            extra_headers = {
+                "Origin": f"http://{backend_host}:{port}",
+                "Host": f"{backend_host}:{port}",
+            }
+
             async with websockets.connect(
                 backend_url,
                 subprotocols=subprotocols if subprotocols else None,
+                additional_headers=extra_headers,
                 close_timeout=5,
                 ping_interval=20,
                 ping_timeout=20,
