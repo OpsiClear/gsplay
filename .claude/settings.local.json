@@ -100,7 +100,14 @@
       "Bash(else echo \"src directory does NOT exist - good\")",
       "Bash(nvidia-smi:*)",
       "Bash(curl:*)",
-      "WebFetch(domain:docs.gsplat.studio)"
+      "WebFetch(domain:docs.gsplat.studio)",
+      "Bash(.venv/bin/python:*)",
+      "Bash(.venv/bin/ruff check launcher/gsplay_launcher/api/routes.py launcher/gsplay_launcher/services/websocket_proxy.py launcher/gsplay_launcher/config.py)",
+      "Bash(PYTHONPATH=launcher .venv/bin/python:*)",
+      "Bash(journalctl:*)",
+      "Bash(systemctl:*)",
+      "Bash(timeout:*)",
+      "Bash(.venv/bin/ruff:*)"
     ],
     "deny": [],
     "ask": []

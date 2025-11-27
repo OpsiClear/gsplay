@@ -1,12 +1,19 @@
-"""FastAPI routes for instance management."""
+"""FastAPI routes for instance management.
+
+This module defines all API routes for the GSPlay Launcher:
+- Instance management (CRUD operations)
+- GPU information
+- File browser
+- WebSocket/HTTP proxy for accessing GSPlay instances
+"""
 
 from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
-
-import subprocess
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, status
+from fastapi.responses import Response
 
 from gsplay_launcher.api.schemas import (
     BrowseConfigResponse,
@@ -22,11 +29,13 @@ from gsplay_launcher.api.schemas import (
     InstanceResponse,
     PortInfoResponse,
 )
+from gsplay_launcher.models import InstanceStatus
 from gsplay_launcher.services.file_browser import (
     FileBrowserService,
     PathNotFoundError,
     PathSecurityError,
 )
+from gsplay_launcher.services.gpu_info import get_gpu_service
 from gsplay_launcher.services.instance_manager import (
     ConfigPathError,
     InstanceManager,
@@ -37,10 +46,24 @@ from gsplay_launcher.services.process_manager import ProcessStartError
 
 logger = logging.getLogger(__name__)
 
-# Router for instance endpoints
+# =============================================================================
+# Configuration
+# =============================================================================
+
+# Status values that indicate an instance can accept proxied connections
+_PROXY_ALLOWED_STATUSES = frozenset({
+    InstanceStatus.STARTING,
+    InstanceStatus.RUNNING,
+    InstanceStatus.ORPHANED,
+})
+
+# Main API router (prefixed with /api)
 router = APIRouter(prefix="/api", tags=["instances"])
 
-# Global instance manager (set by app.py)
+# =============================================================================
+# Dependency Injection
+# =============================================================================
+
 _instance_manager: InstanceManager | None = None
 
 
@@ -70,6 +93,11 @@ def set_file_browser(browser: FileBrowserService) -> None:
     """Set the global file browser service."""
     global _file_browser
     _file_browser = browser
+
+
+# =============================================================================
+# Instance Management Routes
+# =============================================================================
 
 
 @router.get(
@@ -151,6 +179,7 @@ def create_instance(
             view_only=body.view_only,
             compact=body.compact,
             log_level=body.log_level,
+            custom_ip=body.custom_ip,
         )
         return InstanceResponse.from_instance(instance)
     except ConfigPathError as e:
@@ -213,71 +242,9 @@ def get_next_port(
     )
 
 
-def _parse_nvidia_smi() -> GpuInfoResponse | None:
-    """Parse nvidia-smi output for GPU information."""
-    try:
-        # Query GPU info with specific format
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,temperature.gpu",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            return None
-
-        gpus = []
-        for line in result.stdout.strip().split("\n"):
-            if not line.strip():
-                continue
-            parts = [p.strip() for p in line.split(",")]
-            if len(parts) >= 6:
-                gpus.append(
-                    GpuInfo(
-                        index=int(parts[0]),
-                        name=parts[1],
-                        memory_used=int(parts[2]),
-                        memory_total=int(parts[3]),
-                        utilization=int(parts[4]),
-                        temperature=int(parts[5]),
-                    )
-                )
-
-        # Get driver and CUDA version
-        driver_result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        driver_version = driver_result.stdout.strip().split("\n")[0] if driver_result.returncode == 0 else "unknown"
-
-        # Parse CUDA version from nvidia-smi output header
-        header_result = subprocess.run(
-            ["nvidia-smi"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        cuda_version = "unknown"
-        if header_result.returncode == 0:
-            for line in header_result.stdout.split("\n"):
-                if "CUDA Version:" in line:
-                    cuda_version = line.split("CUDA Version:")[1].strip().split()[0]
-                    break
-
-        return GpuInfoResponse(
-            gpus=gpus,
-            driver_version=driver_version,
-            cuda_version=cuda_version,
-        )
-    except Exception as e:
-        logger.warning("Failed to get GPU info: %s", e)
-        return None
+# =============================================================================
+# GPU Information Routes
+# =============================================================================
 
 
 @router.get(
@@ -288,16 +255,33 @@ def _parse_nvidia_smi() -> GpuInfoResponse | None:
 )
 def get_gpu_info() -> GpuInfoResponse:
     """Get GPU information from nvidia-smi."""
-    info = _parse_nvidia_smi()
+    gpu_service = get_gpu_service()
+    info = gpu_service.get_info()
     if info is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "nvidia-smi not available or failed",
         )
-    return info
+    return GpuInfoResponse(
+        gpus=[
+            GpuInfo(
+                index=gpu.index,
+                name=gpu.name,
+                memory_used=gpu.memory_used,
+                memory_total=gpu.memory_total,
+                utilization=gpu.utilization,
+                temperature=gpu.temperature,
+            )
+            for gpu in info.gpus
+        ],
+        driver_version=info.driver_version,
+        cuda_version=info.cuda_version,
+    )
 
 
-# Browse endpoints
+# =============================================================================
+# File Browser Routes
+# =============================================================================
 
 
 @router.get(
@@ -305,14 +289,21 @@ def get_gpu_info() -> GpuInfoResponse:
     response_model=BrowseConfigResponse,
     summary="Get browse configuration",
 )
-def get_browse_config() -> BrowseConfigResponse:
+def get_browse_config(
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> BrowseConfigResponse:
     """Check if file browser is enabled and get root path."""
     browser = get_file_browser()
     if browser is None:
-        return BrowseConfigResponse(enabled=False)
+        return BrowseConfigResponse(
+            enabled=False,
+            external_url=manager.config.external_url,
+        )
     return BrowseConfigResponse(
         enabled=True,
         root_path=str(browser.root),
+        default_custom_ip=manager.config.custom_ip,
+        external_url=manager.config.external_url,
     )
 
 
@@ -400,6 +391,7 @@ def launch_from_browser(
             cache_size=body.cache_size,
             view_only=body.view_only,
             compact=body.compact,
+            custom_ip=body.custom_ip,
         )
         return InstanceResponse.from_instance(instance)
     except PathSecurityError as e:
@@ -412,3 +404,165 @@ def launch_from_browser(
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
     except ProcessStartError as e:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e))
+
+
+# =============================================================================
+# WebSocket Proxy Routes - Access GSPlay instances via /v/{instance_id}/
+# =============================================================================
+
+# Separate router for proxy (no /api prefix)
+proxy_router = APIRouter(tags=["proxy"])
+
+
+async def _proxy_websocket_impl(
+    websocket: WebSocket,
+    instance_id: str,
+    manager: InstanceManager,
+) -> None:
+    """Internal implementation for WebSocket proxy."""
+    from gsplay_launcher.services.websocket_proxy import get_proxy
+
+    try:
+        instance = manager.get(instance_id)
+    except InstanceNotFoundError:
+        await websocket.close(code=4004, reason="Instance not found")
+        return
+
+    # Check if instance can accept connections
+    if instance.status not in _PROXY_ALLOWED_STATUSES:
+        await websocket.close(code=4003, reason="Instance not running")
+        return
+
+    # Accept the WebSocket connection with the requested subprotocol (viser requires this)
+    requested_subprotocol = None
+    if websocket.scope.get("subprotocols"):
+        requested_subprotocol = websocket.scope["subprotocols"][0]
+
+    await websocket.accept(subprotocol=requested_subprotocol)
+
+    # Proxy to backend
+    proxy = get_proxy()
+    await proxy.proxy(websocket, instance)
+
+
+@proxy_router.websocket("/v/{instance_id}/")
+async def proxy_websocket_with_slash(
+    websocket: WebSocket,
+    instance_id: str,
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> None:
+    """Proxy WebSocket connection to a GSPlay instance (with trailing slash)."""
+    await _proxy_websocket_impl(websocket, instance_id, manager)
+
+
+@proxy_router.websocket("/v/{instance_id}")
+async def proxy_websocket_no_slash(
+    websocket: WebSocket,
+    instance_id: str,
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> None:
+    """Proxy WebSocket connection to a GSPlay instance (without trailing slash)."""
+    await _proxy_websocket_impl(websocket, instance_id, manager)
+
+
+# Script to inject into HTML to prevent viser from adding ?websocket= to URL
+_URL_CLEANUP_SCRIPT = b"""<script>
+(function(){
+  const orig = history.replaceState.bind(history);
+  history.replaceState = function(state, title, url) {
+    if (url && typeof url === 'string' && url.includes('websocket=')) {
+      url = url.split('?')[0];
+    }
+    return orig(state, title, url);
+  };
+})();
+</script>"""
+
+
+async def _proxy_http_impl(
+    request: Request,
+    instance_id: str,
+    path: str,
+    manager: InstanceManager,
+) -> Response:
+    """Internal implementation for HTTP proxy."""
+    try:
+        instance = manager.get(instance_id)
+    except InstanceNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Instance not found")
+
+    # Check if instance can accept connections
+    if instance.status not in _PROXY_ALLOWED_STATUSES:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Instance not running")
+
+    # Build backend URL
+    backend_host = "127.0.0.1" if instance.host == "0.0.0.0" else instance.host
+    backend_url = f"http://{backend_host}:{instance.port}/{path}"
+
+    # Forward query string
+    if request.url.query:
+        backend_url += f"?{request.url.query}"
+
+    # Proxy the request
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            # Forward request
+            response = await client.request(
+                method=request.method,
+                url=backend_url,
+                headers={
+                    k: v for k, v in request.headers.items()
+                    if k.lower() not in ("host", "content-length")
+                },
+                content=await request.body() if request.method in ("POST", "PUT", "PATCH") else None,
+            )
+
+            content = response.content
+            content_type = response.headers.get("content-type", "")
+
+            # Inject URL cleanup script into HTML responses (root page only)
+            if path == "" and "text/html" in content_type:
+                # Insert script right after <head>
+                content = content.replace(b"<head>", b"<head>" + _URL_CLEANUP_SCRIPT, 1)
+
+            # Return proxied response
+            return Response(
+                content=content,
+                status_code=response.status_code,
+                headers={
+                    k: v for k, v in response.headers.items()
+                    if k.lower() not in ("content-encoding", "transfer-encoding", "content-length")
+                },
+            )
+
+        except httpx.ConnectError:
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                f"Cannot connect to instance {instance_id}",
+            )
+        except httpx.TimeoutException:
+            raise HTTPException(
+                status.HTTP_504_GATEWAY_TIMEOUT,
+                f"Instance {instance_id} timed out",
+            )
+
+
+@proxy_router.get("/v/{instance_id}/")
+async def proxy_http_root(
+    request: Request,
+    instance_id: str,
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> Response:
+    """Proxy HTTP requests to a GSPlay instance root."""
+    return await _proxy_http_impl(request, instance_id, "", manager)
+
+
+@proxy_router.get("/v/{instance_id}/{path:path}")
+async def proxy_http_path(
+    request: Request,
+    instance_id: str,
+    path: str,
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> Response:
+    """Proxy HTTP requests to a GSPlay instance with path."""
+    return await _proxy_http_impl(request, instance_id, path, manager)

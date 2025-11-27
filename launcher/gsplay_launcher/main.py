@@ -55,6 +55,14 @@ def main(
         str | None,
         tyro.conf.arg(help="Root directory for file browser (omit to disable)"),
     ] = None,
+    custom_ip: Annotated[
+        str | None,
+        tyro.conf.arg(help="Default IP address for instance URLs (omit for auto-detect)"),
+    ] = None,
+    external_url: Annotated[
+        str | None,
+        tyro.conf.arg(help="External base URL for proxy access (e.g., https://gsplay.4dgst.win)"),
+    ] = None,
 ) -> None:
     """GSPlay Launcher - Manage Gaussian Splatting GSPlay instances.
 
@@ -84,7 +92,8 @@ def main(
     # Resolve browse path if provided
     browse_path_resolved: Path | None = None
     if browse_path:
-        browse_path_resolved = (cwd / browse_path).resolve()
+        # Path() handles both absolute and relative paths correctly
+        browse_path_resolved = Path(browse_path).resolve()
         if not browse_path_resolved.is_dir():
             logger.error("Browse path does not exist or is not a directory: %s", browse_path_resolved)
             raise SystemExit(1)
@@ -99,6 +108,8 @@ def main(
         data_dir=data_dir_path,
         gsplay_script=gsplay_script_path,
         browse_path=browse_path_resolved,
+        custom_ip=custom_ip,
+        external_url=external_url.rstrip('/') if external_url else None,
     )
 
     # Validate configuration
@@ -119,6 +130,14 @@ def main(
         logger.info("  Browse path: %s", browse_path_resolved)
     else:
         logger.info("  Browse path: disabled")
+    if custom_ip:
+        logger.info("  Custom IP: %s", custom_ip)
+    else:
+        logger.info("  Custom IP: auto-detect")
+    if external_url:
+        logger.info("  External URL: %s", external_url)
+    else:
+        logger.info("  External URL: disabled (use --external-url to enable)")
 
     # Set config and create app
     set_config(config)

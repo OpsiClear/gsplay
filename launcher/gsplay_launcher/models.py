@@ -11,12 +11,19 @@ from typing import Any
 from uuid import uuid4
 
 
-def _get_machine_hostname() -> str:
-    """Get machine hostname for external URL generation."""
+def _get_machine_ip() -> str:
+    """Get machine's Ethernet IP address for external URL generation."""
     try:
-        return socket.gethostname()
+        # Create a socket to determine the primary network interface IP
+        # This doesn't actually connect, just determines which interface would be used
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
     except Exception:
-        return "localhost"
+        # Fallback to localhost if we can't determine IP
+        return "127.0.0.1"
 
 
 class InstanceStatus(str, Enum):
@@ -75,6 +82,8 @@ class GSPlayInstance:
         Whether to use compact/mobile UI.
     log_level : str
         Logging level for the gsplay.
+    custom_ip : str | None
+        Custom IP address for URL generation (None = auto-detect).
     status : InstanceStatus
         Current instance status.
     pid : int | None
@@ -99,6 +108,7 @@ class GSPlayInstance:
     view_only: bool = False
     compact: bool = False
     log_level: str = "INFO"
+    custom_ip: str | None = None  # Custom IP for URL (None = auto-detect)
     status: InstanceStatus = InstanceStatus.PENDING
     pid: int | None = None
     created_at: str = field(default_factory=_now_iso)
@@ -109,9 +119,12 @@ class GSPlayInstance:
     @property
     def url(self) -> str:
         """Get the gsplay URL for external access."""
-        # Use machine hostname for external access when bound to 0.0.0.0
+        # Use custom IP if provided, otherwise auto-detect
+        if self.custom_ip:
+            return f"http://{self.custom_ip}:{self.port}"
+        # Use machine IP for external access when bound to 0.0.0.0
         if self.host == "0.0.0.0":
-            return f"http://{_get_machine_hostname()}:{self.port}"
+            return f"http://{_get_machine_ip()}:{self.port}"
         return f"http://{self.host}:{self.port}"
 
     @property

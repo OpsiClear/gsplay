@@ -115,6 +115,7 @@ class InstanceManager:
         view_only: bool = False,
         compact: bool = False,
         log_level: str = "INFO",
+        custom_ip: str | None = None,
     ) -> GSPlayInstance:
         """Create and start a new gsplay instance.
 
@@ -153,8 +154,8 @@ class InstanceManager:
         ProcessStartError
             If gsplay fails to start.
         """
-        # Validate config path
-        path = Path(config_path)
+        # Validate config path (handle both absolute and relative paths)
+        path = Path(config_path).resolve()
         if not path.exists():
             raise ConfigPathError(config_path, "Path does not exist")
 
@@ -194,6 +195,7 @@ class InstanceManager:
             view_only=view_only,
             compact=compact,
             log_level=log_level,
+            custom_ip=custom_ip,
         )
 
         # Start the process

@@ -98,6 +98,9 @@ def load_ply(
     except FileNotFoundError:
         raise
     except Exception as e:
+        # Re-raise InterruptRenderException without wrapping so renderer can handle it
+        if e.__class__.__name__ == "InterruptRenderException":
+            raise
         raise ValueError(f"Failed to load PLY file {file_path.name}: {e}") from e
 
 
@@ -134,6 +137,9 @@ def load_ply_as_gsdata(
     except FileNotFoundError:
         raise
     except Exception as e:
+        # Re-raise InterruptRenderException without wrapping so renderer can handle it
+        if e.__class__.__name__ == "InterruptRenderException":
+            raise
         raise ValueError(f"Failed to load PLY file {file_path.name}: {e}") from e
 
 
@@ -185,4 +191,7 @@ def load_ply_as_gstensor(
     except FileNotFoundError:
         raise
     except Exception as e:
+        # Re-raise InterruptRenderException without wrapping so renderer can handle it
+        if e.__class__.__name__ == "InterruptRenderException":
+            raise
         raise ValueError(f"Failed to load PLY file {file_path.name}: {e}") from e

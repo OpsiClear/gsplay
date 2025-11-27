@@ -15,17 +15,14 @@ dependencies = [
     "tyro>=0.8.0", # CLI argument parsing
     # Gaussian Splatting Rendering
     # gsplat is installed via install.ps1/install.sh with --no-build-isolation
-    "gsmod>=0.1.2",  # LUT operations and filtering
-
+    "gsmod>=0.1.2", # LUT operations and filtering
     # GIFStream Support
-    "pyyaml>=6.0",  # Config file parsing
-
+    "pyyaml>=6.0", # Config file parsing
     # Launcher (local)
     "gsplay-launcher",
-
     # Spatial Operations
-    "scipy>=1.10.0",  # KDTree for KNN
-    "tqdm>=4.66.0",  # Progress bars for console output
+    "scipy>=1.10.0", # KDTree for KNN
+    "tqdm>=4.66.0", # Progress bars for console output
 ]
 
 [project.optional-dependencies]

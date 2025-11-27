@@ -33,6 +33,11 @@ class LauncherConfig:
         Timeout in seconds for graceful process shutdown.
     browse_path : Path | None
         Root directory for file browser (None = disabled).
+    custom_ip : str | None
+        Default custom IP for instance URLs (None = auto-detect).
+    external_url : str | None
+        External base URL for reverse proxy access (e.g., https://gsplay.4dgst.win).
+        When set, enables proxy routes at /v/{instance_id}/ for external access.
     """
 
     host: str = "0.0.0.0"  # Bind to all interfaces for external access
@@ -46,6 +51,8 @@ class LauncherConfig:
     )
     process_stop_timeout: float = 10.0
     browse_path: Path | None = None  # Root for file browser (None = disabled)
+    custom_ip: str | None = None  # Default custom IP for URLs (None = auto)
+    external_url: str | None = None  # External base URL for proxy access (e.g., https://gsplay.4dgst.win)
 
     @property
     def state_file(self) -> Path:

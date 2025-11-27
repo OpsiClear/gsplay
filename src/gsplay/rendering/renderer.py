@@ -246,6 +246,15 @@ def create_render_function(
             # Actual rasterization
             _checkpoint_rasterize = time.perf_counter()
             render_colors, render_alphas, _ = _rasterization(**render_kwargs)
+            
+            # CRITICAL: Synchronize GPU immediately after rasterization to prevent
+            # partial frame rendering during camera movement. This ensures all GPU
+            # work completes before we proceed to post-processing and data transfer.
+            # Without this, InterruptRenderException can cause incomplete GPU buffers
+            # to be transferred, resulting in half-updated images in the browser.
+            if device.startswith("cuda"):
+                torch.cuda.synchronize()
+            
             # Normalize output layout to channels-last for downstream math
             if render_colors.dim() == 4 and render_colors.shape[-1] not in (3, 4) and render_colors.shape[1] in (3, 4):
                 render_colors = render_colors.permute(0, 2, 3, 1).contiguous()

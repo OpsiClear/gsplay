@@ -19,6 +19,7 @@ class CreateInstanceRequest(BaseModel):
     view_only: bool = Field(False, description="Hide editing UI")
     compact: bool = Field(False, description="Use compact/mobile UI")
     log_level: str = Field("INFO", description="Logging level")
+    custom_ip: str | None = Field(None, description="Custom IP for Open button URL (auto-detect if null)")
 
 
 class InstanceResponse(BaseModel):
@@ -144,6 +145,8 @@ class BrowseConfigResponse(BaseModel):
 
     enabled: bool
     root_path: str | None = None
+    default_custom_ip: str | None = None
+    external_url: str | None = None  # External base URL for proxy access (e.g., https://gsplay.4dgst.win)
 
 
 class BrowseLaunchRequest(BaseModel):
@@ -156,3 +159,4 @@ class BrowseLaunchRequest(BaseModel):
     cache_size: int = Field(100, description="Frame cache size")
     view_only: bool = Field(False, description="Hide editing UI")
     compact: bool = Field(False, description="Use compact/mobile UI")
+    custom_ip: str | None = Field(None, description="Custom IP for Open button URL (auto-detect if null)")

@@ -27,3 +27,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["gsplay_launcher*"]
+
+[tool.setuptools.package-data]
+gsplay_launcher = ["templates/*.html"]

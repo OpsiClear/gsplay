@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GSPlay Launcher</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg-body: #09090b;
+      --bg-card: #18181b;
+      --bg-card-hover: #27272a;
+      --border-color: #27272a;
+      --text-primary: #e4e4e7;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --accent-primary: #3b82f6;
+      --accent-primary-hover: #2563eb;
+      --accent-danger: #ef4444;
+      --accent-success: #22c55e;
+      --accent-warning: #eab308;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-body);
+      color: var(--text-primary);
+      min-height: 100vh;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* Header */
+    .top-bar {
+      background: rgba(9, 9, 11, 0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      padding: 16px 24px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo {
+      width: 24px;
+      height: 24px;
+      background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
+      border-radius: 6px;
+    }
+
+    .brand h1 {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    .version-badge {
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--bg-card);
+      padding: 2px 8px;
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
+    }
+
+    /* Layout */
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    /* System Status Section */
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .system-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .gpu-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px;
+      transition: all 0.2s;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .gpu-card:hover {
+      border-color: var(--text-secondary);
+      transform: translateY(-1px);
+    }
+
+    .gpu-card.selected {
+      border-color: var(--accent-primary);
+      background: rgba(59, 130, 246, 0.05);
+      box-shadow: 0 0 0 1px var(--accent-primary);
+    }
+
+    .gpu-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .gpu-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .gpu-name {
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--text-primary);
+    }
+
+    .gpu-id {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .gpu-sep {
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    .gpu-temp {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--accent-success);
+      background: rgba(34, 197, 94, 0.1);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    .gpu-temp.hot {
+      color: var(--accent-danger);
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    .stat-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+      font-size: 11px;
+    }
+
+    .stat-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .stat-label {
+      width: 32px;
+      color: var(--text-secondary);
+      font-weight: 500;
+      font-size: 10px;
+    }
+
+    .progress-bg {
+      flex: 1;
+      height: 3px;
+      background: #27272a;
+      border-radius: 1.5px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 1.5px;
+      transition: width 0.5s ease;
+    }
+
+    .stat-value {
+      width: 32px;
+      text-align: right;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-secondary);
+      font-size: 10px;
+    }
+
+    /* Toolbar */
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .toolbar-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+    }
+
+    .btn-sm {
+      padding: 4px 10px;
+      font-size: 12px;
+      border-radius: 6px;
+    }
+
+    .btn-primary {
+      background: var(--accent-primary);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-primary-hover);
+    }
+
+    .btn-secondary {
+      background: var(--bg-card);
+      border-color: var(--border-color);
+      color: var(--text-primary);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--text-secondary);
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--accent-danger);
+      border-color: rgba(239, 68, 68, 0.2);
+    }
+
+    .btn-danger:hover {
+      background: rgba(239, 68, 68, 0.2);
+    }
+
+    .btn-success {
+      background: rgba(34, 197, 94, 0.1);
+      color: var(--accent-success);
+      border-color: rgba(34, 197, 94, 0.2);
+    }
+
+    .btn-success:hover {
+      background: rgba(34, 197, 94, 0.2);
+    }
+
+    /* Forms */
+    .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+      display: none;
+      animation: slideDown 0.2s ease-out;
+    }
+
+    .panel.show {
+      display: block;
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-group.wide {
+      grid-column: 1 / -1;
+    }
+
+    label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    input[type="text"],
+    input[type="number"] {
+      background: #09090b;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 13px;
+      transition: border-color 0.2s;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+    }
+
+    .settings-bar {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-bottom: 24px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+
+    .settings-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .settings-group label {
+      margin-bottom: 0;
+      white-space: nowrap;
+    }
+
+    .checkbox-group {
+      flex-direction: row;
+      align-items: center;
+      gap: 16px;
+      height: 100%;
+    }
+
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    /* Table */
+    .table-container {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th {
+      background: #202023;
+      text-align: left;
+      padding: 12px 16px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--text-primary);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:hover td {
+      background: var(--bg-card-hover);
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .status-running {
+      background: rgba(34, 197, 94, 0.1);
+      color: var(--accent-success);
+    }
+
+    .status-running .status-dot {
+      background: var(--accent-success);
+    }
+
+    .status-starting {
+      background: rgba(234, 179, 8, 0.1);
+      color: var(--accent-warning);
+    }
+
+    .status-starting .status-dot {
+      background: var(--accent-warning);
+    }
+
+    .status-stopped {
+      background: #27272a;
+      color: var(--text-muted);
+    }
+
+    .status-stopped .status-dot {
+      background: var(--text-muted);
+    }
+
+    .status-failed {
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--accent-danger);
+    }
+
+    .status-failed .status-dot {
+      background: var(--accent-danger);
+    }
+
+    .code-font {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    /* File Browser */
+    .browser-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 8px;
+      max-height: 400px;
+      overflow-y: auto;
+      padding: 4px;
+    }
+
+    .folder-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      height: 100%;
+      min-height: 110px;
+      position: relative;
+    }
+
+    .folder-card:hover {
+      border-color: var(--accent-primary);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      z-index: 1;
+    }
+
+    .folder-card.ply-folder {
+      border-color: rgba(34, 197, 94, 0.3);
+      background: rgba(34, 197, 94, 0.02);
+    }
+
+    .folder-card.ply-folder:hover {
+      border-color: var(--accent-success);
+    }
+
+    .folder-icon {
+      font-size: 20px;
+      margin-bottom: 6px;
+      color: var(--accent-primary);
+    }
+
+    .ply-folder .folder-icon {
+      color: var(--accent-success);
+    }
+
+    .folder-name {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-primary);
+      width: 100%;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      -webkit-box-orient: vertical;
+      line-height: 1.3;
+      margin-bottom: auto;
+      /* Push actions to bottom */
+    }
+
+    .folder-meta {
+      font-size: 9px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      margin-bottom: 4px;
+    }
+
+    .folder-actions {
+      margin-top: 6px;
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+    }
+
+    .folder-actions .btn {
+      padding: 2px 0;
+      font-size: 10px;
+      justify-content: center;
+      width: 100%;
+    }
+
+    /* External button spans full width if present */
+    .folder-actions .btn-ext {
+      grid-column: 1 / -1;
+    }
+
+    /* List View Styles */
+    .browser-grid.list-view {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .browser-grid.list-view .folder-card {
+      flex-direction: row;
+      align-items: center;
+      text-align: left;
+      padding: 6px 12px;
+      height: auto;
+      min-height: auto;
+    }
+
+    .browser-grid.list-view .folder-icon {
+      font-size: 16px;
+      margin-bottom: 0;
+      margin-right: 12px;
+    }
+
+    .browser-grid.list-view .folder-name {
+      flex: 1;
+      font-size: 12px;
+      -webkit-line-clamp: 1;
+      line-clamp: 1;
+      margin-bottom: 0;
+    }
+
+    .browser-grid.list-view .folder-meta {
+      margin: 0 16px;
+      min-width: 60px;
+      text-align: right;
+    }
+
+    .browser-grid.list-view .folder-actions {
+      margin-top: 0;
+      width: auto;
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .browser-grid.list-view .folder-card:hover .folder-actions {
+      opacity: 1;
+    }
+
+    .browser-grid.list-view .folder-actions .btn {
+      padding: 2px 8px;
+      width: auto;
+    }
+
+    /* View Controls */
+    .view-controls {
+      display: flex;
+      gap: 4px;
+      background: var(--bg-card);
+      padding: 2px;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+    }
+
+    .view-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .view-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .view-btn.active {
+      background: var(--bg-card-hover);
+      color: var(--text-primary);
+    }
+
+    .view-btn svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
+    .breadcrumbs {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 0;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--border-color);
+      overflow-x: auto;
+    }
+
+    .breadcrumb-item {
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: background 0.2s;
+    }
+
+    .breadcrumb-item:hover {
+      background: var(--bg-card-hover);
+      color: var(--text-primary);
+    }
+
+    .breadcrumb-sep {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    /* Utilities */
+    .empty-state {
+      text-align: center;
+      padding: 48px;
+      color: var(--text-muted);
+    }
+
+    .error-banner {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      color: var(--accent-danger);
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      display: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="top-bar">
+    <div class="brand">
+      <div class="brand-logo"></div>
+      <h1>GSPlay Launcher</h1>
+      <span class="version-badge">v0.1.0</span>
+    </div>
+    <div id="driverInfo" style="font-size: 12px; color: var(--text-muted);"></div>
+  </div>
+
+  <div class="container">
+    <div class="error-banner" id="errorBanner" style="display:none">
+      <span id="errorText"></span>
+      <button onclick="hideError()" class="btn-sm btn-secondary"
+        style="background:transparent; border:none; color:currentColor;">✕</button>
+    </div>
+
+    <!-- System Status -->
+    <div class="section-header">
+      <h2 class="section-title">System Status</h2>
+    </div>
+    <div class="system-grid" id="systemGrid">
+      <div class="gpu-card"
+        style="display:flex; align-items:center; justify-content:center; height:120px; color:var(--text-muted);">
+        Loading system info...
+      </div>
+    </div>
+
+    <!-- Instance Settings -->
+    <div class="settings-bar">
+      <div class="settings-group">
+        <label>Instance Name</label>
+        <input type="text" id="instanceName" placeholder="Auto-generated" style="width: 160px;">
+      </div>
+      <div class="settings-group">
+        <label>Port</label>
+        <input type="number" id="instancePort" placeholder="6020" value="6020" style="width: 80px;">
+      </div>
+      <div class="settings-group checkbox-group" style="padding-top:0; height:auto;">
+        <label class="checkbox-label">
+          <input type="checkbox" id="compact" checked> Compact UI
+        </label>
+      </div>
+      <div style="flex:1"></div>
+      <span class="code-font" id="instanceCount">0 active</span>
+    </div>
+
+    <!-- Hidden GPU input to store selection -->
+    <input type="hidden" id="gpu" value="0">
+
+    <!-- File Browser -->
+    <div class="panel" id="browserPanel">
+      <div class="section-header" style="margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <h3 class="section-title" style="margin:0;">File Browser</h3>
+          <span class="code-font" id="browserRootInfo" style="font-size:11px; color:var(--text-muted);"></span>
+        </div>
+        <div class="view-controls">
+          <button class="view-btn active" id="viewGridBtn" onclick="toggleView('grid')" title="Grid View">
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M4 4h4v4H4zm6 0h4v4h-4zm6 0h4v4h-4zM4 10h4v4H4zm6 0h4v4h-4zm6 0h4v4h-4zM4 16h4v4H4zm6 0h4v4h-4zm6 0h4v4h-4z" />
+            </svg>
+          </button>
+          <button class="view-btn" id="viewListBtn" onclick="toggleView('list')" title="List View">
+            <svg viewBox="0 0 24 24">
+              <path d="M4 4h16v4H4zm0 6h16v4H4zm0 6h16v4H4z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="breadcrumbs" id="breadcrumbs"></div>
+      <div class="browser-grid" id="browserGrid"></div>
+    </div>
+
+    <!-- Instances Table -->
+    <div class="table-container">
+      <div id="instancesContainer"></div>
+    </div>
+  </div>
+
+  <script>
+    const API = '/api';
+    let instances = [];
+    let gpuInfo = null;
+    let browseConfig = null;
+
+    // --- System Status ---
+    async function fetchGpuInfo() {
+      try {
+        const res = await fetch(`${API}/gpu`);
+        if (res.ok) {
+          gpuInfo = await res.json();
+          renderSystemStatus();
+        }
+      } catch (e) {
+        document.getElementById('systemGrid').innerHTML =
+          '<div class="gpu-card" style="text-align:center; color:var(--text-muted);">System info unavailable</div>';
+      }
+    }
+
+    function renderSystemStatus() {
+      if (!gpuInfo || !gpuInfo.gpus.length) {
+        document.getElementById('systemGrid').innerHTML =
+          '<div class="gpu-card">No GPUs detected</div>';
+        return;
+      }
+
+      const currentGpu = parseInt(document.getElementById('gpu').value) || 0;
+
+      const cards = gpuInfo.gpus.map(g => {
+        const memPct = Math.round(g.memory_used / g.memory_total * 100);
+        const tempClass = g.temperature > 80 ? 'hot' : '';
+        const selectedClass = g.index === currentGpu ? 'selected' : '';
+
+        return `
+        <div class="gpu-card ${selectedClass}" onclick="selectGpu(${g.index})">
+          <div class="gpu-header">
+            <div class="gpu-title">
+              <span class="gpu-id">GPU ${g.index}</span>
+              <span class="gpu-sep">•</span>
+              <span class="gpu-name">${escapeHtml(g.name)}</span>
+            </div>
+            <div class="gpu-temp ${tempClass}">${g.temperature}°C</div>
+          </div>
+          
+          <div class="stat-row">
+            <span class="stat-label">Load</span>
+            <div class="progress-bg">
+              <div class="progress-fill" style="width: ${g.utilization}%; background: var(--accent-primary);"></div>
+            </div>
+            <span class="stat-value">${g.utilization}%</span>
+          </div>
+          
+          <div class="stat-row">
+            <span class="stat-label">Mem</span>
+            <div class="progress-bg">
+              <div class="progress-fill" style="width: ${memPct}%; background: var(--accent-success);"></div>
+            </div>
+            <span class="stat-value">${memPct}%</span>
+          </div>
+        </div>`;
+      }).join('');
+
+      document.getElementById('systemGrid').innerHTML = cards;
+      document.getElementById('driverInfo').textContent =
+        `Driver: ${gpuInfo.driver_version} | CUDA: ${gpuInfo.cuda_version}`;
+    }
+
+    function selectGpu(index) {
+      document.getElementById('gpu').value = index;
+      renderSystemStatus(); // Re-render to update selection state
+    }
+
+    // --- File Browser ---
+    async function fetchBrowseConfig() {
+      try {
+        const res = await fetch(`${API}/browse/config`);
+        browseConfig = await res.json();
+        if (browseConfig.enabled) {
+          document.getElementById('browserPanel').classList.add('show');
+          document.getElementById('browserRootInfo').textContent = browseConfig.root_path;
+          await fetchBrowsePath('');
+        }
+        if (browseConfig.default_custom_ip) {
+          // document.getElementById('customIp').value = browseConfig.default_custom_ip; // This element no longer exists
+        }
+        // Show external access indicator
+        if (browseConfig.external_url) {
+          const driverInfo = document.getElementById('driverInfo');
+          const existingText = driverInfo.textContent;
+          driverInfo.innerHTML = `<span style="color: var(--accent-success);">🌐 External: ${browseConfig.external_url}</span>` +
+            (existingText ? ` | ${existingText}` : '');
+        }
+      } catch (e) { console.error(e); }
+    }
+
+    let viewMode = 'grid'; // 'grid' or 'list'
+
+    function toggleView(mode) {
+      viewMode = mode;
+      document.getElementById('viewGridBtn').classList.toggle('active', mode === 'grid');
+      document.getElementById('viewListBtn').classList.toggle('active', mode === 'list');
+
+      const grid = document.getElementById('browserGrid');
+      grid.classList.toggle('list-view', mode === 'list');
+
+      // Re-render if we have data
+      if (browseConfig) fetchBrowsePath(document.getElementById('breadcrumbs').dataset.currentPath || '');
+    }
+
+    async function fetchBrowsePath(path) {
+      try {
+        const res = await fetch(`${API}/browse?path=${encodeURIComponent(path)}`);
+        if (!res.ok) throw new Error((await res.json()).detail);
+        const data = await res.json();
+        renderBrowser(data, path);
+      } catch (e) { showError(e.message); }
+    }
+
+    function renderBrowser(data, currentPath) {
+      document.getElementById('breadcrumbs').dataset.currentPath = currentPath;
+
+      // Breadcrumbs
+      const parts = currentPath.split('/').filter(p => p);
+      let html = `<span class="breadcrumb-item" onclick="fetchBrowsePath('')">root</span>`;
+      let acc = '';
+      parts.forEach((p, i) => {
+        acc += (i === 0 ? '' : '/') + p;
+        const pAcc = acc;
+        html += `<span class="breadcrumb-sep">/</span><span class="breadcrumb-item ${i === parts.length - 1 ? 'active' : ''}" onclick="fetchBrowsePath('${pAcc}')">${escapeHtml(p)}</span>`;
+      });
+      document.getElementById('breadcrumbs').innerHTML = html;
+
+      // Grid/List
+      const grid = document.getElementById('browserGrid');
+      if (data.entries.length === 0) {
+        grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:20px;">Empty directory</div>';
+        return;
+      }
+
+      grid.innerHTML = data.entries.filter(e => e.is_directory).map(e => {
+        const isPly = e.is_ply_folder;
+        const icon = isPly ? '📦' : '📁';
+        const meta = isPly ? `<div class="folder-meta">${e.ply_count} PLY</div>` : '';
+
+        const actions = isPly ? `
+          <div class="folder-actions">
+            <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); selectPath('${escapeHtml(e.path)}')" title="Select Path">Select</button>
+            <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); launchFromBrowser('${escapeHtml(e.path)}', '${escapeHtml(e.name)}', false)" title="Quick Launch">Launch</button>
+            ${browseConfig && browseConfig.external_url ? `
+              <button class="btn btn-sm btn-primary btn-ext" onclick="event.stopPropagation(); launchFromBrowser('${escapeHtml(e.path)}', '${escapeHtml(e.name)}', true)" title="Launch External">Ext</button>
+            ` : ''}
+          </div>
+        ` : '';
+
+        return `
+        <div class="folder-card ${isPly ? 'ply-folder' : ''}" onclick="fetchBrowsePath('${escapeHtml(e.path)}')">
+          <div class="folder-icon">${icon}</div>
+          <div class="folder-name" title="${escapeHtml(e.name)}">${escapeHtml(e.name)}</div>
+          ${meta}
+          ${actions}
+        </div>`;
+      }).join('');
+    }
+
+    function selectPath(path) {
+      // document.getElementById('configPath').value = browseConfig.root_path + '/' + path; // This element no longer exists
+      // if (!document.getElementById('formPanel').classList.contains('show')) toggleForm(); // This element no longer exists
+      // window.scrollTo({ top: document.getElementById('formPanel').offsetTop - 80, behavior: 'smooth' }); // This element no longer exists
+    }
+
+    async function launchFromBrowser(path, name, external) {
+      try {
+        // Use user-provided name if available, otherwise default to folder name
+        const userInstanceName = document.getElementById('instanceName').value.trim();
+        const finalName = userInstanceName || (name || 'GSPlay-' + path.split('/').pop());
+
+        // Get other settings
+        const port = parseInt(document.getElementById('instancePort').value) || 0;
+        const compact = document.getElementById('compact').checked;
+        const gpu = parseInt(document.getElementById('gpu').value) || 0;
+
+        const data = {
+          path: path,
+          name: finalName,
+          port: port,
+          cache_size: 100,
+          compact: compact,
+          gpu: gpu
+        };
+      }
+      } catch (e) { showError(e.message); }
+    }
+
+    // --- Instances ---
+    async function fetchInstances() {
+      try {
+        const res = await fetch(`${API}/instances`);
+        const data = await res.json();
+        instances = data.instances;
+        renderInstances();
+      } catch (e) { showError('Failed to fetch instances'); }
+    }
+
+    function renderInstances() {
+      const container = document.getElementById('instancesContainer');
+      const active = instances.filter(i => ['running', 'starting'].includes(i.status)).length;
+      document.getElementById('instanceCount').textContent = `${active} active / ${instances.length} total`;
+
+      if (instances.length === 0) {
+        container.innerHTML = '<div class="empty-state">No instances running. Create one to get started.</div>';
+        return;
+      }
+
+      const rows = instances.map(i => {
+        const statusClass = `status-${i.status}`;
+        const isActive = ['running', 'starting', 'orphaned'].includes(i.status);
+
+        return `
+        <tr>
+          <td>
+            <div style="font-weight:500;">${escapeHtml(i.name)}</div>
+            <div class="code-font" style="font-size:11px; color:var(--text-muted);">${i.id}</div>
+          </td>
+          <td>
+            <span class="status-badge ${statusClass}">
+              <span class="status-dot"></span>
+              ${i.status.toUpperCase()}
+            </span>
+          </td>
+          <td class="code-font">${i.port}</td>
+          <td class="code-font">${i.gpu !== null ? 'GPU ' + i.gpu : '-'}</td>
+          <td class="code-font" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(i.config_path)}">
+            ${escapeHtml(i.config_path)}
+          </td>
+          <td>
+            ${isActive ? `
+              ${browseConfig && browseConfig.external_url ? `
+                <button class="btn btn-sm btn-primary" onclick="window.open('${browseConfig.external_url}/v/${i.id}/', '_blank')" title="External access via ${browseConfig.external_url}">External</button>
+              ` : ''}
+              <button class="btn btn-sm btn-success" onclick="window.open('${i.url}', '_blank')" title="${i.url}">Local</button>
+              <button class="btn btn-sm btn-danger" onclick="stopInstance('${i.id}')">Stop</button>
+            ` : `
+              <button class="btn btn-sm btn-secondary" onclick="deleteInstance('${i.id}', '${escapeHtml(i.name)}')">Delete</button>
+            `}
+          </td>
+        </tr>`;
+      }).join('');
+
+      container.innerHTML = `<table>
+        <thead><tr><th>Name</th><th>Status</th><th>Port</th><th>GPU</th><th>Config</th><th>Actions</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    }
+
+    // --- Actions ---
+    document.getElementById('createForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('submitBtn');
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Launching...';
+
+      const data = {
+        config_path: document.getElementById('configPath').value.trim(),
+        name: document.getElementById('name').value.trim() || undefined,
+        port: document.getElementById('port').value ? parseInt(document.getElementById('port').value) : undefined,
+        gpu: document.getElementById('gpu').value ? parseInt(document.getElementById('gpu').value) : undefined,
+        cache_size: 100, // Hardcoded cache size
+        custom_ip: document.getElementById('customIp').value.trim() || undefined,
+        view_only: document.getElementById('viewOnly').checked,
+        compact: document.getElementById('compact').checked,
+      };
+
+      try {
+        const res = await fetch(`${API}/instances`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error((await res.json()).detail);
+
+        document.getElementById('createForm').reset();
+        document.getElementById('compact').checked = true;
+        document.getElementById('gpu').value = '0';
+        toggleForm();
+        await fetchInstances();
+      } catch (e) { showError(e.message); }
+      finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    };
+
+    async function stopInstance(id) {
+      try {
+        const res = await fetch(`${API}/instances/${id}/stop`, { method: 'POST' });
+        if (!res.ok) throw new Error('Failed to stop');
+        await fetchInstances();
+      } catch (e) { showError(e.message); }
+    }
+
+    async function deleteInstance(id, name) {
+      if (!confirm(`Delete "${name}"?`)) return;
+      try {
+        const res = await fetch(`${API}/instances/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Failed to delete');
+        await fetchInstances();
+      } catch (e) { showError(e.message); }
+    }
+
+    function showError(msg) {
+      document.getElementById('errorText').textContent = msg;
+      document.getElementById('errorBanner').style.display = 'flex';
+      setTimeout(hideError, 5000);
+    }
+    function hideError() { document.getElementById('errorBanner').style.display = 'none'; }
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // Init
+    fetchGpuInfo();
+    fetchInstances();
+    fetchBrowseConfig();
+    setInterval(fetchGpuInfo, 3000);
+    setInterval(fetchInstances, 5000);
+  </script>
+</body>
+
+</html>
