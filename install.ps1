@@ -1,4 +1,4 @@
-# Universal 4D Viewer Installation Script
+# gsplay Installation Script
 # JIT compiles gsplat with Python 3.12 + PyTorch 2.9.1 + CUDA 12.8
 
 $ErrorActionPreference = "Stop"
@@ -7,7 +7,7 @@ Write-Host "=== gsplay Installation (Windows) ===" -ForegroundColor Cyan
 Write-Host ""
 
 # Step 1: Setup MSVC compiler environment
-Write-Host "[1/4] Setting up MSVC compiler environment..." -ForegroundColor Yellow
+Write-Host "[1/5] Setting up MSVC compiler environment..." -ForegroundColor Yellow
 $vcvarsall = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
 if (-not (Test-Path $vcvarsall)) {
     throw "vcvarsall.bat not found at $vcvarsall"
@@ -32,14 +32,12 @@ Write-Host "MSVC environment loaded" -ForegroundColor Green
 [Environment]::SetEnvironmentVariable("DISTUTILS_USE_SDK", "1", "Process")
 
 # Step 2: Sync dependencies
-Write-Host "[2/4] Running uv sync..." -ForegroundColor Yellow
+Write-Host "[2/5] Running uv sync..." -ForegroundColor Yellow
 uv sync
 if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
 
-
-
-# Step 4: Install gsplat dependencies first (needed for build)
-Write-Host "[3/4] Installing gsplat from GitHub and compiling CUDA extensions..." -ForegroundColor Yellow
+# Step 3: Install gsplat dependencies first (needed for build)
+Write-Host "[3/5] Installing gsplat from GitHub and compiling CUDA extensions..." -ForegroundColor Yellow
 uv pip install jaxtyping ninja rich packaging numpy
 if ($LASTEXITCODE -ne 0) { throw "gsplat dependencies installation failed" }
 
@@ -52,11 +50,45 @@ Write-Host "Compiling gsplat CUDA extensions (this may take several minutes)..."
 uv run python -c "from gsplat.cuda._backend import _C; print('gsplat CUDA extensions compiled successfully')"
 if ($LASTEXITCODE -ne 0) { throw "gsplat CUDA compilation failed" }
 
+# Step 4: Build launcher frontend
+Write-Host "[4/5] Building launcher frontend..." -ForegroundColor Yellow
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$DenoBin = $null
+
+# Find deno
+if (Get-Command deno -ErrorAction SilentlyContinue) {
+    $DenoBin = "deno"
+} elseif (Test-Path "$env:USERPROFILE\.deno\bin\deno.exe") {
+    $DenoBin = "$env:USERPROFILE\.deno\bin\deno.exe"
+}
+
+if ($DenoBin) {
+    Push-Location "$ScriptDir\launcher\frontend"
+    & $DenoBin task build
+    if ($LASTEXITCODE -ne 0) {
+        Pop-Location
+        Write-Host "Warning: Frontend build failed, using fallback dashboard" -ForegroundColor Yellow
+    } else {
+        Pop-Location
+        # Copy to package static directory
+        $StaticDir = "$ScriptDir\launcher\gsplay_launcher\static"
+        if (Test-Path $StaticDir) { Remove-Item -Recurse -Force $StaticDir }
+        New-Item -ItemType Directory -Path $StaticDir -Force | Out-Null
+        Copy-Item -Recurse "$ScriptDir\launcher\frontend\dist\*" $StaticDir
+        Write-Host "Frontend built successfully" -ForegroundColor Green
+    }
+} else {
+    Write-Host "Warning: deno not found, skipping frontend build." -ForegroundColor Yellow
+    Write-Host "Launcher will use fallback HTML dashboard." -ForegroundColor Yellow
+    Write-Host "To build frontend later: install deno and run .\launcher\build_frontend.sh" -ForegroundColor Yellow
+}
+
 # Step 5: Verify installation
-Write-Host "[4/4] Verifying installation..." -ForegroundColor Yellow
+Write-Host "[5/5] Verifying installation..." -ForegroundColor Yellow
 uv run python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); from gsplat.cuda._backend import _C; print('gsplat CUDA: OK')"
 if ($LASTEXITCODE -ne 0) { throw "Verification failed" }
 
 Write-Host ""
 Write-Host "=== Installation Complete ===" -ForegroundColor Green
-Write-Host "Run the viewer with: uv run src/viewer/main.py --config <path>" -ForegroundColor Cyan
+Write-Host "Run the viewer with: uv run gsplay --config <path>" -ForegroundColor Cyan
+Write-Host "Run the launcher with: uv run -m gsplay_launcher --browse-path <path>" -ForegroundColor Cyan

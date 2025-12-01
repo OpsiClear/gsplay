@@ -36,6 +36,7 @@ class UIController:
         """
         self.ui = ui
         self.event_bus = event_bus
+        self._updating_from_event = False  # Guard against recursion
         self._setup_subscriptions()
         logger.debug("UIController initialized")
 
@@ -134,6 +135,9 @@ class UIController:
 
     def _on_fps_changed(self, event: Event) -> None:
         """Handle FPS changed event."""
+        # Skip if we're already updating (prevents recursion)
+        if self._updating_from_event:
+            return
         fps = event.data.get("fps")
         if fps is not None:
             self._update_ui_control(self.ui.play_speed, value=fps)
@@ -150,8 +154,15 @@ class UIController:
             Attributes to set on the control
         """
         if control is not None:
-            for attr, value in kwargs.items():
-                setattr(control, attr, value)
+            self._updating_from_event = True
+            try:
+                for attr, value in kwargs.items():
+                    # Only update if value is different to prevent callback loops
+                    current_value = getattr(control, attr, None)
+                    if current_value != value:
+                        setattr(control, attr, value)
+            finally:
+                self._updating_from_event = False
 
     def cleanup(self) -> None:
         """Unsubscribe from all events."""

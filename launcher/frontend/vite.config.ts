@@ -1,5 +1,5 @@
-import { defineConfig } from "npm:vite@^5.0.0";
-import solid from "npm:vite-plugin-solid@^2.8.0";
+import { defineConfig } from "npm:vite@5.4.19";
+import solid from "npm:vite-plugin-solid@2.10.2";
 
 export default defineConfig({
   plugins: [solid()],

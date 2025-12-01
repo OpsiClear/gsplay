@@ -115,12 +115,7 @@ class GSPlay(object):
         server.scene.set_global_visibility(True)
         server.on_client_disconnect(self._disconnect_client)
         server.on_client_connect(self._connect_client)
-        server.gui.set_panel_label("basic viewer")
-        server.gui.configure_theme(
-            control_layout="collapsible",
-            dark_mode=True,
-            brand_color=(255, 211, 105),
-        )
+        server.gui.set_panel_label("gsplay")
         if self.mode == "training":
             self._init_training_tab()
             self._populate_training_tab()

@@ -57,7 +57,6 @@ class OptimizedPlyModel(ModelInterface):
         ply_files: list[str | Path | UniversalPath],
         device: str = "cuda",
         enable_concurrent_prefetch: bool = True,
-        max_scale_percentile: float | None = None,  # Deprecated, kept for compatibility
         processing_mode: str = "all_gpu",  # Global processing mode from VolumeFilter
         opacity_threshold: float = 0.01,  # Quality filtering threshold
         scale_threshold: float = 1e-7,
@@ -255,9 +254,14 @@ class OptimizedPlyModel(ModelInterface):
                     ).item()
 
         with monitor.track("color_ms"):
-            # Convert SH to RGB using gsply native method (in-place)
-            gstensor_gpu = gstensor_gpu.to_rgb(inplace=True)
-            gstensor_gpu.sh0 = torch.clamp(gstensor_gpu.sh0, 0.0, 1.0)
+            # Only convert SH to RGB if no higher-order SH coefficients
+            # When shN is present, gsplat will evaluate SH during rendering
+            # which requires sh0 to remain in SH format
+            if gstensor_gpu.shN is None or gstensor_gpu.shN.numel() == 0:
+                # No higher-order SH - convert to RGB for direct color blending
+                gstensor_gpu = gstensor_gpu.to_rgb(inplace=True)
+                gstensor_gpu.sh0 = torch.clamp(gstensor_gpu.sh0, 0.0, 1.0)
+            # else: Keep sh0 in SH format for gsplat SH evaluation
 
         stage_timings, total_ms = monitor.stop()
         self._last_process_breakdown = stage_timings.copy()
@@ -325,19 +329,24 @@ class OptimizedPlyModel(ModelInterface):
                     )
 
         with monitor.track("color_ms"):
-            # Convert SH to RGB using gsply native method
-            processed = processed.to_rgb(inplace=True)
-            
-            # Validate after to_rgb
-            n_after_rgb = processed.means.shape[0]
-            if n_after_rgb == 0:
-                logger.error(
-                    f"[OptimizedPlyModel] Data became empty after to_rgb for frame {frame_idx} "
-                    f"(had {n_after_denorm} gaussians before to_rgb)"
-                )
-                return processed
-            
-            processed.sh0 = np.clip(processed.sh0, 0.0, 1.0)
+            # Only convert SH to RGB if no higher-order SH coefficients
+            # When shN is present, gsplat will evaluate SH during rendering
+            # which requires sh0 to remain in SH format
+            if processed.shN is None or processed.shN.size == 0:
+                # No higher-order SH - convert to RGB for direct color blending
+                processed = processed.to_rgb(inplace=True)
+                
+                # Validate after to_rgb
+                n_after_rgb = processed.means.shape[0]
+                if n_after_rgb == 0:
+                    logger.error(
+                        f"[OptimizedPlyModel] Data became empty after to_rgb for frame {frame_idx} "
+                        f"(had {n_after_denorm} gaussians before to_rgb)"
+                    )
+                    return processed
+                
+                processed.sh0 = np.clip(processed.sh0, 0.0, 1.0)
+            # else: Keep sh0 in SH format for gsplat SH evaluation
 
         stage_timings, total_ms = monitor.stop()
         self._last_process_breakdown = stage_timings.copy()

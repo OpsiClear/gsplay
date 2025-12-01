@@ -1,8 +1,8 @@
 {
   "tasks": {
-    "dev": "deno run -A npm:vite",
-    "build": "deno run -A npm:vite build",
-    "preview": "deno run -A npm:vite preview"
+    "dev": "deno run -A npm:vite@5.4.19",
+    "build": "deno run -A npm:vite@5.4.19 build",
+    "preview": "deno run -A npm:vite@5.4.19 preview"
   },
   "compilerOptions": {
     "jsx": "react-jsx",
@@ -10,7 +10,8 @@
     "lib": ["dom", "dom.iterable", "esnext"]
   },
   "imports": {
-    "solid-js": "npm:solid-js@^1.8.0",
-    "solid-js/": "npm:solid-js@^1.8.0/"
-  }
+    "solid-js": "npm:solid-js@1.9.10",
+    "solid-js/": "npm:solid-js@1.9.10/"
+  },
+  "nodeModulesDir": "auto"
 }

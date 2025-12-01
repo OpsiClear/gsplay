@@ -14,7 +14,6 @@ from typing import Any, TYPE_CHECKING
 import numpy as np
 import viser
 from gsmod import ColorValues, TransformValues, FilterValues
-from gsmod.transform.api import euler_to_quaternion
 
 if TYPE_CHECKING:
     from src.domain.filters import VolumeFilter
@@ -42,6 +41,12 @@ class UIHandles:
     jpeg_quality_slider: viser.GuiSliderHandle | None = None
     auto_quality_checkbox: viser.GuiCheckboxHandle | None = None
 
+    # View/Camera controls
+    zoom_slider: viser.GuiSliderHandle | None = None
+    azimuth_slider: viser.GuiSliderHandle | None = None
+    elevation_slider: viser.GuiSliderHandle | None = None
+    roll_slider: viser.GuiSliderHandle | None = None
+
     # Color adjustment controls
     temperature_slider: viser.GuiSliderHandle | None = None
     tint_slider: viser.GuiSliderHandle | None = None
@@ -62,10 +67,9 @@ class UIHandles:
     reset_colors_button: viser.GuiButtonHandle | None = None
     reset_colors_advanced_button: viser.GuiButtonHandle | None = None
 
-    # Auto-fit color controls
-    learn_level_dropdown: viser.GuiDropdownHandle | None = None
-    color_profile_dropdown: viser.GuiDropdownHandle | None = None
-    auto_fit_button: viser.GuiButtonHandle | None = None
+    # Unified color adjustment controls (gsmod 0.1.4 auto-correction + presets + advanced)
+    color_adjustment_dropdown: viser.GuiDropdownHandle | None = None
+    apply_adjustment_button: viser.GuiButtonHandle | None = None
 
     # Scene transformation controls
     translation_x_slider: viser.GuiSliderHandle | None = None
@@ -141,7 +145,8 @@ class UIHandles:
 
     # Config menu controls
     config_path_input: viser.GuiTextHandle | None = None
-    config_buttons: viser.GuiButtonGroupHandle | None = None
+    config_buttons: viser.GuiButtonHandle | None = None  # Export Config button
+    load_config_button: viser.GuiButtonHandle | None = None  # Load Config button (under play)
 
     # Instance control
     terminate_button: viser.GuiButtonHandle | None = None
@@ -190,9 +195,8 @@ class UIHandles:
         rot_y = self.rotation_y_slider.value if self.rotation_y_slider else 0.0
         rot_z = self.rotation_z_slider.value if self.rotation_z_slider else 0.0
 
-        # Convert to quaternion
-        euler_rad = np.radians(np.array([rot_x, rot_y, rot_z], dtype=np.float32))
-        quat = tuple(float(x) for x in euler_to_quaternion(euler_rad))
+        # Convert to quaternion using our consistent function (inverse of _matrix_to_euler_deg)
+        quat = _euler_deg_to_quaternion_xyzw(rot_x, rot_y, rot_z)
 
         translate = (
             float(self.translation_x_slider.value) if self.translation_x_slider else 0.0,
@@ -416,11 +420,36 @@ class UIHandles:
             else:
                 self.global_scale_slider.value = float(scale_value[0])
 
-        # Rotation (quaternion -> euler) is harder to map back uniquely,
-        # but for now we might skip setting rotation sliders from values
-        # or implement quat_to_euler if strictly needed.
-        # Given the complexity, I'll skip rotation reverse mapping for this step
-        # unless I find a helper.
+        # Convert quaternion to Euler angles for rotation sliders
+        rotate = getattr(
+            values, "rotate", getattr(values, "rotation", (0.0, 0.0, 0.0, 1.0))
+        )
+        if rotate is not None and any(
+            s is not None
+            for s in [self.rotation_x_slider, self.rotation_y_slider, self.rotation_z_slider]
+        ):
+            # Convert to numpy array if needed
+            if hasattr(rotate, "tolist"):
+                rotate = tuple(rotate.tolist())
+            else:
+                rotate = tuple(rotate)
+
+            # quaternion format: (x, y, z, w)
+            # Normalize quaternion to have w >= 0 for consistent Euler conversion
+            x, y, z, w = rotate
+            if w < 0:
+                x, y, z, w = -x, -y, -z, -w
+
+            # Convert to rotation matrix then to euler
+            R = _quaternion_to_matrix_xyzw((x, y, z, w))
+            rx, ry, rz = _matrix_to_euler_deg(R)
+
+            if self.rotation_x_slider:
+                self.rotation_x_slider.value = float(rx)
+            if self.rotation_y_slider:
+                self.rotation_y_slider.value = float(ry)
+            if self.rotation_z_slider:
+                self.rotation_z_slider.value = float(rz)
 
     def get_alpha_scaler(self) -> float:
         """Read the opacity multiplier from the UI."""
@@ -433,41 +462,80 @@ class UIHandles:
         if self.alpha_scaler_slider:
             self.alpha_scaler_slider.value = alpha_scaler
 
+    def set_camera_values(
+        self,
+        azimuth: float,
+        elevation: float,
+        roll: float,
+        distance: float,
+        scene_bounds: dict | None = None,
+    ) -> None:
+        """Update view control sliders with camera values.
+
+        Parameters
+        ----------
+        azimuth : float
+            Azimuth angle in degrees (0-360)
+        elevation : float
+            Elevation angle in degrees (-180 to 180)
+        roll : float
+            Roll angle in degrees (-180 to 180)
+        distance : float
+            Distance from look-at point
+        scene_bounds : dict | None
+            Scene bounds for calculating zoom slider (log2 scale)
+        """
+        if self.azimuth_slider:
+            self.azimuth_slider.value = azimuth
+        if self.elevation_slider:
+            self.elevation_slider.value = elevation
+        if self.roll_slider:
+            self.roll_slider.value = roll
+
+        # Zoom uses log2 scale: zoom_log = log2(distance / default_distance)
+        # where default_distance = scene_extent * 2.5
+        if self.zoom_slider and scene_bounds:
+            extent = scene_bounds.get("max_size", 10.0)
+            default_distance = extent * 2.5
+            if default_distance > 0 and distance > 0:
+                actual_zoom = distance / default_distance
+                zoom_log = np.log2(actual_zoom)
+                # Clamp to slider range
+                zoom_log = float(np.clip(zoom_log, -8.0, 3.0))
+                self.zoom_slider.value = zoom_log
+
     def set_volume_filter(self, vf: VolumeFilter) -> None:
         """Update filter controls from a VolumeFilter config."""
-        if self.filter_type:
+        if self.spatial_filter_type:
             if vf.filter_type == "sphere":
-                self.filter_type.value = "Sphere"
+                self.spatial_filter_type.value = "Sphere"
             elif vf.filter_type == "cuboid":
-                self.filter_type.value = "Cuboid"
+                self.spatial_filter_type.value = "Box"  # UI uses "Box" not "Cuboid"
             else:
-                self.filter_type.value = "None"
+                self.spatial_filter_type.value = "None"
 
-        if self.filter_center_x:
-            self.filter_center_x.value = float(vf.sphere_center[0])
-        if self.filter_center_y:
-            self.filter_center_y.value = float(vf.sphere_center[1])
-        if self.filter_center_z:
-            self.filter_center_z.value = float(vf.sphere_center[2])
+        # Sphere center (use correct attribute names)
+        if self.sphere_center_x and hasattr(vf, "sphere_center"):
+            self.sphere_center_x.value = float(vf.sphere_center[0])
+        if self.sphere_center_y and hasattr(vf, "sphere_center"):
+            self.sphere_center_y.value = float(vf.sphere_center[1])
+        if self.sphere_center_z and hasattr(vf, "sphere_center"):
+            self.sphere_center_z.value = float(vf.sphere_center[2])
 
-        if self.sphere_radius_factor:
-            self.sphere_radius_factor.value = float(vf.sphere_radius_factor)
-        if self.cuboid_size_factor_x:
-            self.cuboid_size_factor_x.value = float(vf.cuboid_size_factor_x)
-        if self.cuboid_size_factor_y:
-            self.cuboid_size_factor_y.value = float(vf.cuboid_size_factor_y)
-        if self.cuboid_size_factor_z:
-            self.cuboid_size_factor_z.value = float(vf.cuboid_size_factor_z)
+        # Sphere radius
+        if self.sphere_radius and hasattr(vf, "sphere_radius_factor"):
+            self.sphere_radius.value = float(vf.sphere_radius_factor)
 
-        if self.min_opacity_slider:
+        # Opacity/scale filters
+        if self.min_opacity_slider and hasattr(vf, "opacity_threshold"):
             self.min_opacity_slider.value = float(vf.opacity_threshold)
-        if self.max_opacity_slider:
+        if self.max_opacity_slider and hasattr(vf, "max_opacity"):
             self.max_opacity_slider.value = float(vf.max_opacity)
-        if self.min_scale_slider:
+        if self.min_scale_slider and hasattr(vf, "min_scale"):
             self.min_scale_slider.value = float(vf.min_scale)
-        if self.max_scale_slider:
+        if self.max_scale_slider and hasattr(vf, "max_scale"):
             self.max_scale_slider.value = float(vf.max_scale)
-        if self.use_cpu_filtering_checkbox:
+        if self.use_cpu_filtering_checkbox and hasattr(vf, "use_cpu_filtering"):
             self.use_cpu_filtering_checkbox.value = bool(vf.use_cpu_filtering)
 
     def set_filter_values(self, fv: FilterValues) -> None:
@@ -742,6 +810,19 @@ def _quaternion_to_matrix(q: tuple[float, float, float, float]) -> np.ndarray:
     ], dtype=float)
 
 
+def _quaternion_to_matrix_xyzw(q: tuple[float, float, float, float]) -> np.ndarray:
+    """Convert quaternion (x, y, z, w) to rotation matrix.
+
+    gsmod uses (x, y, z, w) format for quaternions.
+    """
+    x, y, z, w = q
+    return np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+    ], dtype=float)
+
+
 def _matrix_to_quaternion(R: np.ndarray) -> tuple[float, float, float, float]:
     """Convert rotation matrix to quaternion (w, x, y, z)."""
     trace = float(R[0, 0] + R[1, 1] + R[2, 2])
@@ -772,5 +853,36 @@ def _matrix_to_quaternion(R: np.ndarray) -> tuple[float, float, float, float]:
 
     norm = math.sqrt(w * w + x * x + y * y + z * z)
     return (w / norm, x / norm, y / norm, z / norm)
+
+
+def _euler_deg_to_quaternion_xyzw(
+    rx_deg: float, ry_deg: float, rz_deg: float
+) -> tuple[float, float, float, float]:
+    """Convert Euler XYZ angles (degrees) to quaternion (x, y, z, w).
+
+    This is the exact inverse of _matrix_to_euler_deg to ensure round-trip consistency.
+    Uses extrinsic XYZ convention (rotate around fixed axes).
+    """
+    rx = math.radians(rx_deg)
+    ry = math.radians(ry_deg)
+    rz = math.radians(rz_deg)
+
+    # Half angles
+    cx, sx = math.cos(rx / 2), math.sin(rx / 2)
+    cy, sy = math.cos(ry / 2), math.sin(ry / 2)
+    cz, sz = math.cos(rz / 2), math.sin(rz / 2)
+
+    # Quaternion from extrinsic XYZ Euler angles
+    # Order: first rotate around X, then Y, then Z (fixed frame)
+    w = cx * cy * cz + sx * sy * sz
+    x = sx * cy * cz - cx * sy * sz
+    y = cx * sy * cz + sx * cy * sz
+    z = cx * cy * sz - sx * sy * cz
+
+    # Normalize to ensure w >= 0 for consistency
+    if w < 0:
+        w, x, y, z = -w, -x, -y, -z
+
+    return (x, y, z, w)
 
 

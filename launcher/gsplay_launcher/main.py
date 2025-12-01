@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Annotated
 
@@ -11,6 +13,82 @@ import uvicorn
 
 from gsplay_launcher.api.app import create_app, set_config
 from gsplay_launcher.config import LauncherConfig
+
+
+def build_frontend(logger: logging.Logger) -> bool:
+    """Build the frontend if source is newer than dist.
+
+    Returns True if build succeeded or was skipped, False on error.
+    """
+    # Get the launcher package directory
+    launcher_dir = Path(__file__).parent.parent
+    frontend_dir = launcher_dir / "frontend"
+    src_dir = frontend_dir / "src"
+    dist_dir = frontend_dir / "dist"
+    index_html = dist_dir / "index.html"
+
+    # Check if frontend source exists
+    if not src_dir.exists():
+        logger.debug("Frontend source not found, skipping build")
+        return True
+
+    # Check if build is needed
+    needs_build = False
+    if not index_html.exists():
+        needs_build = True
+        logger.info("Frontend dist not found, building...")
+    else:
+        # Check if any source file is newer than dist
+        dist_mtime = index_html.stat().st_mtime
+        for src_file in src_dir.rglob("*"):
+            if src_file.is_file() and src_file.stat().st_mtime > dist_mtime:
+                needs_build = True
+                logger.info("Frontend source changed, rebuilding...")
+                break
+
+    if not needs_build:
+        logger.debug("Frontend is up to date")
+        return True
+
+    # Find deno executable
+    deno_path = shutil.which("deno")
+    if not deno_path:
+        # Check common locations
+        home = Path.home()
+        for candidate in [
+            home / ".deno" / "bin" / "deno",
+            Path("/usr/local/bin/deno"),
+            Path("/usr/bin/deno"),
+        ]:
+            if candidate.exists():
+                deno_path = str(candidate)
+                break
+
+    if not deno_path:
+        logger.warning("Deno not found, skipping frontend build. Install deno or build manually.")
+        return True  # Not a fatal error
+
+    # Run build
+    try:
+        logger.info("Building frontend with deno...")
+        result = subprocess.run(
+            [deno_path, "task", "build"],
+            cwd=frontend_dir,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            logger.error("Frontend build failed:\n%s", result.stderr)
+            return False
+        logger.info("Frontend build completed")
+        return True
+    except subprocess.TimeoutExpired:
+        logger.error("Frontend build timed out")
+        return False
+    except Exception as e:
+        logger.error("Frontend build error: %s", e)
+        return False
 
 
 def setup_logging(level: str) -> None:
@@ -67,6 +145,10 @@ def main(
         bool,
         tyro.conf.arg(help="Force all instances to launch in view-only mode (hides data loader UI)"),
     ] = False,
+    history_limit: Annotated[
+        int,
+        tyro.conf.arg(help="Maximum number of launch history entries to show in UI"),
+    ] = 5,
 ) -> None:
     """GSPlay Launcher - Manage Gaussian Splatting GSPlay instances.
 
@@ -115,6 +197,7 @@ def main(
         custom_ip=custom_ip,
         external_url=external_url.rstrip('/') if external_url else None,
         view_only=view_only,
+        history_limit=history_limit,
     )
 
     # Validate configuration
@@ -145,6 +228,9 @@ def main(
         logger.info("  External URL: disabled (use --external-url to enable)")
     if view_only:
         logger.info("  View-only mode: enabled (all instances will hide data loader)")
+
+    # Build frontend if needed
+    build_frontend(logger)
 
     # Set config and create app
     set_config(config)

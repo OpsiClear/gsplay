@@ -162,6 +162,7 @@ def export_viewer_config(
     config: GSPlayConfig,
     camera_controller: SuperSplatCamera | None,
     output_path: Path | str,
+    ui_handles=None,
 ) -> None:
     """
     Export viewer configuration to YAML file.
@@ -172,6 +173,9 @@ def export_viewer_config(
     - Volume filter settings
     - Spatial filter settings
     - Color adjustments
+    - Animation settings (auto_play, play_speed, current_frame)
+    - Render settings (render_quality, jpeg_quality)
+    - Processing mode
 
     Parameters
     ----------
@@ -181,6 +185,8 @@ def export_viewer_config(
         Camera controller instance (for camera pose)
     output_path : Path | str
         Path to output YAML file
+    ui_handles : UIHandles | None
+        UI handles for reading current UI state
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,6 +197,10 @@ def export_viewer_config(
         "volume_filter": config.volume_filter.to_dict(),
         "color_values": {},
         "alpha_scaler": config.alpha_scaler,
+        "animation": config.animation.to_dict(),
+        "render_settings": config.render_settings.to_dict(),
+        "processing_mode": config.processing_mode,
+        "export_settings": config.export_settings.to_dict(),
     }
 
     # Export transform values (convert from gsmod format)
@@ -206,9 +216,16 @@ def export_viewer_config(
     )
     scale_value = getattr(config.transform_values, "scale", 1.0)
 
+    # Normalize quaternion to have w >= 0 for consistent Euler conversion on import
+    # (q and -q represent the same rotation)
+    rotate_list = rotate.tolist() if hasattr(rotate, "tolist") else list(rotate)
+    # gsmod format: (x, y, z, w)
+    if len(rotate_list) == 4 and rotate_list[3] < 0:
+        rotate_list = [-v for v in rotate_list]
+
     export_data["transform_values"] = {
         "translate": translate.tolist() if hasattr(translate, "tolist") else list(translate),
-        "rotate": rotate.tolist() if hasattr(rotate, "tolist") else list(rotate),
+        "rotate": rotate_list,
         "scale": float(scale_value)
         if isinstance(scale_value, (int, float))
         else scale_value.tolist(),
@@ -233,6 +250,37 @@ def export_viewer_config(
                 else list(state.look_at),
             }
 
+    # Export UI-specific state if handles available
+    if ui_handles is not None:
+        ui_state = {}
+
+        # Animation UI state
+        if ui_handles.time_slider is not None:
+            ui_state["current_frame"] = int(ui_handles.time_slider.value)
+        if ui_handles.auto_play is not None:
+            ui_state["auto_play"] = ui_handles.auto_play.value
+        if ui_handles.play_speed is not None:
+            ui_state["play_speed"] = float(ui_handles.play_speed.value)
+
+        # Render quality UI state
+        if ui_handles.render_quality is not None:
+            ui_state["render_quality"] = float(ui_handles.render_quality.value)
+        if ui_handles.jpeg_quality_slider is not None:
+            ui_state["jpeg_quality"] = int(ui_handles.jpeg_quality_slider.value)
+        if ui_handles.auto_quality_checkbox is not None:
+            ui_state["auto_quality"] = bool(ui_handles.auto_quality_checkbox.value)
+
+        # Filter UI state
+        if ui_handles.spatial_filter_type is not None:
+            ui_state["spatial_filter_type"] = ui_handles.spatial_filter_type.value
+        if ui_handles.show_filter_viz is not None:
+            ui_state["show_filter_viz"] = bool(ui_handles.show_filter_viz.value)
+        if ui_handles.use_cpu_filtering_checkbox is not None:
+            ui_state["use_cpu_filtering"] = bool(ui_handles.use_cpu_filtering_checkbox.value)
+
+        if ui_state:
+            export_data["ui_state"] = ui_state
+
     # Flatten tuples into individual fields for YAML compatibility
     export_data = _flatten_tuples(export_data)
 
@@ -247,6 +295,7 @@ def import_viewer_config(
     config: GSPlayConfig,
     camera_controller: SuperSplatCamera | None,
     input_path: Path | str,
+    ui_handles=None,
 ) -> None:
     """
     Import viewer configuration from YAML file.
@@ -256,6 +305,10 @@ def import_viewer_config(
     - Scene transform (translation, rotation, scale)
     - Volume filter settings
     - Color adjustments
+    - Animation settings (auto_play, play_speed, current_frame)
+    - Render settings (render_quality, jpeg_quality)
+    - Processing mode
+    - UI state (spatial_filter_type, show_filter_viz, etc.)
 
     Parameters
     ----------
@@ -265,6 +318,8 @@ def import_viewer_config(
         Camera controller instance (for camera pose)
     input_path : Path | str
         Path to input YAML file
+    ui_handles : UIHandles | None
+        UI handles for updating UI controls
     """
     input_path = Path(input_path)
 
@@ -293,8 +348,24 @@ def import_viewer_config(
     # Import camera pose
     if "camera" in import_data and camera_controller is not None:
         camera_data = import_data["camera"]
+        logger.debug(f"Importing camera: {camera_data}")
+        logger.debug(
+            f"camera_controller.state={camera_controller.state is not None}, "
+            f"scene_bounds={camera_controller.scene_bounds is not None}"
+        )
+
+        if camera_controller.state is None:
+            logger.warning("camera_controller.state is None, cannot import camera pose")
+
+        if camera_controller.scene_bounds is None:
+            logger.warning("camera_controller.scene_bounds is None, camera may not be applied correctly")
+
         if camera_controller.state is not None:
             import numpy as np
+            import time as time_module
+
+            # Suppress state sync while we're importing to prevent overwrites
+            camera_controller._suppress_state_sync_until = time_module.time() + 5.0
 
             with camera_controller.state_lock:
                 if "azimuth" in camera_data:
@@ -313,8 +384,27 @@ def import_viewer_config(
                             look_at, dtype=np.float32
                         )
 
+            # Log the state we're about to apply
+            logger.debug(
+                f"Applying camera state: azimuth={camera_controller.state.azimuth:.1f}, "
+                f"elevation={camera_controller.state.elevation:.1f}, "
+                f"roll={camera_controller.state.roll:.1f}, "
+                f"distance={camera_controller.state.distance:.2f}"
+            )
+
             # Apply camera state to viser camera
             camera_controller.apply_state_to_camera()
+
+            # Update UI sliders to match imported camera state
+            if ui_handles is not None:
+                ui_handles.set_camera_values(
+                    azimuth=camera_controller.state.azimuth,
+                    elevation=camera_controller.state.elevation,
+                    roll=camera_controller.state.roll,
+                    distance=camera_controller.state.distance,
+                    scene_bounds=camera_controller.scene_bounds,
+                )
+
             logger.info("Imported camera pose from config")
 
     # Import transform values (with migration from old scene_transform)
@@ -338,6 +428,11 @@ def import_viewer_config(
                 rotation=rotate,
                 scale=scale_value,
             )
+
+        # Update UI sliders to match imported transform values
+        if ui_handles is not None:
+            ui_handles.set_transform_values(config.transform_values)
+
         logger.info("Imported transform values from config")
     elif "scene_transform" in import_data:
         # Migration: Convert old SceneTransform to TransformValues
@@ -379,6 +474,11 @@ def import_viewer_config(
                 rotation=quat,
                 scale=scale_value,
             )
+
+        # Update UI sliders to match migrated transform values
+        if ui_handles is not None:
+            ui_handles.set_transform_values(config.transform_values)
+
         logger.info("Migrated old scene_transform to transform_values")
 
     # Import volume filter
@@ -468,5 +568,95 @@ def import_viewer_config(
 
         config.filter_values = FilterValues(**fv_data)
         logger.info("Imported spatial filter values from config")
+
+    # Import animation settings
+    if "animation" in import_data:
+        from src.gsplay.config.settings import AnimationSettings
+
+        anim_data = import_data["animation"]
+        config.animation = AnimationSettings(
+            auto_play=anim_data.get("auto_play", False),
+            play_speed_fps=anim_data.get("play_speed_fps", 30.0),
+            current_frame=anim_data.get("current_frame", 0),
+            auto_rotate=anim_data.get("auto_rotate", "off"),
+            rotation_speed_dps=anim_data.get("rotation_speed_dps", 30.0),
+        )
+        logger.info("Imported animation settings from config")
+
+    # Import render settings
+    if "render_settings" in import_data:
+        from src.gsplay.config.settings import RenderSettings
+
+        render_data = import_data["render_settings"]
+        config.render_settings = RenderSettings(
+            jpeg_quality_static=render_data.get("jpeg_quality_static", 90),
+            jpeg_quality_move=render_data.get("jpeg_quality_move", 60),
+        )
+        logger.info("Imported render settings from config")
+
+    # Import processing mode
+    if "processing_mode" in import_data:
+        config.processing_mode = import_data["processing_mode"]
+        logger.info("Imported processing mode from config")
+
+    # Import export settings
+    if "export_settings" in import_data:
+        from src.gsplay.config.settings import ExportSettings
+        from src.infrastructure.io.path_io import UniversalPath
+
+        es_data = import_data["export_settings"]
+        # Convert export_path back to UniversalPath
+        if "export_path" in es_data:
+            es_data["export_path"] = UniversalPath(es_data["export_path"])
+        config.export_settings = ExportSettings(
+            export_path=es_data.get("export_path", config.export_settings.export_path),
+            export_format=es_data.get("export_format", "compressed-ply"),
+            export_device=es_data.get("export_device", "cpu"),
+            start_frame=es_data.get("start_frame"),
+            end_frame=es_data.get("end_frame"),
+            video_fps=es_data.get("video_fps", 30.0),
+            video_duration_sec=es_data.get("video_duration_sec", 10.0),
+            video_width=es_data.get("video_width", 800),
+            video_height=es_data.get("video_height", 600),
+        )
+        # Update UI handles for export settings
+        if ui_handles is not None:
+            if ui_handles.export_path is not None:
+                ui_handles.export_path.value = str(config.export_settings.export_path)
+            if ui_handles.export_format is not None:
+                ui_handles.export_format.value = config.export_settings.export_format
+            if ui_handles.export_device is not None:
+                ui_handles.export_device.value = config.export_settings.export_device
+        logger.info("Imported export settings from config")
+
+    # Import UI-specific state and update UI handles
+    if "ui_state" in import_data and ui_handles is not None:
+        ui_state = import_data["ui_state"]
+
+        # Animation UI state
+        if "current_frame" in ui_state and ui_handles.time_slider is not None:
+            ui_handles.time_slider.value = int(ui_state["current_frame"])
+        if "auto_play" in ui_state and ui_handles.auto_play is not None:
+            ui_handles.auto_play.value = ui_state["auto_play"]
+        if "play_speed" in ui_state and ui_handles.play_speed is not None:
+            ui_handles.play_speed.value = float(ui_state["play_speed"])
+
+        # Render quality UI state
+        if "render_quality" in ui_state and ui_handles.render_quality is not None:
+            ui_handles.render_quality.value = float(ui_state["render_quality"])
+        if "jpeg_quality" in ui_state and ui_handles.jpeg_quality_slider is not None:
+            ui_handles.jpeg_quality_slider.value = int(ui_state["jpeg_quality"])
+        if "auto_quality" in ui_state and ui_handles.auto_quality_checkbox is not None:
+            ui_handles.auto_quality_checkbox.value = bool(ui_state["auto_quality"])
+
+        # Filter UI state
+        if "spatial_filter_type" in ui_state and ui_handles.spatial_filter_type is not None:
+            ui_handles.spatial_filter_type.value = ui_state["spatial_filter_type"]
+        if "show_filter_viz" in ui_state and ui_handles.show_filter_viz is not None:
+            ui_handles.show_filter_viz.value = bool(ui_state["show_filter_viz"])
+        if "use_cpu_filtering" in ui_state and ui_handles.use_cpu_filtering_checkbox is not None:
+            ui_handles.use_cpu_filtering_checkbox.value = bool(ui_state["use_cpu_filtering"])
+
+        logger.info("Imported UI state from config")
 
     logger.info(f"Imported viewer config from {input_path}")

@@ -218,5 +218,16 @@ NUL
 # Development documentation (generated during development)
 docs/development/
 
+# Launcher frontend build artifacts
+launcher/frontend/node_modules/
+launcher/frontend/dist/
+launcher/frontend/deno.lock
+launcher/gsplay_launcher/static/
+
+# Launcher data directory
+launcher/data/
+
 # Old/backup files
-io_ply_old.py
+*.bak
+*.orig
+*~

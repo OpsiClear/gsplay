@@ -282,6 +282,13 @@ def create_view_controls(
         def sync_sliders_with_camera():
             if camera.state is None:
                 return
+
+            # Skip state sync during programmatic camera updates
+            # This prevents apply_state_to_camera() from having its state
+            # immediately overwritten by the on_update callback
+            import time
+            suppress_state_update = time.time() < camera._suppress_state_sync_until
+
             for client in server.get_clients().values():
                 try:
                     camera_pos = np.array(client.camera.position)
@@ -294,12 +301,16 @@ def create_view_controls(
                     roll = camera._calculate_roll_from_camera(
                         camera_pos, look_at, up_dir, elevation
                     )
-                    with camera.state_lock:
-                        camera.state.azimuth = azimuth
-                        camera.state.elevation = elevation
-                        camera.state.roll = roll
-                        camera.state.distance = distance
-                        camera.state.look_at = look_at.copy()
+
+                    # Only update state if not suppressed (user interaction vs programmatic)
+                    if not suppress_state_update:
+                        with camera.state_lock:
+                            camera.state.azimuth = azimuth
+                            camera.state.elevation = elevation
+                            camera.state.roll = roll
+                            camera.state.distance = distance
+                            camera.state.look_at = look_at.copy()
+
                     updating_from_camera[0] = True
                     azimuth_slider.value = azimuth
                     elevation_slider.value = elevation
@@ -370,11 +381,27 @@ def create_quality_controls(server: viser.ViserServer, config=None) -> tuple:
     tuple
         (render_quality, jpeg_quality_slider, auto_quality_checkbox)
     """
-    initial_quality = 1280
-    initial_jpeg = 90
+    # Check if compact mode is enabled - if so, default to Mid preset
+    compact_mode = getattr(config, "compact_ui", False) if config else False
 
-    if config is not None and hasattr(config, "render_settings"):
+    if compact_mode:
+        # Mid preset values for compact mode
+        initial_quality = 1080
+        initial_jpeg = 60
+    else:
+        # Default values (closer to High)
+        initial_quality = 1280
+        initial_jpeg = 90
+
+    if config is not None and hasattr(config, "render_settings") and not compact_mode:
         initial_jpeg = config.render_settings.jpeg_quality_static
+
+    # Quality presets button group
+    quality_presets = server.gui.add_button_group(
+        "Preset",
+        options=("Low", "Mid", "High"),
+        hint="Quick quality presets for different use cases",
+    )
 
     render_quality = server.gui.add_slider(
         "Quality",
@@ -400,36 +427,21 @@ def create_quality_controls(server: viser.ViserServer, config=None) -> tuple:
         hint="Reduce quality during camera movement for smoother navigation",
     )
 
+    # Wire up preset button group
+    @quality_presets.on_click
+    def _on_preset_click(event: viser.GuiEvent) -> None:
+        preset = event.target.value
+        if preset == "Low":
+            render_quality.value = 540
+            jpeg_quality_slider.value = 30
+        elif preset == "Mid":
+            render_quality.value = 1080
+            jpeg_quality_slider.value = 60
+        elif preset == "High":
+            render_quality.value = 1440
+            jpeg_quality_slider.value = 90
+
     return (render_quality, jpeg_quality_slider, auto_quality_checkbox)
-
-
-def create_render_controls(
-    server: viser.ViserServer, camera: SuperSplatCamera, config=None
-) -> tuple:
-    """
-    Create Render controls (FPS, Quality, JPEG, Auto Quality).
-
-    DEPRECATED: Use create_fps_control and create_quality_controls separately.
-
-    Parameters
-    ----------
-    server : viser.ViserServer
-        Viser server instance
-    camera : SuperSplatCamera
-        Camera controller instance
-    config : GSPlayConfig | None
-        GSPlay configuration for animation settings
-
-    Returns
-    -------
-    tuple
-        (play_speed, render_quality, jpeg_quality_slider, auto_quality_checkbox)
-    """
-    play_speed = create_fps_control(server, config)
-    render_quality, jpeg_quality_slider, auto_quality_checkbox = create_quality_controls(
-        server, config
-    )
-    return (play_speed, render_quality, jpeg_quality_slider, auto_quality_checkbox)
 
 
 def create_playback_controls(server: viser.ViserServer, config=None):

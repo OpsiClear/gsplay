@@ -39,6 +39,7 @@ import asyncio
 import logging
 import threading
 import time
+from contextlib import suppress
 from http import HTTPStatus
 from typing import Set
 
@@ -157,6 +158,7 @@ class WebSocketStreamServer:
         self._running = False
         self._started_event = threading.Event()
         self._server = None
+        self._broadcast_task: asyncio.Task | None = None
 
     def start(self) -> int:
         """Start the WebSocket streaming server.
@@ -214,7 +216,7 @@ class WebSocketStreamServer:
         logger.info(f"WebSocket stream server started on port {self.port}")
 
         # Start broadcast task
-        asyncio.create_task(self._broadcast_loop())
+        self._broadcast_task = asyncio.create_task(self._broadcast_loop())
 
     async def _handle_http(
         self, connection: ServerConnection, request: Request
@@ -328,22 +330,33 @@ class WebSocketStreamServer:
         self._running = False
 
         if self._loop and self._server:
-            # Close all client connections
+            # Close all client connections and drain background tasks
             async def close_all():
+                if self._broadcast_task:
+                    self._broadcast_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await self._broadcast_task
+
                 for client in list(self._clients):
                     try:
                         await client.close()
                     except Exception:
                         pass
+
                 self._server.close()
                 await self._server.wait_closed()
 
-            asyncio.run_coroutine_threadsafe(close_all(), self._loop)
+            future = asyncio.run_coroutine_threadsafe(close_all(), self._loop)
+            with suppress(Exception):
+                future.result(timeout=5.0)
+
             self._loop.call_soon_threadsafe(self._loop.stop)
 
         if self._thread:
             self._thread.join(timeout=5.0)
             self._thread = None
+            self._broadcast_task = None
+            self._server = None
 
         logger.info("WebSocket stream server stopped")
 
@@ -413,7 +426,7 @@ class WebSocketStreamServer:
         }
         @keyframes spin { to { transform: rotate(360deg); } }
         .info-bar {
-            height: 32px;
+            height: 36px;
             background: rgba(20,20,20,0.95);
             display: flex;
             align-items: center;
@@ -461,7 +474,7 @@ class WebSocketStreamServer:
             background: transparent;
             border: 1px solid #333;
             color: #888;
-            padding: 3px 8px;
+            padding: 4px 10px;
             border-radius: 3px;
             cursor: pointer;
             font-size: 10px;
@@ -470,6 +483,35 @@ class WebSocketStreamServer:
             background: #222;
             color: #ccc;
         }
+        .info-bar button.recording {
+            background: #dc2626;
+            border-color: #dc2626;
+            color: white;
+            animation: rec-pulse 1s infinite;
+        }
+        .info-bar button.streaming {
+            background: #059669;
+            border-color: #059669;
+            color: white;
+        }
+        @keyframes rec-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        .rec-indicator {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: #dc2626;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            animation: rec-pulse 1s infinite;
+            display: none;
+        }
+        .rec-indicator.visible { display: block; }
     </style>
 </head>
 <body>
@@ -480,6 +522,7 @@ class WebSocketStreamServer:
                 <span>Connecting...</span>
             </div>
             <img id="stream" alt="Stream">
+            <div class="rec-indicator" id="recIndicator">● REC</div>
         </div>
         <div class="info-bar">
             <span class="title">
@@ -497,6 +540,8 @@ class WebSocketStreamServer:
                 <div class="stat" id="latencyContainer">
                     <span id="latency">--</span> ms
                 </div>
+                <button id="streamBtn" onclick="toggleStream()">⏹ Stop</button>
+                <button id="recordBtn" onclick="toggleRecording()">⏺ Record</button>
                 <button onclick="toggleFullscreen()">Fullscreen</button>
             </div>
         </div>
@@ -509,12 +554,23 @@ class WebSocketStreamServer:
         const statusText = document.getElementById('statusText');
         const fpsEl = document.getElementById('fps');
         const latencyEl = document.getElementById('latency');
+        const streamBtn = document.getElementById('streamBtn');
+        const recordBtn = document.getElementById('recordBtn');
+        const recIndicator = document.getElementById('recIndicator');
 
         let ws = null;
         let frameCount = 0;
         let lastFpsTime = performance.now();
         let currentBlobUrl = null;
         let reconnectTimer = null;
+        let streamEnabled = true;
+
+        // Recording state
+        let isRecording = false;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let recordCanvas = null;
+        let recordCtx = null;
 
         function setStatus(state, text) {
             dot.className = 'dot ' + state;
@@ -527,6 +583,7 @@ class WebSocketStreamServer:
         }
 
         function connect() {
+            if (!streamEnabled) return;
             if (ws) {
                 ws.close();
             }
@@ -540,13 +597,12 @@ class WebSocketStreamServer:
 
             ws.onopen = () => {
                 setStatus('connected', 'Live');
-                // Start latency measurement
+                updateStreamBtn();
                 measureLatency();
             };
 
             ws.onmessage = (event) => {
                 if (typeof event.data === 'string') {
-                    // Handle pong for latency measurement
                     if (event.data === 'pong') {
                         const latency = performance.now() - window._pingTime;
                         latencyEl.textContent = Math.round(latency / 2);
@@ -554,18 +610,29 @@ class WebSocketStreamServer:
                     return;
                 }
 
-                // Binary frame data
                 const blob = new Blob([event.data], { type: 'image/jpeg' });
                 const url = URL.createObjectURL(blob);
 
-                // Revoke previous URL to prevent memory leak
                 if (currentBlobUrl) {
                     URL.revokeObjectURL(currentBlobUrl);
                 }
                 currentBlobUrl = url;
                 img.src = url;
 
-                // Update FPS counter
+                // Draw to recording canvas if recording
+                if (isRecording && recordCtx) {
+                    const tempImg = new Image();
+                    tempImg.onload = () => {
+                        const scale = Math.min(recordCanvas.width / tempImg.width, recordCanvas.height / tempImg.height);
+                        const x = (recordCanvas.width - tempImg.width * scale) / 2;
+                        const y = (recordCanvas.height - tempImg.height * scale) / 2;
+                        recordCtx.fillStyle = '#000';
+                        recordCtx.fillRect(0, 0, recordCanvas.width, recordCanvas.height);
+                        recordCtx.drawImage(tempImg, x, y, tempImg.width * scale, tempImg.height * scale);
+                    };
+                    tempImg.src = url;
+                }
+
                 frameCount++;
                 const now = performance.now();
                 const elapsed = now - lastFpsTime;
@@ -581,11 +648,49 @@ class WebSocketStreamServer:
             };
 
             ws.onclose = () => {
-                setStatus('error', 'Disconnected');
-                // Auto-reconnect after 2 seconds
-                if (reconnectTimer) clearTimeout(reconnectTimer);
-                reconnectTimer = setTimeout(connect, 2000);
+                if (streamEnabled) {
+                    setStatus('error', 'Disconnected');
+                    if (reconnectTimer) clearTimeout(reconnectTimer);
+                    reconnectTimer = setTimeout(connect, 2000);
+                } else {
+                    setStatus('error', 'Stopped');
+                }
+                updateStreamBtn();
             };
+        }
+
+        function disconnect() {
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            setStatus('error', 'Stopped');
+            updateStreamBtn();
+        }
+
+        function toggleStream() {
+            streamEnabled = !streamEnabled;
+            if (streamEnabled) {
+                connect();
+            } else {
+                // Stop recording if active
+                if (isRecording) stopRecording();
+                disconnect();
+            }
+        }
+
+        function updateStreamBtn() {
+            if (streamEnabled && ws && ws.readyState === WebSocket.OPEN) {
+                streamBtn.textContent = '⏹ Stop';
+                streamBtn.classList.add('streaming');
+            } else {
+                streamBtn.textContent = '▶ Start';
+                streamBtn.classList.remove('streaming');
+            }
         }
 
         function measureLatency() {
@@ -594,6 +699,59 @@ class WebSocketStreamServer:
                 ws.send('ping');
                 setTimeout(measureLatency, 2000);
             }
+        }
+
+        function toggleRecording() {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        }
+
+        function startRecording() {
+            recordCanvas = document.createElement('canvas');
+            recordCanvas.width = 1920;
+            recordCanvas.height = 1080;
+            recordCtx = recordCanvas.getContext('2d');
+
+            const stream = recordCanvas.captureStream(30);
+            mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'video/webm;codecs=vp9',
+                videoBitsPerSecond: 8000000
+            });
+
+            recordedChunks = [];
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) recordedChunks.push(e.data);
+            };
+
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
+                a.download = 'gsplay_stream_' + timestamp + '.webm';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            mediaRecorder.start(100);
+            isRecording = true;
+            recordBtn.textContent = '⏹ Stop';
+            recordBtn.classList.add('recording');
+            recIndicator.classList.add('visible');
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            isRecording = false;
+            recordBtn.textContent = '⏺ Record';
+            recordBtn.classList.remove('recording');
+            recIndicator.classList.remove('visible');
         }
 
         function toggleFullscreen() {
@@ -606,10 +764,16 @@ class WebSocketStreamServer:
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'f' || e.key === 'F') toggleFullscreen();
-            if (e.key === 'r' || e.key === 'R') connect();
+            if (e.key === 's' || e.key === 'S') toggleStream();
+            if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey) {
+                if (e.shiftKey) {
+                    toggleRecording();
+                } else {
+                    connect();
+                }
+            }
         });
 
-        // Start connection
         connect();
     </script>
 </body>

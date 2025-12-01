@@ -46,6 +46,8 @@ class LauncherConfig:
     external_url : str | None
         External base URL for reverse proxy access (e.g., https://gsplay.4dgst.win).
         When set, enables proxy routes at /v/{instance_id}/ for external access.
+    history_limit : int
+        Maximum number of launch history entries to show in UI.
     """
 
     host: str = "0.0.0.0"  # Bind to all interfaces for external access
@@ -62,6 +64,7 @@ class LauncherConfig:
     custom_ip: str | None = None  # Default custom IP for URLs (None = auto)
     external_url: str | None = None  # External base URL for proxy access (e.g., https://gsplay.4dgst.win)
     view_only: bool = False  # Force all instances to launch in view-only mode
+    history_limit: int = 5  # Maximum number of launch history entries to show in UI
     url_secret: str = field(default_factory=_generate_url_secret)  # Secret for encoding instance IDs in URLs
 
     @property

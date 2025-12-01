@@ -69,6 +69,66 @@ COLOR_PRESETS: dict[str, ColorValues] = {
 }
 
 
+# Unified adjustment options for the Color tab dropdown
+# Maps: display label -> (category, handler_key)
+# Categories: "correction" (gsmod 0.1.4), "stylize" (presets), "advanced" (histogram learning)
+ADJUSTMENT_OPTIONS: dict[str, tuple[str, str]] = {
+    # Correction section (gsmod 0.1.4 auto-correction)
+    "Auto Enhance": ("correction", "auto_enhance"),
+    "Auto Contrast": ("correction", "auto_contrast"),
+    "Auto Exposure": ("correction", "auto_exposure"),
+    "Auto WB (Gray World)": ("correction", "auto_wb_gray"),
+    "Auto WB (White Patch)": ("correction", "auto_wb_white"),
+    # Stylize section (existing presets)
+    "Vibrant": ("stylize", "vibrant"),
+    "Dramatic": ("stylize", "dramatic"),
+    "Bright": ("stylize", "bright"),
+    "Dark": ("stylize", "dark"),
+    "Warm": ("stylize", "warm"),
+    "Cool": ("stylize", "cool"),
+    "Cinematic": ("stylize", "cinematic"),
+    "Muted": ("stylize", "muted"),
+    "Punchy": ("stylize", "punchy"),
+    # Advanced section (legacy histogram learning)
+    "Auto Fit (Basic)": ("advanced", "basic"),
+    "Auto Fit (Standard)": ("advanced", "standard"),
+    "Auto Fit (Full)": ("advanced", "full"),
+}
+
+# Cached dropdown options list (created once at module load)
+_DROPDOWN_OPTIONS: list[str] = list(ADJUSTMENT_OPTIONS.keys())
+
+
+def get_dropdown_options() -> list[str]:
+    """
+    Get ordered list of dropdown options for UI.
+
+    Returns
+    -------
+    list[str]
+        All adjustment option labels in display order (cached)
+    """
+    return _DROPDOWN_OPTIONS
+
+
+def get_adjustment_type(option: str) -> tuple[str, str]:
+    """
+    Get adjustment category and key for dropdown option.
+
+    Parameters
+    ----------
+    option : str
+        The dropdown option label (e.g., "Auto Enhance", "Vibrant")
+
+    Returns
+    -------
+    tuple[str, str]
+        (category, key) where category is "correction", "stylize", or "advanced"
+        Returns ("stylize", "neutral") if option not found
+    """
+    return ADJUSTMENT_OPTIONS.get(option, ("stylize", "neutral"))
+
+
 def get_preset_values(profile: str) -> ColorValues:
     """
     Get preset color adjustments for a profile (relative to neutral).

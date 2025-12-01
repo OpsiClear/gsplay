@@ -25,7 +25,6 @@ from src.gsplay.rendering.camera_state import CameraState
 # Re-export factory functions from camera_ui for backward compatibility
 from src.gsplay.rendering.camera_ui import (
     create_view_controls,
-    create_render_controls,
     create_fps_control,
     create_quality_controls,
     create_playback_controls,
@@ -40,7 +39,6 @@ __all__ = [
     "CameraState",
     "SuperSplatCamera",
     "create_view_controls",
-    "create_render_controls",
     "create_fps_control",
     "create_quality_controls",
     "create_playback_controls",
@@ -104,6 +102,10 @@ class SuperSplatCamera:
         # Explicit camera state (single source of truth)
         self.state: CameraState | None = None
         self.state_lock = threading.Lock()
+
+        # Flag to suppress state sync during programmatic camera updates
+        # Set to time.time() + duration when we want to suppress syncing
+        self._suppress_state_sync_until: float = 0.0
 
         # Initialize
         self._setup_grid()
@@ -368,6 +370,13 @@ class SuperSplatCamera:
             logger.warning("Cannot apply state - state not initialized")
             return
 
+        # Suppress state sync to prevent camera on_update callback
+        # from immediately overwriting our programmatic state change
+        # Only extend suppression, never shorten it (in case import set a longer duration)
+        new_suppress_time = time.time() + 0.5
+        if new_suppress_time > self._suppress_state_sync_until:
+            self._suppress_state_sync_until = new_suppress_time
+
         # Validate state before applying
         with self.state_lock:
             validated_state = self.validate_state(self.state)
@@ -462,6 +471,24 @@ class SuperSplatCamera:
                 try:
                     if self.scene_bounds is None or "center" not in self.scene_bounds:
                         time.sleep(0.1)
+                        continue
+
+                    # Skip intercept processing during programmatic camera updates
+                    # This prevents feedback loops when apply_state_to_camera() is called
+                    if time.time() < self._suppress_state_sync_until:
+                        # Update last_camera_state to current position so we don't see
+                        # a spurious "change" when suppression ends
+                        for client in self.server.get_clients().values():
+                            client_id = id(client)
+                            current_pos = np.array(client.camera.position)
+                            current_lookat = np.array(client.camera.look_at)
+                            current_up = np.array(client.camera.up_direction)
+                            self._last_camera_state[client_id] = {
+                                "position": current_pos.copy(),
+                                "lookat": current_lookat.copy(),
+                                "up": current_up.copy(),
+                            }
+                        time.sleep(0.05)
                         continue
 
                     # Periodic cleanup of stale client entries (every ~5 seconds)
@@ -866,7 +893,9 @@ class SuperSplatCamera:
             If provided, uses this exact look-at point instead of preserve logic
         """
         if self.scene_bounds is None or "center" not in self.scene_bounds:
-            logger.warning("No scene bounds available for orbit")
+            logger.warning(
+                f"No scene bounds available for orbit (scene_bounds={self.scene_bounds})"
+            )
             return
 
         # Get current camera state from first client
@@ -876,6 +905,7 @@ class SuperSplatCamera:
             break
 
         if current_client is None:
+            logger.warning("No clients connected, cannot apply camera orbit")
             return
 
         # Determine look-at point and distance

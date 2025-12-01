@@ -6,7 +6,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.9%2B-EE4C2C.svg)](https://pytorch.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 [Features](#key-features) | [Installation](#installation) | [Quick Start](#quick-start) | [Documentation](#documentation) | [Architecture](#system-architecture)
@@ -17,25 +17,27 @@
 
 ## Overview
 
-**gsplay** is a high-performance, real-time viewer for rendering dynamic 4D Gaussian Splatting scenes. Supports PLY files and GIFStream checkpoint-based models for viewing complex, dynamic 3D content.
+**gsplay** is a high-performance, real-time viewer for rendering dynamic 4D Gaussian Splatting scenes. Load and play sequences of PLY files with an intuitive web-based interface, manage multiple instances through a modern launcher dashboard, and stream live previews to monitor your scenes.
 
 **Key Capabilities:**
-- **Jellyfin Integration**: Stream pre-compressed 4D scenes from standard Jellyfin media servers
 - **Local PLY Playback**: Load and render sequences of `.ply` files directly from disk
-- **Real-Time Performance**: GPU-accelerated decompression and rendering at 60+ FPS
-- **Multi-Stream Synchronization**: Perfect frame alignment across 11+ video streams
+- **Web-Based Launcher**: Manage multiple viewer instances with a modern dashboard UI
+- **Real-Time Streaming**: WebSocket-based live preview streaming from running instances
+- **Real-Time Performance**: GPU-accelerated rendering at 60+ FPS
 - **Interactive Navigation**: Full camera controls with responsive seek and variable playback speed
+- **Jellyfin Integration** *(Coming Soon)*: Stream pre-compressed 4D scenes from media servers
 
 ---
 
 ## Key Features
 
-- **Real-time Decompression & Rendering**: GPU-accelerated pipeline using custom compression library to decode multiple video streams into Gaussian Splatting parameters
-- **Robust Multi-Stream Synchronization**: Sophisticated synchronization manager ensures perfect frame alignment across all streams, handling network jitter and preventing visual artifacts
-- **Responsive Seek Functionality**: Debounced and interruptible seek system with clean stream re-synchronization
-- **Variable Playback Speed**: Rendering speed decoupled from source framerate for smooth playback at any speed
-- **Clean Architecture**: Modular design following Clean Architecture principles for maintainability and extensibility
-- **Optimized PLY Loading**: High-performance PLY I/O with automatic format detection and caching
+- **High-Performance PLY Loading**: Optimized PLY I/O with automatic format detection and frame caching
+- **Multi-Instance Launcher**: Web-based dashboard to launch, monitor, and manage multiple viewer instances
+- **Live Stream Preview**: Real-time WebSocket streaming of viewer output with recording support
+- **Responsive Seek**: Debounced and interruptible seek system for smooth timeline scrubbing
+- **Variable Playback Speed**: Rendering speed decoupled from source framerate
+- **Clean Architecture**: Modular design following Clean Architecture principles for maintainability
+- **Launch History**: Quick access to recently launched scenes with one-click relaunch
 
 ---
 
@@ -83,25 +85,30 @@ This creates a virtual environment in `.venv/` with:
 
 ## Quick Start
 
-### Local PLY Files (Simplest)
+### Option 1: Direct CLI (Single Instance)
 
 ```bash
-# Using the CLI command
+# Launch viewer with a PLY folder
 uv run gsplay --config ./path/to/ply/folder
 
-# Or directly with Python
+# Or with explicit module config
 uv run python -m gsplay.core.main --config ./path/to/ply/folder
 ```
 
-### Jellyfin Streaming
-
-1. **Place `meta_bundle.json`** (from compression tool) in `assets/` directory
-2. **Configure Jellyfin settings** in a JSON file in `module_config/`
-3. **Run the viewer:**
+### Option 2: Web Launcher (Recommended for Multiple Instances)
 
 ```bash
-uv run gsplay --config ./module_config/gif_elly.json
+# Start the launcher with a browse directory
+uv run -m gsplay_launcher --browse-path /path/to/your/data
+
+# Open http://localhost:8000 in your browser
 ```
+
+The launcher provides:
+- File browser to navigate and launch PLY folders
+- GPU selection and instance configuration
+- Live stream preview with recording
+- Launch history for quick access to recent scenes
 
 ### Configuration Examples
 
@@ -115,16 +122,12 @@ uv run gsplay --config ./module_config/gif_elly.json
 }
 ```
 
-**Jellyfin Streaming:**
-```json
-{
-    "module": "sogs",
-    "config": {
-        "jellyfin_url": "https://your-server.com",
-        "api_key": "your-api-key",
-        "video_ids": ["id1", "id2", ...]
-    }
-}
+**Launcher CLI Options:**
+```bash
+uv run -m gsplay_launcher \
+  --browse-path /data/scenes \
+  --port 8000 \
+  --history-limit 10
 ```
 
 ---
@@ -160,70 +163,80 @@ Following **Clean Architecture** principles for clear separation of concerns:
 
 ```
 src/
-├── domain/                  # Core business logic (no infrastructure deps)
-│   ├── entities.py, interfaces.py
-│   └── services/            # Pure math helpers (color, transform, ...)
-│
-├── infrastructure/          # External dependencies & I/O adapters
-│   ├── config.py, processing_mode.py, model_factory.py
-│   ├── io/                  # Filesystem + streaming helpers
-│   │   ├── path_io.py       # UniversalPath (local/S3/GCS/Azure)
-│   │   ├── discovery.py     # discover_and_sort_ply_files()
-│   │   └── streaming.py     # Jellyfin VideoManager client
-│   ├── cache/frame_cache.py # Hybrid RAM+disk BinaryFrameCache
-│   ├── processing/          # gspro + PLY activation/loader/writer
-│   │   ├── gaussian_constants.py, data_validation.py, gspro_adapter.py
-│   │   └── ply/{activation_service,loader,writer,utils}.py
-│   └── exporters/
-│       ├── factory.py
-│       ├── ply_exporter.py
-│       └── compressed_ply_exporter.py
-│
-├── models/
-│   ├── ply/optimized_model.py
-│   ├── gifstream/{loader.py, model.py}
-│   └── composite/composite_model.py
-│
-├── viewer/
-│   ├── main.py, app.py, config.py, rendering.py
-│   ├── container.py, edit_manager.py, events.py, handlers.py, ui.py
-│   ├── processing/          # GSBridge + processors/strategies/volume filter
-│   ├── components/          # Model/render/export components
+├── gsplay/                  # Main viewer application
+│   ├── core/                # App entry point (main.py, app.py)
+│   ├── config/              # Configuration and UI handles
+│   ├── rendering/           # Render pipeline and camera
+│   ├── streaming/           # WebSocket stream server
+│   ├── ui/                  # UI layout and components
 │   └── nerfview/            # Embedded viser-based viewer
 │
+├── domain/                  # Core business logic (no infrastructure deps)
+│   ├── entities.py          # GSTensor dataclass
+│   ├── interfaces.py        # Model/DataLoader protocols
+│   └── services/            # Pure math helpers (color, transform)
+│
+├── infrastructure/          # External dependencies & I/O adapters
+│   ├── io/                  # Filesystem helpers
+│   │   ├── path_io.py       # Path utilities
+│   │   └── discovery.py     # PLY file discovery
+│   ├── cache/               # Frame caching
+│   ├── processing/          # PLY loader/writer/activation
+│   └── exporters/           # Export format implementations
+│
+├── models/
+│   ├── ply/                 # OptimizedPlyModel
+│   └── composite/           # CompositeModel (multi-layer)
+│
 └── shared/
-    ├── math.py, perf.py
-    └── exceptions.py
+    ├── math.py              # Math utilities
+    └── exceptions.py        # Custom exceptions
 ```
 
 Layering guidelines:
-- **Domain** contains only dataclasses, protocols, and stateless services that work with plain tensors/arrays—no viewer, gspro, or filesystem imports.
-- **Infrastructure** adapts frameworks and external services (Jellyfin, gspro, filesystem, exporters) to the domain interfaces; it can depend on domain but never on viewer code.
+- **Domain** contains only dataclasses, protocols, and stateless services that work with plain tensors/arrays—no viewer or filesystem imports.
+- **Infrastructure** adapts frameworks and external services (PLY I/O, caching, exporters) to the domain interfaces; it can depend on domain but never on viewer code.
 - **Models + Viewer** make up the application/presentation layer: they orchestrate user interactions, rendering, and model lifecycles while calling into domain services for pure math and infrastructure for I/O.
 
-### Multi-Threaded Pipeline
+### Data Flow
 
 ```
-Jellyfin Server (Compressed MP4 streams)
+PLY Files on Disk
     |
     v
-VideoManager (infrastructure/streaming.py)
-  - Opens cv2.VideoCapture for each stream
-  - Dedicated thread per stream for buffering
-  - Backpressure to prevent buffer overruns
-  - Synchronized seeking across all streams
+OptimizedPlyModel (models/ply/optimized_model.py)
+  - Discovers and sorts PLY files
+  - Auto-detects format (log-space vs linear)
+  - Caches frames for fast playback
     |
     v
-StreamingModel (models/streaming/model.py)
-  - Requests synchronized frame bundles
-  - Passes data to CompressionAdapter
-  - Holds render-ready Gaussian data
-    |
-    v
-Viewer (viewer/main.py)
+GSPlay Viewer (gsplay/core/app.py)
   - Provides UI using viser
   - Drives animation loop
   - Renders using gsplat
+    |
+    v
+WebSocket Stream Server (gsplay/streaming/)
+  - JPEG-encoded frame streaming
+  - Connected to launcher for preview
+```
+
+### Launcher Architecture
+
+```
+Web Browser (SolidJS Frontend)
+    |
+    v
+FastAPI Backend (gsplay_launcher/)
+  - Instance lifecycle management
+  - File browser with PLY detection
+  - WebSocket proxy for streams
+    |
+    v
+GSPlay Instances (subprocess per instance)
+  - Independent viewer processes
+  - Configurable GPU assignment
+  - State persisted across restarts
 ```
 
 ---
@@ -236,19 +249,24 @@ gsplay/
 ├── install.ps1                 # Windows installation script
 ├── install.sh                  # Linux installation script
 ├── src/                        # Main source code
-│   ├── gsplay/                 # Main application package
-│   │   ├── core/               # Core application logic
-│   │   ├── rendering/          # Rendering engine
-│   │   ├── ui/                 # User interface
-│   │   └── interaction/        # User interaction handlers
-│   ├── domain/                 # Domain models and services
-│   ├── infrastructure/         # External dependencies & I/O
-│   ├── models/                 # Data models
-│   ├── plugins/                # Plugin system
+│   ├── gsplay/                 # Viewer application
+│   │   ├── core/               # Core app logic (main.py, app.py)
+│   │   ├── rendering/          # Render pipeline
+│   │   ├── streaming/          # WebSocket stream server
+│   │   ├── ui/                 # UI layout and components
+│   │   └── nerfview/           # Embedded viser viewer
+│   ├── domain/                 # Domain models and interfaces
+│   ├── infrastructure/         # I/O adapters (PLY, cache, etc.)
+│   ├── models/                 # Model implementations (PLY, composite)
 │   └── shared/                 # Shared utilities
-├── launcher/                   # Launcher application
+├── launcher/                   # Web-based launcher
+│   ├── gsplay_launcher/        # FastAPI backend
+│   │   ├── api/                # REST API routes
+│   │   ├── services/           # Instance management
+│   │   └── main.py             # CLI entry point
+│   └── frontend/               # SolidJS frontend
+│       └── src/                # Components and stores
 ├── tests/                      # Unit and integration tests
-├── docs/                       # Documentation
 ├── pyproject.toml              # Package configuration
 └── uv.lock                     # Locked dependencies
 ```
@@ -323,16 +341,26 @@ Quick answers:
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ---
 
 ## Acknowledgments
 
-- **gsplat**: GPU-accelerated Gaussian splatting
-- **viser**: Web-based 3D visualization
-- **Jellyfin**: Open-source media server
-- **nerfview**: NeRF rendering and camera controls (core viewer logic now vendored into `src/viewer/nerfview`)
+This project builds upon excellent open-source work:
+
+### Core Dependencies
+
+- **[viser](https://github.com/nerfstudio-project/viser)** - The web-based 3D visualization framework that powers the viewer UI. Viser provides the interactive scene graph, camera controls, and GUI components. Licensed under MIT.
+
+- **[nerfview](https://github.com/hangg7/nerfview)** - The original NeRF viewer implementation that inspired and provided the foundation for our rendering architecture. Core viewer logic has been adapted and extended in `src/gsplay/nerfview/`. Licensed under MIT.
+
+- **[gsplat](https://github.com/nerfstudio-project/gsplat)** - GPU-accelerated Gaussian splatting rasterization library. Provides the high-performance CUDA kernels for real-time rendering. Licensed under Apache 2.0.
+
+### Other Dependencies
+
+- **[gsply](https://github.com/opsiclear/gsply)** - PLY file I/O for Gaussian Splatting data
+- **[Jellyfin](https://jellyfin.org/)** *(Planned)* - Open-source media server for future streaming support
 
 ---
 

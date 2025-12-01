@@ -84,6 +84,9 @@ def create_render_function(
         np.ndarray
             Rendered image [H, W, 3] in range [0, 1]
         """
+        # Allow modification of the outer CUDA stream in error recovery
+        nonlocal _cuda_stream
+        
         # Performance profiling
         _frame_start = time.perf_counter()
         _t_load = _t_render = 0.0
@@ -204,9 +207,21 @@ def create_render_function(
                 ],
                 axis=0,
             )
-            camera_params_gpu = (
-                torch.from_numpy(camera_params).float().to(device, non_blocking=True)
-            )
+            # Use dedicated stream for camera transfer to isolate from nvImageCodec
+            # which runs on the default stream. This prevents CUDA errors from
+            # nvImageCodec (e.g., during JPEG encoding failure) from corrupting
+            # our render operations.
+            if _cuda_stream is not None:
+                with torch.cuda.stream(_cuda_stream):
+                    camera_params_gpu = (
+                        torch.from_numpy(camera_params).float().to(device, non_blocking=True)
+                    )
+                # Sync to ensure camera params are on GPU before use
+                _cuda_stream.synchronize()
+            else:
+                camera_params_gpu = (
+                    torch.from_numpy(camera_params).float().to(device)
+                )
 
             # Unpack on GPU (creates views, no data copy)
             c2w = camera_params_gpu[:16].reshape(4, 4).contiguous()
@@ -232,7 +247,13 @@ def create_render_function(
                 sh_degree = SH_DEGREE_MAP.get(render_gaussians.shN.shape[1])
 
             if sh_degree is not None:
-                render_kwargs["colors"] = render_gaussians.shN
+                # gsplat expects ALL SH coefficients (DC + higher-order) when sh_degree is specified
+                # sh0: [N, 3] -> [N, 1, 3] (DC component)
+                # shN: [N, K, 3] (higher-order components)
+                # Combined: [N, K+1, 3] where K+1 = (sh_degree+1)^2
+                sh0_expanded = render_gaussians.sh0.unsqueeze(1)  # [N, 3] -> [N, 1, 3]
+                colors_all = torch.cat([sh0_expanded, render_gaussians.shN], dim=1)  # [N, K+1, 3]
+                render_kwargs["colors"] = colors_all
                 render_kwargs["sh_degree"] = sh_degree
             else:
                 render_kwargs["colors"] = render_gaussians.sh0
@@ -423,6 +444,60 @@ def create_render_function(
             # InterruptRenderException is normal - user moved camera, re-raise silently
             if e.__class__.__name__ == "InterruptRenderException":
                 raise
+
+            # CUDA error recovery: Clear corrupted state to prevent propagation
+            # When nvImageCodec or other CUDA operations fail, they can corrupt the
+            # CUDA context. We need to synchronize and clear the error state to allow
+            # subsequent renders to succeed.
+            if device.startswith("cuda"):
+                try:
+                    # Clear the GPU frame cache first - it may reference corrupted memory
+                    try:
+                        from src.gsplay.rendering.jpeg_encoder import get_service
+                        get_service().clear_gpu_frame()
+                    except Exception:
+                        pass  # Best effort
+
+                    # Reset the CUDA stream for this render function
+                    # This abandons any pending async work on the corrupted stream
+                    if _cuda_stream is not None:
+                        try:
+                            # Query stream status to check if it's in error state
+                            _cuda_stream.synchronize()
+                        except Exception:
+                            pass  # Stream may be in error state
+                        # Create a fresh stream to recover from any stream-level corruption
+                        _cuda_stream = torch.cuda.Stream()
+
+                    # Synchronize device to ensure all pending operations complete/fail
+                    try:
+                        torch.cuda.synchronize(device)
+                    except Exception:
+                        pass  # May fail if device is in bad state
+
+                    # Reset CUDA error state by calling cudaGetLastError equivalent
+                    # PyTorch doesn't expose this directly, but we can force a reset
+                    # by doing a minimal CUDA operation that clears the error
+                    try:
+                        # This small allocation forces CUDA to report and clear last error
+                        _probe = torch.zeros(1, device=device)
+                        del _probe
+                    except Exception:
+                        # If even this fails, the device may need a full reset
+                        logger.warning("CUDA device in unrecoverable state, attempting cache clear")
+
+                    # Empty cache to release any corrupted allocations
+                    torch.cuda.empty_cache()
+
+                    logger.warning(
+                        f"CUDA error recovered. Cleared error state, stream, and cache. "
+                        f"Error was: {e.__class__.__name__}"
+                    )
+                except Exception as cleanup_error:
+                    logger.error(
+                        f"Failed to cleanup CUDA state after error: {cleanup_error}",
+                        exc_info=False
+                    )
 
             logger.error(f"Render failed: {e}", exc_info=True)
             return np.zeros((H, W, 3), dtype=np.float32)

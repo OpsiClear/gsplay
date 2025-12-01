@@ -37,6 +37,9 @@ class InstanceResponse(BaseModel):
     encoded_stream_path: str | None = None  # Encoded path for proxy access (e.g., /s/TOKEN/)
     config_path: str
     gpu: int | None
+    cache_size: int = 100
+    view_only: bool = False
+    compact: bool = False
     pid: int | None
     created_at: str
     started_at: str | None
@@ -91,6 +94,9 @@ class InstanceResponse(BaseModel):
             encoded_stream_path=encoded_stream_path,
             config_path=instance.config_path,
             gpu=instance.gpu,
+            cache_size=instance.cache_size,
+            view_only=instance.view_only,
+            compact=instance.compact,
             pid=instance.pid,
             created_at=instance.created_at,
             started_at=instance.started_at,
@@ -189,6 +195,7 @@ class BrowseConfigResponse(BaseModel):
     default_custom_ip: str | None = None
     external_url: str | None = None  # External base URL for proxy access (e.g., https://gsplay.4dgst.win)
     view_only: bool = False  # If true, all instances are forced to view-only mode
+    history_limit: int = 5  # Maximum number of launch history entries to show in UI
 
 
 class BrowseLaunchRequest(BaseModel):

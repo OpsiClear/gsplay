@@ -668,7 +668,7 @@
             <label>Options</label>
             <div style="display: flex; gap: 8px;">
               <button type="button" class="toggle-btn active" id="compactBtn" onclick="toggleOption('compact')">Compact</button>
-              <button type="button" class="toggle-btn" id="viewOnlyBtn" style="display: none;" onclick="toggleOption('viewOnly')">View Only</button>
+              <button type="button" class="toggle-btn active" id="viewOnlyBtn" style="display: none;" onclick="toggleOption('viewOnly')">View Only</button>
             </div>
           </div>
         </div>
@@ -1010,7 +1010,7 @@
           <div class="instance-item ${isSelected ? 'selected' : ''}" onclick="selectInstance('${i.id}')">
             <span class="instance-name">${escapeHtml(i.name)}</span>
             <span class="badge ${badgeClass}">${i.status}</span>
-            <span class="instance-meta">:${i.port}${i.gpu !== null ? ` • GPU ${i.gpu}` : ''}</span>
+            <span class="instance-meta">:${i.port}${i.gpu !== null ? ` • GPU ${i.gpu}` : ''}${i.view_only ? ' • <span style="color: var(--accent);">View</span>' : ''}${i.compact ? ' • <span style="color: #a78bfa;">Compact</span>' : ''}</span>
             <span class="instance-actions">
               ${isActive ? `
                 <span class="btn-group">

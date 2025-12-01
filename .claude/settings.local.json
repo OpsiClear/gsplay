@@ -110,7 +110,8 @@
       "Bash(.venv/bin/ruff:*)",
       "Bash(.venv/bin/gsplay_launcher:*)",
       "Bash(git grep:*)",
-      "WebFetch(domain:docs.nvidia.com)"
+      "WebFetch(domain:docs.nvidia.com)",
+      "Bash(/home/yeheliu/.deno/bin/deno task build)"
     ],
     "deny": [],
     "ask": []

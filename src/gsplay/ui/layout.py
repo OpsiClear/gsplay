@@ -179,14 +179,14 @@ def create_config_menu(
     except (ValueError, AttributeError):
         initial_mode = "All GPU"
 
-    # Determine default config path
-    default_config_path = "config.yaml"
+    # Determine default config path (gsplay.yaml in data folder)
+    default_config_path = "gsplay.yaml"
     if config.model_config_path:
         model_path = Path(str(config.model_config_path))
         if model_path.is_dir():
-            default_config_path = str(model_path / "config.yaml")
+            default_config_path = str(model_path / "gsplay.yaml")
         else:
-            default_config_path = str(model_path.parent / "config.yaml")
+            default_config_path = str(model_path.parent / "gsplay.yaml")
 
     # Mode dropdown
     processing_mode = server.gui.add_dropdown(
@@ -245,70 +245,33 @@ def create_config_menu(
     config_path_input = server.gui.add_text(
         "Config Path",
         initial_value=default_config_path,
-        hint="Path to YAML config file for export/import",
+        hint="Path to YAML config file for export",
     )
 
-    # Export/Import button group (styled like Preset/Transform)
-    config_buttons = server.gui.add_button_group(
-        "Config",
-        ("Export", "Import"),
+    # Single Export Config button
+    config_buttons = server.gui.add_button(
+        "Export Config",
+        icon=viser.Icon.DOWNLOAD,
+        hint="Export current settings to config file",
     )
 
     # Setup callbacks
     if viewer_app is not None:
-        from src.gsplay.config.io import export_viewer_config, import_viewer_config
-        from src.gsplay.interaction.events import EventType
+        from src.gsplay.config.io import export_viewer_config
 
         @config_buttons.on_click
         def _(event) -> None:
-            action = config_buttons.value.strip()
-
-            if action == "Export":
-                try:
-                    output_path = Path(config_path_input.value)
-                    export_viewer_config(
-                        viewer_app.config,
-                        camera_controller,
-                        output_path,
-                    )
-                    logger.info(f"Config exported to {output_path}")
-                except Exception as e:
-                    logger.error(f"Failed to export config: {e}", exc_info=True)
-
-            elif action == "Import":
-                try:
-                    input_path = Path(config_path_input.value)
-                    if not input_path.exists():
-                        logger.error(f"Config file not found: {input_path}")
-                        return
-
-                    import_viewer_config(
-                        viewer_app.config,
-                        camera_controller,
-                        input_path,
-                    )
-
-                    # Update UI from config
-                    if viewer_app.ui:
-                        viewer_app.ui.set_color_values(
-                            viewer_app.config.color_values,
-                            alpha_scaler=viewer_app.config.alpha_scaler,
-                        )
-                        viewer_app.ui.set_transform_values(
-                            viewer_app.config.transform_values
-                        )
-                        viewer_app.ui.set_volume_filter(
-                            viewer_app.config.volume_filter
-                        )
-                        viewer_app.ui.set_filter_values(
-                            viewer_app.config.filter_values
-                        )
-                        if viewer_app.event_bus:
-                            viewer_app.event_bus.emit(EventType.RERENDER_REQUESTED)
-
-                    logger.info(f"Config imported from {input_path}")
-                except Exception as e:
-                    logger.error(f"Failed to import config: {e}", exc_info=True)
+            try:
+                output_path = Path(config_path_input.value)
+                export_viewer_config(
+                    viewer_app.config,
+                    camera_controller,
+                    output_path,
+                    ui_handles=viewer_app.ui,
+                )
+                logger.info(f"Config exported to {output_path}")
+            except Exception as e:
+                logger.error(f"Failed to export config: {e}", exc_info=True)
 
     logger.debug("Created config menu")
     return (
@@ -718,9 +681,9 @@ def create_volume_filter_controls(
         hint="Copy current camera position and rotation to frustum filter",
     )
 
-    # Legacy checkbox (hidden)
+    # CPU filtering option (hidden, used for fallback on non-CUDA devices)
     controls["use_cpu_filtering"] = server.gui.add_checkbox(
-        "CPU Filtering (Legacy)",
+        "CPU Filtering",
         initial_value=config.volume_filter.use_cpu_filtering,
         visible=False,
     )
@@ -851,22 +814,18 @@ def create_color_controls(
         hint="<1=fade, 1=normal, >1=boost",
     )
 
-    # Auto-fit controls
-    controls["learn_level"] = server.gui.add_dropdown(
-        "Learn Level",
-        ["Basic", "Standard", "Full"],
-        initial_value="Standard",
-        hint="Basic=3 params, Standard=6 params, Full=11 params",
+    # Unified color adjustment dropdown (gsmod 0.1.4 auto-correction + presets + advanced)
+    from src.gsplay.core.handlers.color_presets import get_dropdown_options
+
+    controls["color_adjustment"] = server.gui.add_dropdown(
+        "Adjustment",
+        get_dropdown_options(),
+        initial_value="Auto Enhance",
+        hint="Auto-correction (gsmod 0.1.4), style presets, or histogram learning",
     )
-    controls["color_profile"] = server.gui.add_dropdown(
-        "Target Profile",
-        ["Neutral", "Vibrant", "Dramatic", "Bright", "Dark", "Warm", "Cool", "Cinematic", "Muted", "Punchy"],
-        initial_value="Neutral",
-        hint="Target color profile to fit",
-    )
-    controls["auto_fit"] = server.gui.add_button(
-        "Auto Fit",
-        hint="Automatically adjust colors to match selected profile",
+    controls["apply_button"] = server.gui.add_button(
+        "Apply",
+        hint="Apply selected color adjustment",
     )
 
     controls["reset_button"] = server.gui.add_button("Reset")
@@ -1007,6 +966,7 @@ def setup_ui_layout(
 
     logger.debug("Setting up UI layout")
     view_only = getattr(config, "view_only", False)
+    compact_ui = getattr(config, "compact_ui", False)
 
     # Info panel at very top (compact markdown display)
     info_panel = create_info_panel(server)
@@ -1030,6 +990,11 @@ def setup_ui_layout(
     jpeg_quality_slider = None
     auto_quality_checkbox = None
     setup_camera_sync = None
+    # View/Camera controls
+    zoom_slider = None
+    azimuth_slider = None
+    elevation_slider = None
+    roll_slider = None
 
     # Playback controls (after data loader) - FPS and frame controls at root level
     if camera_controller is not None:
@@ -1049,11 +1014,78 @@ def setup_ui_layout(
         # Playback controls (Frame slider + Play/Pause button)
         time_slider, auto_play = create_playback_controls(server, config)
 
-    # Spacer before tabs
-    server.gui.add_markdown(content=" ")
+    # Load Config button (under play controls)
+    load_config_button = server.gui.add_button(
+        "Load Config",
+        icon=viser.Icon.UPLOAD,
+        hint="Load settings from gsplay.yaml in data folder",
+    )
 
-    # Create tab group for View/Config/Convert
-    main_tabs = server.gui.add_tab_group()
+    # Setup Load Config callback
+    if viewer_app is not None:
+        from src.gsplay.config.io import import_viewer_config
+        from src.gsplay.interaction.events import EventType
+        from src.infrastructure.processing_mode import ProcessingMode
+
+        @load_config_button.on_click
+        def _load_config_click(event) -> None:
+            try:
+                # Determine config path from model path
+                if not config.model_config_path:
+                    logger.warning("No model path set, cannot load config")
+                    return
+
+                model_path = Path(str(config.model_config_path))
+                if model_path.is_dir():
+                    config_path = model_path / "gsplay.yaml"
+                else:
+                    config_path = model_path.parent / "gsplay.yaml"
+
+                if not config_path.exists():
+                    logger.warning(f"Config file not found: {config_path}")
+                    return
+
+                logger.info(f"Loading config from {config_path}")
+
+                import_viewer_config(
+                    viewer_app.config,
+                    camera_controller,
+                    config_path,
+                    ui_handles=viewer_app.ui,
+                )
+
+                # Update UI from imported config
+                if viewer_app.ui:
+                    viewer_app.ui.set_color_values(
+                        viewer_app.config.color_values,
+                        alpha_scaler=viewer_app.config.alpha_scaler,
+                    )
+                    viewer_app.ui.set_transform_values(
+                        viewer_app.config.transform_values
+                    )
+                    viewer_app.ui.set_volume_filter(
+                        viewer_app.config.volume_filter
+                    )
+                    viewer_app.ui.set_filter_values(
+                        viewer_app.config.filter_values
+                    )
+                    # Update processing mode dropdown
+                    if viewer_app.ui.processing_mode_dropdown is not None:
+                        try:
+                            mode = ProcessingMode.from_string(viewer_app.config.processing_mode)
+                            viewer_app.ui.processing_mode_dropdown.value = mode.to_display_string()
+                        except (ValueError, AttributeError):
+                            pass
+
+                    if viewer_app.event_bus:
+                        viewer_app.event_bus.emit(EventType.RERENDER_REQUESTED)
+
+                logger.info(f"Config loaded from {config_path}")
+            except Exception as e:
+                logger.error(f"Failed to load config: {e}", exc_info=True)
+
+    # Spacer before tabs/folders
+    server.gui.add_markdown(content=" ")
 
     # Initialize export controls (may be hidden in view-only mode)
     export_path = None
@@ -1063,94 +1095,188 @@ def setup_ui_layout(
     config_path_input = None
     config_buttons = None
 
-    # View tab (camera controls) - first tab
-    if camera_controller is not None:
-        with main_tabs.add_tab("View", icon=None):
-            view_controls = create_view_controls(server, camera_controller)
-            zoom_slider, azimuth_slider, elevation_slider, roll_slider, setup_camera_sync = view_controls
+    if compact_ui:
+        # Compact mode: wrap tab groups in collapsible folders
+        # Main folder containing View/Config/Convert tabs
+        with server.gui.add_folder("Main"):
+            main_tabs = server.gui.add_tab_group()
 
-        # Set up camera sync after all controls are created
-        if setup_camera_sync:
-            setup_camera_sync()
+            # View tab (camera controls)
+            if camera_controller is not None:
+                with main_tabs.add_tab("View", icon=None):
+                    view_controls = create_view_controls(server, camera_controller)
+                    zoom_slider, azimuth_slider, elevation_slider, roll_slider, setup_camera_sync = view_controls
 
-    # Config tab (quality settings + config menu)
-    with main_tabs.add_tab("Config", icon=None):
-        # Quality controls (Quality, JPEG, Auto Quality)
+                # Set up camera sync after all controls are created
+                if setup_camera_sync:
+                    setup_camera_sync()
+
+            # Config tab (quality settings + config menu)
+            with main_tabs.add_tab("Config", icon=None):
+                # Quality controls (Quality, JPEG, Auto Quality)
+                if camera_controller is not None:
+                    render_quality, jpeg_quality_slider, auto_quality_checkbox = create_quality_controls(
+                        server, config
+                    )
+
+                # Config menu (processing mode, grid, axis, save/load)
+                (
+                    processing_mode_dropdown,
+                    cfg_path_input,
+                    cfg_buttons,
+                    grid_buttons,
+                    world_axis_buttons,
+                ) = create_config_menu(server, config, camera_controller, viewer_app=viewer_app)
+                # Only expose config save controls if not view-only
+                if not view_only:
+                    config_path_input = cfg_path_input
+                    config_buttons = cfg_buttons
+                else:
+                    # Hide config save controls in view-only mode
+                    if cfg_path_input:
+                        cfg_path_input.visible = False
+                    if cfg_buttons:
+                        cfg_buttons.visible = False
+
+                # Terminate instance button
+                server.gui.add_markdown(content=" ")
+                terminate_button = server.gui.add_button(
+                    "Terminate Instance",
+                    icon=viser.Icon.POWER,
+                    color="red",
+                    hint="Shut down this viewer instance",
+                )
+
+            # Convert tab (hidden in view-only mode)
+            if not view_only:
+                with main_tabs.add_tab("Convert", icon=None):
+                    (
+                        export_path,
+                        export_format,
+                        export_device,
+                        export_ply_button,
+                    ) = create_export_menu(server, config)
+
+        # Edit folder containing Transform/Filter/Color/Color+ tabs
+        with server.gui.add_folder("Edit"):
+            edit_tabs = server.gui.add_tab_group()
+
+            # Transform tab
+            with edit_tabs.add_tab("Transform", icon=None):
+                (
+                    translation_x,
+                    translation_y,
+                    translation_z,
+                    global_scale,
+                    rotation_x,
+                    rotation_y,
+                    rotation_z,
+                    reset_pose,
+                ) = create_transform_controls(server, config)
+
+            # Filter tab
+            with edit_tabs.add_tab("Filter", icon=None):
+                filter_controls = create_volume_filter_controls(server, config)
+
+            # Color tab (basic)
+            with edit_tabs.add_tab("Color", icon=None):
+                color_controls = create_color_controls(server, config)
+
+            # Color+ tab (advanced)
+            with edit_tabs.add_tab("Color+", icon=None):
+                color_advanced_controls = create_color_advanced_controls(server, config)
+
+    else:
+        # Standard mode: use tab groups
+        # Create tab group for View/Config/Convert
+        main_tabs = server.gui.add_tab_group()
+
+        # View tab (camera controls) - first tab
         if camera_controller is not None:
-            render_quality, jpeg_quality_slider, auto_quality_checkbox = create_quality_controls(
-                server, config
+            with main_tabs.add_tab("View", icon=None):
+                view_controls = create_view_controls(server, camera_controller)
+                zoom_slider, azimuth_slider, elevation_slider, roll_slider, setup_camera_sync = view_controls
+
+            # Set up camera sync after all controls are created
+            if setup_camera_sync:
+                setup_camera_sync()
+
+        # Config tab (quality settings + config menu)
+        with main_tabs.add_tab("Config", icon=None):
+            # Quality controls (Quality, JPEG, Auto Quality)
+            if camera_controller is not None:
+                render_quality, jpeg_quality_slider, auto_quality_checkbox = create_quality_controls(
+                    server, config
+                )
+
+            # Config menu (processing mode, grid, axis, save/load)
+            (
+                processing_mode_dropdown,
+                cfg_path_input,
+                cfg_buttons,
+                grid_buttons,
+                world_axis_buttons,
+            ) = create_config_menu(server, config, camera_controller, viewer_app=viewer_app)
+            # Only expose config save controls if not view-only
+            if not view_only:
+                config_path_input = cfg_path_input
+                config_buttons = cfg_buttons
+            else:
+                # Hide config save controls in view-only mode
+                if cfg_path_input:
+                    cfg_path_input.visible = False
+                if cfg_buttons:
+                    cfg_buttons.visible = False
+
+            # Terminate instance button
+            server.gui.add_markdown(content=" ")
+            terminate_button = server.gui.add_button(
+                "Terminate Instance",
+                icon=viser.Icon.POWER,
+                color="red",
+                hint="Shut down this viewer instance",
             )
 
-        # Config menu (processing mode, grid, axis, save/load)
-        (
-            processing_mode_dropdown,
-            cfg_path_input,
-            cfg_buttons,
-            grid_buttons,
-            world_axis_buttons,
-        ) = create_config_menu(server, config, camera_controller, viewer_app=viewer_app)
-        # Only expose config save controls if not view-only
+        # Convert tab (hidden in view-only mode)
         if not view_only:
-            config_path_input = cfg_path_input
-            config_buttons = cfg_buttons
-        else:
-            # Hide config save controls in view-only mode
-            if cfg_path_input:
-                cfg_path_input.visible = False
-            if cfg_buttons:
-                cfg_buttons.visible = False
+            with main_tabs.add_tab("Convert", icon=None):
+                (
+                    export_path,
+                    export_format,
+                    export_device,
+                    export_ply_button,
+                ) = create_export_menu(server, config)
 
-    # Convert tab (hidden in view-only mode)
-    if not view_only:
-        with main_tabs.add_tab("Convert", icon=None):
+        # Spacer between tab groups
+        server.gui.add_markdown(content=" ")
+
+        # Create tab group for Transform, Filter, and Color controls
+        edit_tabs = server.gui.add_tab_group()
+
+        # Transform tab
+        with edit_tabs.add_tab("Transform", icon=None):
             (
-                export_path,
-                export_format,
-                export_device,
-                export_ply_button,
-            ) = create_export_menu(server, config)
+                translation_x,
+                translation_y,
+                translation_z,
+                global_scale,
+                rotation_x,
+                rotation_y,
+                rotation_z,
+                reset_pose,
+            ) = create_transform_controls(server, config)
 
-    # Spacer between tab groups
-    server.gui.add_markdown(content=" ")
+        # Filter tab
+        with edit_tabs.add_tab("Filter", icon=None):
+            filter_controls = create_volume_filter_controls(server, config)
 
-    # Create tab group for Transform, Filter, and Color controls
-    edit_tabs = server.gui.add_tab_group()
+        # Color tab (basic)
+        with edit_tabs.add_tab("Color", icon=None):
+            color_controls = create_color_controls(server, config)
 
-    # Transform tab
-    with edit_tabs.add_tab("Transform", icon=None):
-        (
-            translation_x,
-            translation_y,
-            translation_z,
-            global_scale,
-            rotation_x,
-            rotation_y,
-            rotation_z,
-            reset_pose,
-        ) = create_transform_controls(server, config)
-
-    # Filter tab
-    with edit_tabs.add_tab("Filter", icon=None):
-        filter_controls = create_volume_filter_controls(server, config)
-
-    # Color tab (basic)
-    with edit_tabs.add_tab("Color", icon=None):
-        color_controls = create_color_controls(server, config)
-
-    # Color+ tab (advanced)
-    with edit_tabs.add_tab("Color+", icon=None):
-        color_advanced_controls = create_color_advanced_controls(server, config)
-
-    # Spacer before terminate button
-    server.gui.add_markdown(content=" ")
-
-    # Terminate instance button at the bottom
-    terminate_button = server.gui.add_button(
-        "Terminate Instance",
-        icon=viser.Icon.POWER,
-        color="red",
-        hint="Shut down this viewer instance",
-    )
+        # Color+ tab (advanced)
+        with edit_tabs.add_tab("Color+", icon=None):
+            color_advanced_controls = create_color_advanced_controls(server, config)
 
     # Assemble into UIHandles dataclass
     ui = UIHandles(
@@ -1166,6 +1292,11 @@ def setup_ui_layout(
         render_quality=render_quality,
         jpeg_quality_slider=jpeg_quality_slider,
         auto_quality_checkbox=auto_quality_checkbox,
+        # View/Camera controls
+        zoom_slider=zoom_slider,
+        azimuth_slider=azimuth_slider,
+        elevation_slider=elevation_slider,
+        roll_slider=roll_slider,
         # Color adjustments - basic (from color_controls dict)
         temperature_slider=color_controls["temperature"],
         tint_slider=color_controls["tint"],
@@ -1175,10 +1306,9 @@ def setup_ui_layout(
         gamma_slider=color_controls["gamma"],
         alpha_scaler_slider=color_controls["alpha_scaler"],
         reset_colors_button=color_controls["reset_button"],
-        # Auto-fit color controls
-        learn_level_dropdown=color_controls["learn_level"],
-        color_profile_dropdown=color_controls["color_profile"],
-        auto_fit_button=color_controls["auto_fit"],
+        # Unified color adjustment controls (gsmod 0.1.4)
+        color_adjustment_dropdown=color_controls["color_adjustment"],
+        apply_adjustment_button=color_controls["apply_button"],
         # Color adjustments - advanced (from color_advanced_controls dict)
         vibrance_slider=color_advanced_controls["vibrance"],
         hue_shift_slider=color_advanced_controls["hue_shift"],
@@ -1256,6 +1386,7 @@ def setup_ui_layout(
         # Config menu
         config_path_input=config_path_input,
         config_buttons=config_buttons,
+        load_config_button=load_config_button,
         # Instance control
         terminate_button=terminate_button,
     )

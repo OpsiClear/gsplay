@@ -342,13 +342,17 @@ class UniversalGSPlay:
         """Setup UI, handlers, and nerfview viewer."""
         logger.debug("Setting up viewer...")
 
-        # Configure viser theme based on compact_ui setting
-        compact_ui = getattr(self.config, "compact_ui", False)
+        # Configure viser theme to match launcher style (cyan accent #06b6d4)
+        # Use floating panel for compact/mobile UI, fixed panel (right sidebar) for desktop
+        layout = "floating" if self.config.compact_ui else "fixed"
+
         self.server.gui.configure_theme(
-            control_layout="floating" if compact_ui else "collapsible",
-            control_width="small" if compact_ui else "medium",
+            control_layout=layout,
+            control_width="medium",
             dark_mode=True,
-            brand_color=(100, 180, 255),
+            brand_color=(6, 182, 212),
+            show_logo=False,
+            show_share_button=False,
         )
 
         # Create camera controller first (UI will be created in setup_ui_layout)
@@ -691,135 +695,75 @@ class UniversalGSPlay:
         logger.debug("Filter visualizer callbacks registered")
 
     def _setup_auto_learn_color(self) -> None:
-        """Setup auto-fit color callback."""
+        """Setup unified color adjustment callback."""
         if not self.ui:
             return
 
-        # Register "Auto Fit" button callback
-        if self.ui.auto_fit_button:
+        # Register "Apply" button callback for unified color adjustment
+        if self.ui.apply_adjustment_button:
 
-            @self.ui.auto_fit_button.on_click
-            def on_auto_fit(_) -> None:
-                self._auto_fit_colors()
+            @self.ui.apply_adjustment_button.on_click
+            def on_apply_adjustment(_) -> None:
+                self._apply_color_adjustment()
 
-        logger.debug("Auto-fit color callback registered")
+        logger.debug("Color adjustment callback registered")
 
-    def _auto_fit_colors(self) -> None:
-        """Fit color parameters to selected target profile.
+    def _apply_color_adjustment(self) -> None:
+        """Apply selected color adjustment from unified dropdown.
 
-        Two-stage approach:
-        1. Learn normalization params to bring colors to neutral baseline
-        2. Compose with preset style adjustments
+        Handles three categories:
+        - correction: gsmod 0.1.4 auto-correction (auto_enhance, auto_contrast, etc.)
+        - stylize: preset color profiles (vibrant, dramatic, etc.)
+        - advanced: legacy histogram learning (auto_fit basic/standard/full)
         """
         if not self.model:
             logger.warning("No model loaded")
             return
 
         try:
-            import torch
             from gsmod import ColorValues
-            from gsmod.histogram.result import HistogramResult
-            import numpy as np
-
-            # Get selected profile
-            profile = "neutral"
-            if self.ui and self.ui.color_profile_dropdown:
-                profile = self.ui.color_profile_dropdown.value.lower()
-
-            # Get current frame data
-            frame_idx = 0
-            if self.ui and self.ui.time_slider:
-                frame_idx = int(self.ui.time_slider.value)
-
-            # Convert frame index to normalized time
-            total_frames = self.model.get_total_frames()
-            normalized_time = (
-                frame_idx / max(1, total_frames - 1) if total_frames > 1 else 0.0
+            from src.gsplay.core.handlers.color_presets import (
+                get_adjustment_type,
+                get_preset_values,
             )
 
-            gaussians = self.model.get_gaussians_at_normalized_time(normalized_time)
+            # Get selected option from dropdown
+            option = "Auto Enhance"
+            if self.ui and self.ui.color_adjustment_dropdown:
+                option = self.ui.color_adjustment_dropdown.value
+
+            category, key = get_adjustment_type(option)
+
+            # Get current frame gaussians
+            gaussians = self._get_current_frame_gaussians()
             if gaussians is None:
                 logger.warning("Could not get frame data")
                 return
 
-            # Get source colors as tensor
-            if hasattr(gaussians, "sh0"):
-                source_colors = gaussians.sh0
-                if not isinstance(source_colors, torch.Tensor):
-                    source_colors = torch.tensor(source_colors, dtype=torch.float32)
+            if category == "correction":
+                # gsmod 0.1.4 auto-correction functions
+                from src.gsplay.core.handlers.auto_correction import (
+                    apply_auto_correction,
+                )
+
+                color_values = apply_auto_correction(gaussians, key)
+
+            elif category == "stylize":
+                # Style preset (direct preset values)
+                color_values = get_preset_values(key)
+
+            elif category == "advanced":
+                # Legacy histogram learning - get colors tensor
+                colors = self._get_colors_from_gaussians(gaussians)
+                if colors is None:
+                    logger.warning("Could not extract colors")
+                    return
+                color_values = self._histogram_learn(colors, key)
+
             else:
-                source_colors = torch.tensor(gaussians.sh0, dtype=torch.float32)
+                color_values = ColorValues()
 
-            source_colors = source_colors.to(self.device)
-
-            # Stage 1: Create neutral target histogram and learn normalization
-            # Target: mean=0.5, std=0.289 (uniform distribution stats)
-            neutral_target = HistogramResult(
-                counts=np.ones((3, 64), dtype=np.int64),  # Uniform
-                bin_edges=np.linspace(0, 1, 65),
-                mean=np.array([0.5, 0.5, 0.5]),
-                std=np.array([0.289, 0.289, 0.289]),  # std of uniform [0,1]
-                min_val=np.array([0.0, 0.0, 0.0]),
-                max_val=np.array([1.0, 1.0, 1.0]),
-                n_samples=1000,
-            )
-
-            # Get learn level
-            learn_level = "standard"
-            if self.ui and self.ui.learn_level_dropdown:
-                learn_level = self.ui.learn_level_dropdown.value.lower()
-
-            # Select parameters based on learn level
-            # NOTE: saturation/vibrance excluded - causes grayscale (degenerate solution)
-            # These are stylistic params, not normalization params
-            if learn_level == "basic":
-                # 3 params - fast, core tonal only
-                norm_params = ["brightness", "contrast", "gamma"]
-                n_epochs, lr = 100, 0.02
-            elif learn_level == "full":
-                # 8 params - tonal + white balance + range
-                norm_params = [
-                    "brightness",
-                    "contrast",
-                    "gamma",  # Core tonal
-                    "temperature",
-                    "tint",  # White balance
-                    "shadows",
-                    "highlights",  # Tonal range
-                    "fade",  # Lifted blacks
-                ]
-                n_epochs, lr = 200, 0.015
-            else:  # standard
-                # 5 params - tonal + white balance
-                norm_params = [
-                    "brightness",
-                    "contrast",
-                    "gamma",  # Core tonal
-                    "temperature",
-                    "tint",  # White balance
-                ]
-                n_epochs, lr = 150, 0.02
-
-            norm_values = neutral_target.learn_from(
-                source_colors,
-                params=norm_params,
-                n_epochs=n_epochs,
-                lr=lr,
-                verbose=False,
-            )
-
-            # Stage 2: Get preset style adjustments
-            # For "neutral" profile, just use normalization
-            if profile == "neutral":
-                color_values = norm_values
-            else:
-                # Get preset adjustments (these are relative to neutral)
-                preset_values = self._get_preset_values(profile)
-
-                # Compose: normalization + preset
-                color_values = self._compose_color_values(norm_values, preset_values)
-
-            # Update UI sliders with fitted values
+            # Update UI sliders with computed values
             if self.ui:
                 self.ui.set_color_values(color_values)
 
@@ -831,27 +775,110 @@ class UniversalGSPlay:
                 self.render_component.rerender()
 
             logger.info(
-                f"Auto-fit to '{profile}': brightness={color_values.brightness:.3f}, "
-                f"contrast={color_values.contrast:.3f}, gamma={color_values.gamma:.3f}, "
-                f"saturation={color_values.saturation:.3f}"
+                f"Applied '{option}': brightness={color_values.brightness:.3f}, "
+                f"contrast={color_values.contrast:.3f}, gamma={color_values.gamma:.3f}"
             )
 
+        except ImportError as e:
+            logger.error(f"gsmod 0.1.4 auto-correction not available: {e}")
         except Exception as e:
-            logger.error(f"Failed to auto-fit colors: {e}", exc_info=True)
+            logger.error(f"Failed to apply color adjustment: {e}", exc_info=True)
 
-    def _get_preset_values(self, profile: str) -> ColorValues:
-        """Get preset color adjustments for a profile (relative to neutral)."""
-        from src.gsplay.core.handlers.color_presets import get_preset_values
+    def _get_current_frame_gaussians(self) -> "GSTensor | None":
+        """Get GSTensor for current frame."""
+        frame_idx = 0
+        if self.ui and self.ui.time_slider:
+            frame_idx = int(self.ui.time_slider.value)
 
-        return get_preset_values(profile)
+        total_frames = self.model.get_total_frames()
+        normalized_time = (
+            frame_idx / max(1, total_frames - 1) if total_frames > 1 else 0.0
+        )
 
-    def _compose_color_values(
-        self, base: ColorValues, style: ColorValues
-    ) -> ColorValues:
-        """Compose two ColorValues: apply base normalization, then style adjustments."""
-        from src.gsplay.core.handlers.color_presets import compose_color_values
+        return self.model.get_gaussians_at_normalized_time(normalized_time)
 
-        return compose_color_values(base, style)
+    def _get_colors_from_gaussians(
+        self, gaussians: "GSTensor | None"
+    ) -> "torch.Tensor | None":
+        """Extract SH0 colors from gaussians as GPU tensor."""
+        import torch
+
+        if gaussians is None or not hasattr(gaussians, "sh0"):
+            return None
+
+        sh0 = gaussians.sh0
+        if not isinstance(sh0, torch.Tensor):
+            sh0 = torch.tensor(sh0, dtype=torch.float32)
+
+        return sh0.to(self.device)
+
+    # Histogram learning configuration by level
+    # NOTE: saturation/vibrance excluded - causes grayscale (degenerate solution)
+    _HISTOGRAM_LEARN_CONFIG: dict[str, tuple[list[str], int, float]] = {
+        "basic": (["brightness", "contrast", "gamma"], 100, 0.02),
+        "standard": (
+            ["brightness", "contrast", "gamma", "temperature", "tint"],
+            150,
+            0.02,
+        ),
+        "full": (
+            [
+                "brightness",
+                "contrast",
+                "gamma",
+                "temperature",
+                "tint",
+                "shadows",
+                "highlights",
+                "fade",
+            ],
+            200,
+            0.015,
+        ),
+    }
+
+    def _histogram_learn(self, colors: "torch.Tensor", level: str) -> "ColorValues":
+        """Legacy histogram learning.
+
+        Parameters
+        ----------
+        colors : torch.Tensor
+            Source SH0 colors (N, 3)
+        level : str
+            One of "basic", "standard", "full"
+
+        Returns
+        -------
+        ColorValues
+            Learned normalization parameters
+        """
+        from gsmod.histogram.result import HistogramResult
+        import numpy as np
+
+        # Get config for level (default to standard)
+        norm_params, n_epochs, lr = self._HISTOGRAM_LEARN_CONFIG.get(
+            level, self._HISTOGRAM_LEARN_CONFIG["standard"]
+        )
+
+        # Create neutral target histogram
+        # Target: mean=0.5, std=0.289 (uniform distribution stats)
+        neutral_target = HistogramResult(
+            counts=np.ones((3, 64), dtype=np.int64),
+            bin_edges=np.linspace(0, 1, 65),
+            mean=np.array([0.5, 0.5, 0.5]),
+            std=np.array([0.289, 0.289, 0.289]),
+            min_val=np.array([0.0, 0.0, 0.0]),
+            max_val=np.array([1.0, 1.0, 1.0]),
+            n_samples=1000,
+        )
+
+        return neutral_target.learn_from(
+            colors,
+            params=norm_params,
+            n_epochs=n_epochs,
+            lr=lr,
+            verbose=False,
+        )
 
     def _update_filter_visualization(self) -> None:
         """Update filter visualization based on current UI state.

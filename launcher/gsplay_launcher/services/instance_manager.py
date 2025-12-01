@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import psutil
+
 from gsplay_launcher.config import LauncherConfig
 from gsplay_launcher.models import InstanceStatus, LauncherState, GSPlayInstance
 from gsplay_launcher.services.port_allocator import PortAllocator
@@ -328,19 +330,33 @@ class InstanceManager:
             raise InstanceNotFoundError(instance_id)
 
         # Sync status with actual process
-        self._sync_instance_status(instance)
+        if self._sync_instance_status(instance):
+            self._persistence.save(self._state)
         return instance
 
     def list_all(self) -> list[GSPlayInstance]:
-        """List all instances.
+        """List all instances, pruning any that have already stopped."""
+        changed = False
+        to_delete: list[str] = []
 
-        Returns
-        -------
-        list[GSPlayInstance]
-            All instances.
-        """
-        for instance in self._state.instances.values():
-            self._sync_instance_status(instance)
+        # Work on a copy so we can safely prune terminated entries
+        for instance_id, instance in list(self._state.instances.items()):
+            if self._sync_instance_status(instance):
+                changed = True
+
+            # Automatically remove cleanly stopped instances to keep the UI in sync
+            if instance.status == InstanceStatus.STOPPED:
+                to_delete.append(instance_id)
+
+        if to_delete:
+            for instance_id in to_delete:
+                del self._state.instances[instance_id]
+            changed = True
+            logger.info("Pruned stopped instances: %s", ", ".join(to_delete))
+
+        if changed:
+            self._persistence.save(self._state)
+
         return list(self._state.instances.values())
 
     def get_next_available_port(self) -> int | None:
@@ -368,14 +384,36 @@ class InstanceManager:
                 return instance
         return None
 
-    def _sync_instance_status(self, instance: GSPlayInstance) -> None:
-        """Sync instance status with actual process state."""
-        if instance.pid is None:
-            return
+    def _sync_instance_status(self, instance: GSPlayInstance) -> bool:
+        """Sync instance status with actual process state.
 
-        if instance.status == InstanceStatus.RUNNING:
-            if not self._process_manager.is_running(instance.pid):
-                # Process died unexpectedly
-                instance.mark_failed("Process terminated unexpectedly")
-                self._persistence.save(self._state)
-                logger.warning("Instance %s process died unexpectedly", instance.id)
+        Returns
+        -------
+        bool
+            True if the instance state changed.
+        """
+        if instance.pid is None:
+            return False
+
+        if self._process_manager.is_running(instance.pid):
+            return False
+
+        exit_code: int | None = None
+        try:
+            proc = psutil.Process(instance.pid)
+            exit_code = proc.wait(timeout=0)
+        except psutil.NoSuchProcess:
+            exit_code = 0
+        except psutil.TimeoutExpired:
+            return False
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Could not determine exit code for %s: %s", instance.id, e)
+
+        if exit_code and exit_code != 0:
+            instance.mark_failed(f"Process exited with code {exit_code}")
+            logger.warning("Instance %s exited unexpectedly (code %s)", instance.id, exit_code)
+        else:
+            instance.mark_stopped()
+            logger.info("Instance %s stopped (process exited)", instance.id)
+
+        return True

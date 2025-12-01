@@ -180,9 +180,32 @@ class GPUJpegBackend:
             image = self._prepare_numpy(image)
 
         # Encode using thread-local encoder
+        # NOTE: We synchronize the CUDA device before encoding because:
+        # 1. The input tensor may have been created on a different stream
+        # 2. nvImageCodec uses its own CUDA context and needs stable memory
+        # 3. Without sync, we can get "Unable to get context for stream" errors
         encoder = self._get_encoder()
-        nv_image = self._nvimgcodec.as_image(image)
-        return encoder.encode(nv_image, codec="jpeg", params=params)
+        
+        try:
+            # Ensure all CUDA operations on this tensor are complete
+            # This is critical when the tensor was created on a non-default stream
+            import torch
+            if isinstance(image, torch.Tensor) and image.is_cuda:
+                torch.cuda.synchronize(image.device)
+            
+            nv_image = self._nvimgcodec.as_image(image)
+            result = encoder.encode(nv_image, codec="jpeg", params=params)
+            return result
+        except Exception as e:
+            # If nvImageCodec fails, attempt to recover CUDA state
+            try:
+                import torch
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+            logger.error(f"nvImageCodec encode failed: {e}")
+            raise
 
     def _prepare_tensor(self, tensor: "torch.Tensor") -> "torch.Tensor":
         """Prepare tensor for encoding (GPU path, zero-copy).

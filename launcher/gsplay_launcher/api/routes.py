@@ -330,6 +330,7 @@ def get_browse_config(
             enabled=False,
             external_url=manager.config.external_url,
             view_only=manager.config.view_only,
+            history_limit=manager.config.history_limit,
         )
     return BrowseConfigResponse(
         enabled=True,
@@ -337,6 +338,7 @@ def get_browse_config(
         default_custom_ip=manager.config.custom_ip,
         external_url=manager.config.external_url,
         view_only=manager.config.view_only,
+        history_limit=manager.config.history_limit,
     )
 
 

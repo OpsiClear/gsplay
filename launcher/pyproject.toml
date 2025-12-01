@@ -2,6 +2,7 @@
 name = "gsplay-launcher"
 version = "0.1.0"
 description = "FastAPI launcher for managing GSPlay instances"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.12,<3.13"
 
 dependencies = [
@@ -33,4 +34,7 @@ where = ["."]
 include = ["gsplay_launcher*"]
 
 [tool.setuptools.package-data]
-gsplay_launcher = ["templates/*.html"]
+gsplay_launcher = [
+    "templates/*.html",
+    "static/**/*",
+]

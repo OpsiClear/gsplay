@@ -118,13 +118,13 @@ class GSPlayAPI:
     def play(self) -> None:
         """Start playback."""
         if self._viewer.ui and self._viewer.ui.auto_play:
-            self._viewer.ui.auto_play.value = "On"
+            self._viewer.ui.auto_play.value = " Play"  # PlaybackButton: " Play" = playing
             logger.debug("Playback started")
 
     def pause(self) -> None:
         """Pause playback."""
         if self._viewer.ui and self._viewer.ui.auto_play:
-            self._viewer.ui.auto_play.value = "Off"
+            self._viewer.ui.auto_play.value = "Pause"  # PlaybackButton: "Pause" = paused
             logger.debug("Playback paused")
 
     def is_playing(self) -> bool:
@@ -137,7 +137,8 @@ class GSPlayAPI:
             True if playing, False if paused
         """
         if self._viewer.ui and self._viewer.ui.auto_play:
-            return self._viewer.ui.auto_play.value == "On"
+            # PlaybackButton uses " Play" (with space) when playing
+            return self._viewer.ui.auto_play.value.strip() == "Play"
         return False
 
     def set_playback_speed(self, fps: float) -> None:
@@ -418,7 +419,7 @@ class GSPlayAPI:
             total_frames=self._viewer.model.get_total_frames()
             if self._viewer.model
             else 0,
-            is_playing=ui.auto_play.value == "On" if ui.auto_play else False,
+            is_playing=ui.auto_play.value.strip() == "Play" if ui.auto_play else False,
             playback_fps=float(ui.play_speed.value)
             if ui.play_speed
             else config.animation.play_speed_fps,
