@@ -122,6 +122,13 @@ class UniversalGSPlay:
         # Stream server for view-only output (WebSocket-based, low latency)
         self.stream_server: StreamServer | None = None
 
+        # Control server for external commands (HTTP-based)
+        self.control_server = None  # ControlServer, started in setup_viewer
+
+        # Track if user manually edited export path (don't auto-update if so)
+        self._user_edited_export_path: bool = False
+        self._last_auto_export_path: str | None = None
+
     @property
     def model(self) -> ModelInterface | None:
         """Get the current model from model component."""
@@ -145,24 +152,70 @@ class UniversalGSPlay:
         current = str(export_settings.export_path).replace("\\", "/").rstrip("/")
         return current in ("./export_with_edits", "export_with_edits")
 
-    def _build_default_export_dir(self, export_format: str) -> UniversalPath:
-        """Create timestamped export path rooted at the source path (or CWD)."""
-        base_dir = (
-            UniversalPath(self.source_path) if self.source_path else UniversalPath(".")
-        )
-        timestamp = datetime.now().strftime("%Y%m%d")
-        return base_dir / f"{timestamp}_{export_format}"
+    def _build_default_export_dir(
+        self, export_format: str, export_device: str | None = None
+    ) -> UniversalPath:
+        """Create export path: {source_name}_export_{device}_{format}.
 
-    def _set_export_path(self, export_path: UniversalPath | str) -> None:
-        """Store export path on config and sync UI control if it exists."""
+        Parameters
+        ----------
+        export_format : str
+            Export format (e.g., "ply", "compressed-ply")
+        export_device : str | None
+            Export device (e.g., "cpu", "cuda:0"). If None, reads from config/UI.
+        """
+        # Get source folder as base (export folder created inside source path)
+        if self.source_path:
+            base_dir = UniversalPath(self.source_path)
+            source_name = UniversalPath(self.source_path).name
+        else:
+            base_dir = UniversalPath(".")
+            source_name = "export"
+
+        # Get device string (normalize to "gpu" or "cpu")
+        if export_device is None:
+            if self.ui and self.ui.export_device:
+                device_value = self.ui.export_device.value.upper()
+                export_device = "gpu" if device_value == "GPU" else "cpu"
+            else:
+                export_device = "cpu"
+        else:
+            # Normalize device string - handle "cuda:0", "cuda", "gpu", "CPU", etc.
+            device_lower = export_device.lower()
+            export_device = "gpu" if device_lower.startswith("cuda") or device_lower == "gpu" else "cpu"
+
+        # Normalize format string (remove dashes, use underscore)
+        format_str = export_format.replace("-", "_")
+
+        # Build path: {source_name}_export_{device}_{format}
+        folder_name = f"{source_name}_export_{export_device}_{format_str}"
+        return base_dir / folder_name
+
+    def _set_export_path(
+        self, export_path: UniversalPath | str, *, is_auto: bool = False
+    ) -> None:
+        """Store export path on config and sync UI control if it exists.
+
+        Parameters
+        ----------
+        export_path : UniversalPath | str
+            The export path to set
+        is_auto : bool
+            If True, this is an auto-generated path (track for comparison)
+        """
         resolved_path = UniversalPath(export_path)
         self.config.export_settings.export_path = resolved_path
         if self.ui and self.ui.export_path:
             self.ui.export_path.value = str(resolved_path)
 
+        if is_auto:
+            self._last_auto_export_path = str(resolved_path)
+            self._user_edited_export_path = False
+
     def _initialize_export_path(
         self,
         export_format: str | None = None,
+        export_device: str | None = None,
         *,
         force: bool = False,
     ) -> UniversalPath:
@@ -173,9 +226,49 @@ class UniversalGSPlay:
         if not force and not self._is_export_path_placeholder():
             return self.config.export_settings.export_path
 
-        export_path = self._build_default_export_dir(export_format)
-        self._set_export_path(export_path)
+        export_path = self._build_default_export_dir(export_format, export_device)
+        self._set_export_path(export_path, is_auto=True)
         return export_path
+
+    def _update_export_path_on_option_change(self) -> None:
+        """Update export path when format/device options change.
+
+        Only updates if user hasn't manually edited the path.
+        """
+        # Check if user manually edited the path
+        if self._user_edited_export_path:
+            return
+
+        # Check if current UI path matches the last auto-generated path
+        # Use UI value (what user sees) not config value
+        # Normalize paths for comparison (handle Windows backslash vs forward slash)
+        current_path = ""
+        if self.ui and self.ui.export_path:
+            current_path = self.ui.export_path.value.strip().replace("\\", "/")
+
+        last_auto = (self._last_auto_export_path or "").replace("\\", "/")
+        if last_auto and current_path != last_auto:
+            # User edited the path, don't auto-update
+            self._user_edited_export_path = True
+            return
+
+        # Get current format and device from UI
+        export_format = "compressed-ply"
+        if self.ui and self.ui.export_format:
+            format_map = {
+                "compressed ply": "compressed-ply",
+                "ply": "ply",
+            }
+            ui_value = self.ui.export_format.value.lower()
+            export_format = format_map.get(ui_value, ui_value)
+
+        export_device = None
+        if self.ui and self.ui.export_device:
+            export_device = self.ui.export_device.value.lower()
+
+        # Generate new path
+        export_path = self._build_default_export_dir(export_format, export_device)
+        self._set_export_path(export_path, is_auto=True)
 
     def _refresh_render_pipeline(self, model: ModelInterface | None) -> None:
         """Rebuild the render function so the viewer reflects the active model."""
@@ -388,6 +481,9 @@ class UniversalGSPlay:
             EventType.RESET_FILTER_REQUESTED, self._on_reset_filter_requested
         )
         self.event_bus.subscribe(
+            EventType.CENTER_REQUESTED, self._on_center_requested
+        )
+        self.event_bus.subscribe(
             EventType.RERENDER_REQUESTED, self._on_rerender_requested
         )
         self.event_bus.subscribe(
@@ -455,12 +551,21 @@ class UniversalGSPlay:
         # Setup auto-learn color controls
         self._setup_auto_learn_color()
 
+        # Setup export option handlers
+        self._setup_export_handlers()
+
+        # Initialize export path now that UI exists (model may have been loaded before UI)
+        self._initialize_export_path(force=True)
+
         # Initialize programmatic API
         self.api = GSPlayAPI(self)
         logger.debug("Programmatic API initialized")
 
         # Start stream server if configured
         self._start_stream_server()
+
+        # Start control server for external commands
+        self._start_control_server()
 
     def _start_stream_server(self) -> None:
         """Start WebSocket stream server if configured.
@@ -493,6 +598,27 @@ class UniversalGSPlay:
         except Exception as e:
             logger.warning(f"Failed to start stream server: {e}")
             self.stream_server = None
+
+    def _start_control_server(self) -> None:
+        """Start HTTP control server for remote commands.
+
+        Control port convention: viser_port + 2
+        Provides endpoints: /center-scene, /get-state, /set-translation
+        """
+        try:
+            from src.gsplay.control.server import ControlServer
+
+            control_port = self.config.port + 2
+
+            self.control_server = ControlServer(control_port, self)
+            actual_port = self.control_server.start()
+
+            logger.info(
+                f"Control server: http://{self.config.host}:{actual_port}/"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to start control server: {e}")
+            self.control_server = None
 
     def _on_model_loaded(self, event: Event) -> None:
         """
@@ -550,6 +676,10 @@ class UniversalGSPlay:
     def _on_reset_filter_requested(self, event: Event) -> None:
         """Handle reset filter request."""
         self._handle_filter_reset()
+
+    def _on_center_requested(self, event: Event) -> None:
+        """Handle center request - center scene at origin."""
+        self._handle_center_scene()
 
     def _on_rerender_requested(self, event: Event) -> None:
         """Handle rerender request."""
@@ -707,6 +837,28 @@ class UniversalGSPlay:
                 self._apply_color_adjustment()
 
         logger.debug("Color adjustment callback registered")
+
+    def _setup_export_handlers(self) -> None:
+        """Setup handlers for export format/device changes.
+
+        Updates the export path automatically when options change,
+        unless user has manually edited the path.
+        """
+        if not self.ui:
+            return
+
+        def on_export_option_change(_) -> None:
+            self._update_export_path_on_option_change()
+
+        # Register format change handler
+        if self.ui.export_format:
+            self.ui.export_format.on_update(on_export_option_change)
+
+        # Register device change handler
+        if self.ui.export_device:
+            self.ui.export_device.on_update(on_export_option_change)
+
+        logger.debug("Export option handlers registered")
 
     def _apply_color_adjustment(self) -> None:
         """Apply selected color adjustment from unified dropdown.
@@ -1232,6 +1384,95 @@ class UniversalGSPlay:
         if self.viewer:
             self.viewer.rerender(None)
 
+    def _handle_center_scene(self) -> None:
+        """Center scene at origin by applying inverse centroid translation.
+
+        Respects active filters - only considers visible/filtered gaussians
+        when calculating centroid.
+        """
+        import numpy as np
+
+        if self.model is None:
+            logger.warning("Cannot center scene: no model loaded")
+            return
+
+        # Get current frame gaussians
+        gaussians = self._get_current_frame_gaussians()
+        if gaussians is None:
+            logger.warning("Cannot center scene: no gaussians available")
+            return
+
+        # Get means as numpy array
+        means = gaussians.means
+        if hasattr(means, "detach"):
+            means = means.detach().cpu().numpy()
+        elif not isinstance(means, np.ndarray):
+            means = np.array(means)
+
+        total_count = len(means)
+
+        # Apply filter mask if filtering is active
+        fv = self.config.filter_values
+        if not fv.is_neutral():
+            try:
+                from gsmod.filter.apply import compute_filter_mask
+
+                # Create GSData-like object for compute_filter_mask
+                # It needs means, scales, opacities attributes
+                class _GaussianData:
+                    pass
+
+                data = _GaussianData()
+                data.means = means
+
+                # Get scales and opacities for filtering
+                scales = gaussians.scales
+                if hasattr(scales, "detach"):
+                    scales = scales.detach().cpu().numpy()
+                elif not isinstance(scales, np.ndarray):
+                    scales = np.array(scales)
+                data.scales = scales
+
+                opacities = gaussians.opacities
+                if hasattr(opacities, "detach"):
+                    opacities = opacities.detach().cpu().numpy()
+                elif not isinstance(opacities, np.ndarray):
+                    opacities = np.array(opacities)
+                data.opacities = opacities
+
+                # Compute filter mask
+                mask = compute_filter_mask(data, fv)
+                means = means[mask]
+
+                logger.info(
+                    f"Centering on {len(means)}/{total_count} filtered gaussians "
+                    f"({len(means)/total_count*100:.1f}%)"
+                )
+            except ImportError:
+                logger.warning("gsmod filter module unavailable, centering on all gaussians")
+            except Exception as e:
+                logger.warning(f"Filter mask computation failed: {e}, centering on all gaussians")
+
+        if len(means) == 0:
+            logger.warning("Cannot center scene: no gaussians after filtering")
+            return
+
+        # Calculate centroid
+        centroid = np.mean(means, axis=0)
+        logger.info(f"Scene centroid: [{centroid[0]:.3f}, {centroid[1]:.3f}, {centroid[2]:.3f}]")
+
+        # Apply inverse translation to center at origin
+        # gsmod formula: new_pos = old_pos + translate
+        # To move centroid to origin: 0 = centroid + translate -> translate = -centroid
+        tx, ty, tz = -float(centroid[0]), -float(centroid[1]), -float(centroid[2])
+        self.api.set_translation(tx, ty, tz)
+
+        # Trigger rerender
+        if self.viewer:
+            self.render_component.rerender()
+
+        logger.info(f"Scene centered: translation=[{tx:.3f}, {ty:.3f}, {tz:.3f}]")
+
     def _handle_filter_reset(self) -> None:
         """Reset all filtering to defaults."""
         logger.info("Resetting volume filters")
@@ -1452,6 +1693,14 @@ class UniversalGSPlay:
                     logger.debug("Stream server stopped")
                 except Exception as e:
                     logger.debug(f"Stream server cleanup error (ignored): {e}")
+
+            # Stop control server
+            if self.control_server:
+                try:
+                    self.control_server.stop()
+                    logger.debug("Control server stopped")
+                except Exception as e:
+                    logger.debug(f"Control server cleanup error (ignored): {e}")
 
             # Give websocket connections time to close gracefully
             # This prevents "cannot schedule new futures after shutdown" errors

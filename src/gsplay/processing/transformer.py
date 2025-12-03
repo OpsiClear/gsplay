@@ -1,9 +1,6 @@
-"""
-Scene transform adapter using gsmod's optimized transform pipelines.
+"""Scene transform processing using gsmod's native GPU-accelerated operations.
 
-Uses:
-- GSDataPro.transform() for CPU processing (Numba kernels)
-- GSTensorPro.transform() for GPU processing (PyTorch operations)
+Uses GSTensorPro.transform() for GPU and GSDataPro.transform() for CPU.
 """
 
 from __future__ import annotations
@@ -12,32 +9,13 @@ from gsmod import TransformValues
 from src.domain.entities import GSData, GSDataPro, GSTensor, GSTensorPro
 
 from .protocols import SceneTransformer
-import numpy as np
-
-
-def _canonical_transform_values(values: TransformValues) -> TransformValues:
-    """Return a new TransformValues with scalar scale and tuple fields to satisfy gsmod comparisons."""
-    translate = tuple(
-        float(x)
-        for x in getattr(values, "translate", getattr(values, "translation", (0.0, 0.0, 0.0)))
-    )
-    rotate = tuple(
-        float(x)
-        for x in getattr(values, "rotate", getattr(values, "rotation", (1.0, 0.0, 0.0, 0.0)))
-    )
-    scale_arr = np.asarray(getattr(values, "scale", 1.0), dtype=np.float32).reshape(-1)
-    scale_val = float(scale_arr[0])
-    try:
-        return TransformValues(translate=translate, rotate=rotate, scale=scale_val)
-    except TypeError:
-        return TransformValues(translation=translate, rotation=rotate, scale=scale_val)
 
 
 class DefaultSceneTransformer(SceneTransformer):
-    """Scene transformer using gsmod's optimized transform pipelines.
+    """Scene transformer using gsmod's native GPU-accelerated operations.
 
-    For GPU: Uses GSTensorPro.transform() with GPU-accelerated operations
-    For CPU: Uses GSDataPro.transform() with Numba kernels (698M Gaussians/sec)
+    GPU: GSTensorPro.transform() with PyTorch CUDA operations
+    CPU: GSDataPro.transform() with Numba kernels
     """
 
     def apply_gpu(
@@ -46,92 +24,32 @@ class DefaultSceneTransformer(SceneTransformer):
         transform_values: TransformValues,
         device: str,
     ) -> GSTensor:
-        """Apply scene transform on GPU using gsmod TransformValues.
+        """Apply transform using native GSTensorPro.transform().
 
-        Performance: 20-50x faster than CPU version
+        Uses inplace=False to let gsmod handle copying internally.
         """
-        transform_values = _canonical_transform_values(transform_values)
-
-        # Handle array-like fields that break gsmod equality checks
-        try:
-            neutral = transform_values.is_neutral()
-        except ValueError:
-            rot = np.asarray(getattr(transform_values, "rotation", transform_values.rotate), dtype=np.float32).reshape(-1)
-            trans = np.asarray(getattr(transform_values, "translation", transform_values.translate), dtype=np.float32).reshape(-1)
-            scale_arr = np.asarray(transform_values.scale, dtype=np.float32).reshape(-1)
-            neutral = (
-                np.allclose(scale_arr[0], 1.0)
-                and np.allclose(rot, np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32))
-                and np.allclose(trans, np.array([0.0, 0.0, 0.0], dtype=np.float32))
-            )
-        if neutral:
+        if transform_values.is_neutral():
             return gaussians
 
-        # Convert to GSTensorPro if needed - avoid CPU round-trips
-        source_format = getattr(gaussians, '_format', None)
+        # Wrap GSTensor as GSTensorPro if needed (preserves format state)
+        if not isinstance(gaussians, GSTensorPro):
+            gaussians = GSTensorPro.from_gstensor(gaussians)
 
-        if isinstance(gaussians, GSTensorPro):
-            tensor_pro = gaussians
-        elif isinstance(gaussians, GSTensor):
-            # Direct GPU wrapping - no CPU transfer needed
-            current_device = str(gaussians.means.device)
-            if current_device != device:
-                gaussians = gaussians.to(device)
-            tensor_pro = GSTensorPro(
-                means=gaussians.means,
-                scales=gaussians.scales,
-                quats=gaussians.quats,
-                opacities=gaussians.opacities,
-                sh0=gaussians.sh0,
-                shN=gaussians.shN,
-            )
-            # Preserve format tracking from source
-            if source_format is not None:
-                tensor_pro._format = source_format.copy()
-        else:
-            # GSData path - single CPU->GPU transfer
-            tensor_pro = GSTensorPro.from_gsdata(gaussians, device=device)
-            if source_format is not None:
-                tensor_pro._format = source_format.copy()
-
-        # Apply transform using gsmod's GPU-optimized operations
-        # Note: Even with inplace=True, method returns GSTensorPro
-        tensor_pro = tensor_pro.transform(transform_values, inplace=True)
-
-        return tensor_pro
+        # Native API with inplace=False handles copying internally
+        return gaussians.transform(transform_values, inplace=False)
 
     def apply_cpu(
         self,
         data: GSData,
         transform_values: TransformValues,
     ) -> GSData:
-        """Apply scene transform on CPU using gsmod's Numba kernels.
-
-        Performance: 698M Gaussians/sec (1.43ms for 1M Gaussians)
-        """
-        transform_values = _canonical_transform_values(transform_values)
-
-        try:
-            neutral = transform_values.is_neutral()
-        except ValueError:
-            rot = np.asarray(getattr(transform_values, "rotation", transform_values.rotate), dtype=np.float32).reshape(-1)
-            trans = np.asarray(getattr(transform_values, "translation", transform_values.translate), dtype=np.float32).reshape(-1)
-            scale_arr = np.asarray(transform_values.scale, dtype=np.float32).reshape(-1)
-            neutral = (
-                np.allclose(scale_arr[0], 1.0)
-                and np.allclose(rot, np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32))
-                and np.allclose(trans, np.array([0.0, 0.0, 0.0], dtype=np.float32))
-            )
-        if neutral:
+        """Apply transform using native GSDataPro.transform()."""
+        if transform_values.is_neutral():
             return data
 
-        # Convert to GSDataPro for gsmod processing
-        if isinstance(data, GSDataPro):
-            data_pro = data
-        else:
-            data_pro = GSDataPro.from_gsdata(data)
+        # Ensure we have GSDataPro for native API
+        if not isinstance(data, GSDataPro):
+            data = GSDataPro.from_gsdata(data)
 
-        # Apply transform using gsmod's optimized Numba kernels
-        data_pro.transform(transform_values, inplace=True)
-
-        return data_pro
+        # Native API with inplace=False handles copying internally
+        return data.transform(transform_values, inplace=False)

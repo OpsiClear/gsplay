@@ -65,19 +65,9 @@ class DefaultGSBridge(GSBridge):
                     tensor = tensor.to(device)
                 # Convert to GSTensorPro if input was already GSTensorPro
                 if isinstance(gaussians, GSTensorPro) and not isinstance(tensor, GSTensorPro):
-                    tensor = GSTensorPro(
-                        means=tensor.means,
-                        scales=tensor.scales,
-                        quats=tensor.quats,
-                        opacities=tensor.opacities,
-                        sh0=tensor.sh0,
-                        shN=tensor.shN,
-                    )
-                    # Preserve format tracking using public API
-                    if hasattr(tensor, "copy_format_from"):
-                        tensor.copy_format_from(gaussians)
-                    elif hasattr(gaussians, "_format"):
-                        tensor._format = gaussians._format.copy()
+                    tensor = GSTensorPro.from_gstensor(tensor)
+                    # Copy format from original (not from transferred tensor)
+                    tensor.copy_format_from(gaussians)
             elif isinstance(gaussians, GSDataPro):
                 # Convert GSDataPro to GSTensorPro
                 tensor = GSTensorPro.from_gsdata(gaussians, device=device)
@@ -116,19 +106,8 @@ class DefaultGSBridge(GSBridge):
             # Convert GaussianData to GSTensor then to GSTensorPro
             gstensor = data.to_gstensor(device=device)
 
-            # Wrap in GSTensorPro for gsmod processing
-            tensor_pro = GSTensorPro(
-                means=gstensor.means,
-                scales=gstensor.scales,
-                quats=gstensor.quats,
-                opacities=gstensor.opacities,
-                sh0=gstensor.sh0,
-                shN=gstensor.shN,
-            )
-
-            # Copy format info
-            if hasattr(gstensor, "_format"):
-                tensor_pro._format = gstensor._format.copy()
+            # Wrap in GSTensorPro for gsmod processing (preserves format state)
+            tensor_pro = GSTensorPro.from_gstensor(gstensor)
 
         timings, _ = monitor.stop()
         return tensor_pro, timings.get("transfer_ms", 0.0)

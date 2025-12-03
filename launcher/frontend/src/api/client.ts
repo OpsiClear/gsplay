@@ -139,6 +139,16 @@ export interface LogResponse {
   has_more: boolean;
 }
 
+// Control types
+export interface ControlResponse {
+  ok: boolean;
+  centroid?: [number, number, number];
+  translation_applied?: [number, number, number];
+  filtered_count?: number;
+  total_count?: number;
+  error?: string;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -221,5 +231,18 @@ export const api = {
 
   ports: {
     getNext: () => request<PortInfo>("/ports/next"),
+  },
+
+  control: {
+    centerScene: (instanceId: string) =>
+      request<ControlResponse>(`/instances/${instanceId}/control/center-scene`, {
+        method: "POST",
+      }),
+
+    setTranslation: (instanceId: string, x: number, y: number, z: number) =>
+      request<ControlResponse>(`/instances/${instanceId}/control/set-translation`, {
+        method: "POST",
+        body: JSON.stringify({ x, y, z }),
+      }),
   },
 };

@@ -45,6 +45,7 @@ class RenderTabState:
     viewer_height: int = 960
     render_width: int = 1280
     render_height: int = 960
+    jpeg_quality: int = 85  # Current JPEG quality for streaming
 
 
 Colormaps = Literal["turbo", "viridis", "magma", "inferno", "cividis", "gray"]

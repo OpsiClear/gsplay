@@ -90,7 +90,7 @@ class ExporterFactory:
                     ExportCapability.SH_COEFFICIENTS
                 },
                 description="Compressed PLY format (16 bytes/splat)",
-                file_extension=".ply"
+                file_extension=".compressed.ply"
             )
 
     @classmethod

@@ -71,6 +71,7 @@ class EventType(Enum):
     RESET_COLORS_REQUESTED = auto()
     RESET_TRANSFORM_REQUESTED = auto()
     RESET_FILTER_REQUESTED = auto()
+    CENTER_REQUESTED = auto()
     RERENDER_REQUESTED = auto()
     TERMINATE_REQUESTED = auto()
 

@@ -8,6 +8,8 @@ and the PlaybackButton helper class.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -160,7 +162,12 @@ def create_view_controls(
         camera.stop_auto_rotation()
         if camera.state is not None:
             with camera.state_lock:
-                camera.state.azimuth = azimuth_slider.value
+                # Use set_from_euler to update quaternion orientation
+                camera.state.set_from_euler(
+                    azimuth_slider.value,
+                    camera.state.elevation,
+                    camera.state.roll,
+                )
             camera.apply_state_to_camera()
 
     @elevation_slider.on_update
@@ -170,7 +177,12 @@ def create_view_controls(
         camera.stop_auto_rotation()
         if camera.state is not None:
             with camera.state_lock:
-                camera.state.elevation = elevation_slider.value
+                # Use set_from_euler to update quaternion orientation
+                camera.state.set_from_euler(
+                    camera.state.azimuth,
+                    elevation_slider.value,
+                    camera.state.roll,
+                )
             camera.apply_state_to_camera()
 
     @roll_slider.on_update
@@ -180,7 +192,12 @@ def create_view_controls(
         camera.stop_auto_rotation()
         if camera.state is not None:
             with camera.state_lock:
-                camera.state.roll = roll_slider.value
+                # Use set_from_euler to update quaternion orientation
+                camera.state.set_from_euler(
+                    camera.state.azimuth,
+                    camera.state.elevation,
+                    roll_slider.value,
+                )
             camera.apply_state_to_camera()
 
     # FOV
@@ -210,17 +227,11 @@ def create_view_controls(
         if camera.state is not None:
             with camera.state_lock:
                 if view == "Top":
-                    camera.state.azimuth = 0.0
-                    camera.state.elevation = 90.0
-                    camera.state.roll = 0.0
+                    camera.state.set_from_euler(0.0, 90.0, 0.0)
                 elif view == "Front":
-                    camera.state.azimuth = 0.0
-                    camera.state.elevation = 0.0
-                    camera.state.roll = 0.0
+                    camera.state.set_from_euler(0.0, 0.0, 0.0)
                 elif view == "Side":
-                    camera.state.azimuth = 90.0
-                    camera.state.elevation = 0.0
-                    camera.state.roll = 0.0
+                    camera.state.set_from_euler(90.0, 0.0, 0.0)
             camera.apply_state_to_camera()
 
     # Transform buttons
@@ -235,16 +246,15 @@ def create_view_controls(
         if camera.state is not None:
             with camera.state_lock:
                 if action == "Reset":
-                    camera.state.azimuth = 45.0
-                    camera.state.elevation = 30.0
-                    camera.state.roll = 0.0
+                    camera.state.set_from_euler(45.0, 30.0, 0.0)
                 elif action == "Flip":
+                    # Flip: invert elevation and rotate azimuth 180 degrees
+                    current_azimuth = camera.state.azimuth
                     current_elevation = camera.state.elevation
-                    if current_elevation >= 0:
-                        camera.state.elevation = 180.0 - current_elevation
-                    else:
-                        camera.state.elevation = -180.0 - current_elevation
-                    camera.state.azimuth = (camera.state.azimuth + 180.0) % 360.0
+                    current_roll = camera.state.roll
+                    new_azimuth = (current_azimuth + 180.0) % 360.0
+                    new_elevation = -current_elevation
+                    camera.state.set_from_euler(new_azimuth, new_elevation, current_roll)
             camera.apply_state_to_camera()
 
     # Auto-rotation controls
@@ -279,57 +289,61 @@ def create_view_controls(
     # Create sync function that can be called after all controls are set up
     def setup_camera_sync():
         """Set up camera sync callbacks."""
+
         def sync_sliders_with_camera():
+            """Sync UI sliders with camera state (quaternion-based)."""
             if camera.state is None:
                 return
 
-            # Skip state sync during programmatic camera updates
-            # This prevents apply_state_to_camera() from having its state
-            # immediately overwritten by the on_update callback
-            import time
-            suppress_state_update = time.time() < camera._suppress_state_sync_until
+            try:
+                # Read Euler angles from quaternion state properties
+                with camera.state_lock:
+                    azimuth = camera.state.azimuth
+                    elevation = camera.state.elevation
+                    roll = camera.state.roll
+                    distance = camera.state.distance
 
-            for client in server.get_clients().values():
-                try:
-                    camera_pos = np.array(client.camera.position)
-                    look_at = np.array(client.camera.look_at)
-                    up_dir = np.array(client.camera.up_direction)
-                    distance = float(np.linalg.norm(camera_pos - look_at))
-                    azimuth, elevation = camera.calculate_azimuth_elevation(
-                        camera_pos, look_at, up_dir
-                    )
-                    roll = camera._calculate_roll_from_camera(
-                        camera_pos, look_at, up_dir, elevation
-                    )
+                # Update UI sliders (prevent circular updates)
+                updating_from_camera[0] = True
 
-                    # Only update state if not suppressed (user interaction vs programmatic)
-                    if not suppress_state_update:
-                        with camera.state_lock:
-                            camera.state.azimuth = azimuth
-                            camera.state.elevation = elevation
-                            camera.state.roll = roll
-                            camera.state.distance = distance
-                            camera.state.look_at = look_at.copy()
+                # Clamp elevation to slider range (-180 to 180)
+                # With quaternions, elevation is already in -90 to 90 range
+                azimuth_slider.value = azimuth % 360.0
+                elevation_slider.value = np.clip(elevation, -180.0, 180.0)
+                roll_slider.value = np.clip(roll, -180.0, 180.0)
 
-                    updating_from_camera[0] = True
-                    azimuth_slider.value = azimuth
-                    elevation_slider.value = elevation
-                    roll_slider.value = roll
-                    if camera.scene_bounds:
-                        extent = camera.scene_bounds.get("max_size", 10.0)
-                        default_distance = extent * 2.5
-                        if default_distance > 0:
-                            actual_zoom = distance / default_distance
-                            zoom_slider.value = np.log2(actual_zoom)
-                    updating_from_camera[0] = False
-                    break
-                except Exception as e:
-                    logger.debug(f"Error syncing camera sliders: {e}")
+                if camera.scene_bounds:
+                    extent = camera.scene_bounds.get("max_size", 10.0)
+                    default_distance = extent * 2.5
+                    if default_distance > 0 and distance > 0:
+                        actual_zoom = distance / default_distance
+                        zoom_slider.value = np.clip(np.log2(actual_zoom), -8.0, 3.0)
+
+                updating_from_camera[0] = False
+
+            except Exception as e:
+                logger.debug(f"Error syncing camera sliders: {e}")
+                updating_from_camera[0] = False
 
         @server.on_client_connect
         def _(client: viser.ClientHandle) -> None:
+            if camera.state is not None:
+                # Apply stored camera state after viser initializes the client
+                def apply_state_after_init():
+                    time.sleep(0.2)  # Wait for viser to be ready
+                    try:
+                        camera.apply_state_to_camera([client])
+                        # Mark client as initialized - now on_update will sync state
+                        camera.mark_client_initialized(client)
+                    except Exception:
+                        pass  # Client may have disconnected
+
+                threading.Thread(target=apply_state_after_init, daemon=True).start()
+
             @client.camera.on_update
             def _(_) -> None:
+                # Sync state from user interactions (ignored until client initialized)
+                camera.sync_state_from_client(client)
                 sync_sliders_with_camera()
 
     return (zoom_slider, azimuth_slider, elevation_slider, roll_slider, setup_camera_sync)

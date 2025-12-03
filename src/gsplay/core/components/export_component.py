@@ -211,8 +211,9 @@ class ExportComponent:
                                     gaussian_data, export_device
                                 )
 
-                        # Determine output path
-                        output_path = output_dir / f"frame_{frame_idx:05d}.ply"
+                        # Determine output path using exporter's extension
+                        ext = exporter.get_file_extension()
+                        output_path = output_dir / f"frame_{frame_idx:05d}{ext}"
 
                         # Export frame
                         exporter.export_frame(

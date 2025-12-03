@@ -51,6 +51,10 @@ def setup_logging(level: str = "INFO") -> None:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
+    # Suppress verbose gsply logging (per-frame load messages)
+    logging.getLogger("gsply.torch.compression").setLevel(logging.WARNING)
+    logging.getLogger("gsply.torch").setLevel(logging.WARNING)
+
 
 def main(
     config: Annotated[Path, tyro.conf.Positional],

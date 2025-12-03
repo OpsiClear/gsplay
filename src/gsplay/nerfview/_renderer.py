@@ -263,12 +263,22 @@ class Renderer(threading.Thread):
                 continue
             self._state = self.transitions[self._state][task.action]
             assert task.camera_state is not None
+            # Determine JPEG quality BEFORE render (so render_fn can use it for encoding)
+            if (
+                getattr(self.viewer, "auto_quality_enabled", False)
+                and task.action == "move"
+            ):
+                jpeg_quality = self.viewer.jpeg_quality_move
+            else:
+                jpeg_quality = self.viewer.jpeg_quality_static
+
             try:
                 with self.lock, set_trace_context(self._may_interrupt_trace):
                     tic = time.perf_counter()
                     W, H = img_wh = self._get_img_wh(task.camera_state.aspect)
                     self.viewer.render_tab_state.viewer_width = W
                     self.viewer.render_tab_state.viewer_height = H
+                    self.viewer.render_tab_state.jpeg_quality = jpeg_quality
 
                     if not self._old_version:
                         try:
@@ -318,14 +328,6 @@ class Renderer(threading.Thread):
                 # Normal render completed - safe to broadcast GPU frame
                 _skip_gpu_broadcast = False
 
-            # Use lower JPEG quality only during active camera movement when auto-quality is on
-            if (
-                getattr(self.viewer, "auto_quality_enabled", False)
-                and task.action == "move"
-            ):
-                jpeg_quality = self.viewer.jpeg_quality_move
-            else:
-                jpeg_quality = self.viewer.jpeg_quality_static
             self.client.scene.set_background_image(
                 img,
                 format="jpeg",
@@ -528,12 +530,22 @@ class SharedRenderer(threading.Thread):
             if camera_state is None:
                 continue
 
+            # Determine JPEG quality BEFORE render (so render_fn can use it for encoding)
+            if (
+                getattr(self.viewer, "auto_quality_enabled", False)
+                and task.action == "move"
+            ):
+                jpeg_quality = self.viewer.jpeg_quality_move
+            else:
+                jpeg_quality = self.viewer.jpeg_quality_static
+
             try:
                 with self.lock, set_trace_context(self._may_interrupt_trace):
                     tic = time.perf_counter()
                     W, H = img_wh = self._get_img_wh(camera_state.aspect)
                     self.viewer.render_tab_state.viewer_width = W
                     self.viewer.render_tab_state.viewer_height = H
+                    self.viewer.render_tab_state.jpeg_quality = jpeg_quality
 
                     if not self._old_version:
                         try:
@@ -574,15 +586,6 @@ class SharedRenderer(threading.Thread):
             else:
                 # Normal render completed - safe to broadcast GPU frame
                 _skip_gpu_broadcast = False
-
-            # Determine JPEG quality
-            if (
-                getattr(self.viewer, "auto_quality_enabled", False)
-                and task.action == "move"
-            ):
-                jpeg_quality = self.viewer.jpeg_quality_move
-            else:
-                jpeg_quality = self.viewer.jpeg_quality_static
 
             # BROADCAST to ALL clients (pre-encoded JPEG)
             # Skip if render was interrupted - cache may be incomplete/corrupt

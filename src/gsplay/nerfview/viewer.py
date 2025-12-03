@@ -191,16 +191,23 @@ class GSPlay(object):
         client_id = client.client_id
         logger.debug(f"Client {client_id} connected")
 
-        # Initialize shared camera from first client's position
-        if self._renderer is not None:
-            if self._renderer.get_camera_state() is None:
-                initial_camera = self.get_camera_state(client)
-                self._renderer.update_camera(initial_camera)
-                logger.debug(f"Initialized shared camera from client {client_id}")
+        # NOTE: Do NOT initialize renderer camera here from viser's default camera.
+        # The camera_ui module will apply the stored camera state after a short delay,
+        # which will trigger on_update and properly initialize the renderer camera.
+        # This ensures the renderer uses our stored camera state, not viser's default.
 
         @client.camera.on_update
         def _(_: viser.CameraHandle):
             self._last_move_time = time.perf_counter()
+
+            # Only update renderer if client has been initialized with our camera state.
+            # This prevents viser's default camera from being used for initial renders.
+            # The camera_ui module tracks initialization via _initialized_clients set.
+            if self.universal_viewer is not None:
+                camera_ctrl = getattr(self.universal_viewer, "camera_controller", None)
+                if camera_ctrl is not None:
+                    if client.client_id not in camera_ctrl._initialized_clients:
+                        return  # Skip - client not yet initialized with our camera state
 
             with self.server.atomic():
                 camera_state = self.get_camera_state(client)

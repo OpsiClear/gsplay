@@ -259,127 +259,150 @@ def create_render_function(
                 render_kwargs["colors"] = render_gaussians.sh0
             _t_prep = (time.perf_counter() - _checkpoint_prep) * 1000
 
-            # Actual rasterization - use dedicated stream to isolate from other instances
+            # Actual rasterization and ALL post-processing on the SAME stream
+            # CRITICAL: All GPU operations from rasterization through D2H transfer MUST
+            # be on the same CUDA stream. Switching streams without sync causes race
+            # conditions that manifest as horizontal stripe corruption.
             _checkpoint_rasterize = time.perf_counter()
+            _checkpoint_upscale = time.perf_counter()  # Will be updated if upscaling
+            _t_upscale = 0.0
+
             if _cuda_stream is not None:
+                # ALL GPU operations on the dedicated stream - no stream switching!
                 with torch.cuda.stream(_cuda_stream):
+                    # Rasterization
                     render_colors, render_alphas, _ = _rasterization(**render_kwargs)
-                # Sync before accessing results to ensure rasterization is complete
-                _cuda_stream.synchronize()
-            else:
-                render_colors, render_alphas, _ = _rasterization(**render_kwargs)
-            
-            # Note: Stream sync above already ensures rasterization is complete.
-            # No additional global sync needed here - using stream-based isolation
-            # allows multiple instances to run concurrently without blocking each other.
-            
-            # Normalize output layout to channels-last for downstream math
-            # gsplat outputs: render_colors [N, H, W, C], render_alphas [N, H, W, 1]
-            if render_colors.dim() == 4 and render_colors.shape[-1] not in (3, 4) and render_colors.shape[1] in (3, 4):
-                # NCHW format detected - permute to NHWC
-                render_colors = render_colors.permute(0, 2, 3, 1).contiguous()
-                if render_alphas.dim() == 4:
-                    render_alphas = render_alphas.permute(0, 2, 3, 1).contiguous()
-                elif render_alphas.dim() == 3:
-                    render_alphas = render_alphas.unsqueeze(-1).contiguous()
-            elif render_colors.dim() == 4 and render_colors.shape[-1] in (3, 4):
-                # Already NHWC format - ensure contiguity
-                render_colors = render_colors.contiguous()
-                if render_alphas.dim() == 4:
-                    # Always make alpha contiguous regardless of shape[-1]
-                    render_alphas = render_alphas.contiguous()
-                elif render_alphas.dim() == 3:
-                    render_alphas = render_alphas.unsqueeze(-1).contiguous()
-            else:
-                # Unexpected format - log warning and ensure contiguity
-                logger.warning(
-                    f"Unexpected render output format: colors={render_colors.shape}, "
-                    f"alphas={render_alphas.shape}"
-                )
-                render_colors = render_colors.contiguous()
-                render_alphas = render_alphas.contiguous()
-            _t_rasterize = (time.perf_counter() - _checkpoint_rasterize) * 1000
 
-            # Post-processing: GPU upscaling + async transfer
-            _checkpoint_post = time.perf_counter()
+                    # Normalize output layout to channels-last
+                    if render_colors.dim() == 4 and render_colors.shape[-1] not in (3, 4) and render_colors.shape[1] in (3, 4):
+                        render_colors = render_colors.permute(0, 2, 3, 1).contiguous()
+                        if render_alphas.dim() == 4:
+                            render_alphas = render_alphas.permute(0, 2, 3, 1).contiguous()
+                        elif render_alphas.dim() == 3:
+                            render_alphas = render_alphas.unsqueeze(-1).contiguous()
+                    elif render_colors.dim() == 4 and render_colors.shape[-1] in (3, 4):
+                        render_colors = render_colors.contiguous()
+                        if render_alphas.dim() == 4:
+                            render_alphas = render_alphas.contiguous()
+                        elif render_alphas.dim() == 3:
+                            render_alphas = render_alphas.unsqueeze(-1).contiguous()
+                    else:
+                        logger.warning(
+                            f"Unexpected render output format: colors={render_colors.shape}, "
+                            f"alphas={render_alphas.shape}"
+                        )
+                        render_colors = render_colors.contiguous()
+                        render_alphas = render_alphas.contiguous()
 
-            # Use alpha channel to mask uncovered pixels to black
-            # render_alphas is [N, H, W, 1], so render_alphas[0] is [H, W, 1]
-            # Composite: rgb * alpha (uncovered pixels become black)
-            # Single clamp after multiplication - avoids redundant kernel launch
-            alpha_mask = render_alphas[0]
-            result_gpu = torch.clamp(render_colors[0] * alpha_mask, 0.0, 1.0)
+                    # Alpha compositing
+                    alpha_mask = render_alphas[0]
+                    result_gpu = torch.clamp(render_colors[0] * alpha_mask, 0.0, 1.0)
 
-            # Validate output - check for NaN/Inf which can corrupt JPEG encoding
-            if torch.isnan(result_gpu).any() or torch.isinf(result_gpu).any():
-                logger.warning(
-                    "NaN/Inf detected in render output - replacing with zeros. "
-                    f"Colors has_nan={torch.isnan(render_colors).any().item()}, "
-                    f"Alpha has_nan={torch.isnan(render_alphas).any().item()}"
-                )
-                result_gpu = torch.nan_to_num(result_gpu, nan=0.0, posinf=1.0, neginf=0.0)
+                    # NaN/Inf validation
+                    if torch.isnan(result_gpu).any() or torch.isinf(result_gpu).any():
+                        logger.warning(
+                            "NaN/Inf detected in render output - replacing with zeros. "
+                            f"Colors has_nan={torch.isnan(render_colors).any().item()}, "
+                            f"Alpha has_nan={torch.isnan(render_alphas).any().item()}"
+                        )
+                        result_gpu = torch.nan_to_num(result_gpu, nan=0.0, posinf=1.0, neginf=0.0)
 
-            # GPU-based upscaling (if needed) - faster than CPU
-            _checkpoint_upscale = time.perf_counter()
-            if W_scaled != W or H_scaled != H:
-                # Upscale on GPU using torch interpolation
-                result_gpu = (
-                    torch.nn.functional.interpolate(
-                        result_gpu.permute(2, 0, 1).unsqueeze(
-                            0
-                        ),  # [H, W, C] -> [1, C, H, W]
-                        size=(H, W),
-                        mode="bilinear",
-                        align_corners=False,
-                    )
-                    .squeeze(0)
-                    .permute(1, 2, 0)
-                )  # [1, C, H, W] -> [H, W, C]
-            _t_upscale = (time.perf_counter() - _checkpoint_upscale) * 1000
+                    # GPU upscaling if needed
+                    _checkpoint_upscale = time.perf_counter()
+                    if W_scaled != W or H_scaled != H:
+                        result_gpu = (
+                            torch.nn.functional.interpolate(
+                                result_gpu.permute(2, 0, 1).unsqueeze(0),
+                                size=(H, W),
+                                mode="bilinear",
+                                align_corners=False,
+                            )
+                            .squeeze(0)
+                            .permute(1, 2, 0)
+                        )
+                    _t_upscale = (time.perf_counter() - _checkpoint_upscale) * 1000
 
-            # GPU->CPU transfer with synchronization
-            # Note: We use synchronous transfer to avoid race conditions with viser's
-            # async JPEG encoding. The overhead is minimal (~1-2ms) and prevents
-            # frame cross-talk between instances.
-            if _cuda_stream is not None:
-                # Use dedicated stream for this instance's transfers
-                with torch.cuda.stream(_cuda_stream):
-                    # CRITICAL: Ensure tensor is contiguous before transfer!
-                    # Permute operations (used in upscaling) can leave strides in a state
-                    # that causes "stripes" or corruption when converted to numpy/image.
+                    # Ensure contiguous before D2H transfer
                     result_gpu = result_gpu.contiguous()
 
-                    # Convert to uint8 on GPU (once) for both viser and streaming
-                    # This avoids redundant float32→uint8 conversion in viser/PIL
+                    # Convert to uint8 on GPU
                     gpu_frame_uint8 = (result_gpu * 255).clamp(0, 255).to(torch.uint8)
 
-                    # Transfer uint8 to CPU (4x smaller than float32, no redundant conversion)
-                    result = gpu_frame_uint8.cpu().numpy()
+                    # Queue D2H transfer (async on this stream)
+                    cpu_tensor = gpu_frame_uint8.cpu()
 
-                # CRITICAL: Sync stream BEFORE JPEG encoding
-                # This ensures the tensor data is complete and prevents corruption
+                # Sync stream BEFORE accessing CPU data
                 _cuda_stream.synchronize()
 
-                # Encode to JPEG immediately and cache the bytes
-                # This is more efficient than caching the tensor because:
-                # 1. No clone needed (we encode while we still own the tensor)
-                # 2. Less memory (JPEG bytes ~150KB vs tensor ~6MB for 1080p)
+                # Now safe to access CPU tensor
+                result = cpu_tensor.numpy()
+
+                # Encode to JPEG
                 from src.gsplay.rendering.jpeg_encoder import encode_and_cache
-                encode_and_cache(gpu_frame_uint8)
+                encode_and_cache(gpu_frame_uint8, quality=render_tab_state.jpeg_quality)
+
             else:
-                # Fallback for non-CUDA devices
+                # Non-CUDA fallback path
+                render_colors, render_alphas, _ = _rasterization(**render_kwargs)
+
+                # Format normalization
+                if render_colors.dim() == 4 and render_colors.shape[-1] not in (3, 4) and render_colors.shape[1] in (3, 4):
+                    render_colors = render_colors.permute(0, 2, 3, 1).contiguous()
+                    if render_alphas.dim() == 4:
+                        render_alphas = render_alphas.permute(0, 2, 3, 1).contiguous()
+                    elif render_alphas.dim() == 3:
+                        render_alphas = render_alphas.unsqueeze(-1).contiguous()
+                elif render_colors.dim() == 4 and render_colors.shape[-1] in (3, 4):
+                    render_colors = render_colors.contiguous()
+                    if render_alphas.dim() == 4:
+                        render_alphas = render_alphas.contiguous()
+                    elif render_alphas.dim() == 3:
+                        render_alphas = render_alphas.unsqueeze(-1).contiguous()
+                else:
+                    logger.warning(
+                        f"Unexpected render output format: colors={render_colors.shape}, "
+                        f"alphas={render_alphas.shape}"
+                    )
+                    render_colors = render_colors.contiguous()
+                    render_alphas = render_alphas.contiguous()
+
+                # Alpha compositing
+                alpha_mask = render_alphas[0]
+                result_gpu = torch.clamp(render_colors[0] * alpha_mask, 0.0, 1.0)
+
+                # NaN/Inf validation
+                if torch.isnan(result_gpu).any() or torch.isinf(result_gpu).any():
+                    logger.warning(
+                        "NaN/Inf detected in render output - replacing with zeros. "
+                        f"Colors has_nan={torch.isnan(render_colors).any().item()}, "
+                        f"Alpha has_nan={torch.isnan(render_alphas).any().item()}"
+                    )
+                    result_gpu = torch.nan_to_num(result_gpu, nan=0.0, posinf=1.0, neginf=0.0)
+
+                # GPU upscaling if needed
+                _checkpoint_upscale = time.perf_counter()
+                if W_scaled != W or H_scaled != H:
+                    result_gpu = (
+                        torch.nn.functional.interpolate(
+                            result_gpu.permute(2, 0, 1).unsqueeze(0),
+                            size=(H, W),
+                            mode="bilinear",
+                            align_corners=False,
+                        )
+                        .squeeze(0)
+                        .permute(1, 2, 0)
+                    )
+                _t_upscale = (time.perf_counter() - _checkpoint_upscale) * 1000
+
                 result_gpu = result_gpu.contiguous()
-
-                # Convert to uint8 (once) for both viser and streaming
                 gpu_frame_uint8 = (result_gpu * 255).clamp(0, 255).to(torch.uint8)
-
-                # Transfer uint8 to CPU (4x smaller, no redundant conversion)
                 result = gpu_frame_uint8.detach().cpu().numpy()
 
-                # Encode to JPEG immediately and cache the bytes
                 from src.gsplay.rendering.jpeg_encoder import encode_and_cache
-                encode_and_cache(gpu_frame_uint8)
+                encode_and_cache(gpu_frame_uint8, quality=render_tab_state.jpeg_quality)
 
+            _t_rasterize = (time.perf_counter() - _checkpoint_rasterize) * 1000
+            _checkpoint_post = time.perf_counter()
             _t_post = (time.perf_counter() - _checkpoint_post) * 1000
 
             # Performance logging

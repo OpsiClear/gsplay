@@ -53,20 +53,26 @@ class VolumeFilterService:
         data: GSData,
         config: GSPlayConfig,
         scene_bounds: dict[str, Any] | None,
-    ) -> None:
+    ) -> GSData:
         """Apply CPU filtering using gsmod's compute_filter_mask with FilterValues.
 
         This supports all filter types including rotated box, ellipsoid, and frustum.
+
+        Returns
+        -------
+        GSData
+            The filtered data (may be modified in-place, but returned for API consistency
+            with filter_gpu which returns a new GSTensor).
         """
         fv = config.filter_values
         if fv.is_neutral():
-            return
+            return data
 
         try:
             from gsmod.filter.apply import compute_filter_mask
         except ImportError as exc:
             logger.error("gsmod filter module unavailable: %s", exc)
-            return
+            return data
 
         try:
             start_time = time.perf_counter()
@@ -96,6 +102,8 @@ class VolumeFilterService:
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.error("CPU volume filter failed: %s", exc, exc_info=True)
+
+        return data
 
     def filter_gpu(
         self,
@@ -136,18 +144,8 @@ class VolumeFilterService:
             if isinstance(gaussians, GSTensorPro):
                 tensor_pro = gaussians
             else:
-                # Direct tensor wrapping - shares memory with input
-                tensor_pro = GSTensorPro(
-                    means=gaussians.means,
-                    scales=gaussians.scales,
-                    quats=gaussians.quats,
-                    opacities=gaussians.opacities,
-                    sh0=gaussians.sh0,
-                    shN=gaussians.shN,
-                )
-                # Preserve format info for correct opacity/scale interpretation
-                if hasattr(gaussians, "_format") and gaussians._format:
-                    tensor_pro._format = gaussians._format.copy()
+                # Wrap GSTensor as GSTensorPro (preserves format state)
+                tensor_pro = GSTensorPro.from_gstensor(gaussians)
 
             # Use gsmod's optimized GPU filter (inplace=False for non-destructive)
             filtered = tensor_pro.filter(fv, inplace=False)

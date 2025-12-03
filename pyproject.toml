@@ -16,7 +16,7 @@ dependencies = [
     "tyro>=0.8.0", # CLI argument parsing
     # Gaussian Splatting Rendering
     # gsplat is installed via install.ps1/install.sh with --no-build-isolation
-    "gsmod==0.1.4", # LUT operations and filtering
+    "gsmod",  # Configured via [tool.uv.sources] for local editable install
     # GIFStream Support
     "pyyaml>=6.0", # Config file parsing
     # Launcher (local)
@@ -26,6 +26,9 @@ dependencies = [
     "tqdm>=4.66.0", # Progress bars for console output
     "nvidia-nvimgcodec-cu12>=0.6.1.37",
     "websockets>=15.0.1",
+    # Triton for GPU kernel acceleration (gsmod uses for color operations)
+    "triton-windows>=3.0.0; sys_platform == 'win32'",
+    "triton>=3.0.0; sys_platform != 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -93,6 +96,7 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
 gsplay-launcher = { path = "launcher" }
+gsmod = { path = "../gsmod", editable = true }
 
 [tool.ruff]
 target-version = "py312"

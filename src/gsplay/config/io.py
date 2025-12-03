@@ -241,13 +241,18 @@ def export_viewer_config(
         with camera_controller.state_lock:
             state = camera_controller.state
             export_data["camera"] = {
-                "azimuth": float(state.azimuth),
-                "elevation": float(state.elevation),
-                "roll": float(state.roll),
+                "version": 2,  # Quaternion format version
+                "orientation": state.orientation.tolist()
+                if hasattr(state.orientation, "tolist")
+                else list(state.orientation),
                 "distance": float(state.distance),
                 "look_at": state.look_at.tolist()
                 if hasattr(state.look_at, "tolist")
                 else list(state.look_at),
+                # Also export Euler angles for human readability and backwards compat
+                "azimuth": float(state.azimuth),
+                "elevation": float(state.elevation),
+                "roll": float(state.roll),
             }
 
     # Export UI-specific state if handles available
@@ -362,26 +367,36 @@ def import_viewer_config(
 
         if camera_controller.state is not None:
             import numpy as np
-            import time as time_module
-
-            # Suppress state sync while we're importing to prevent overwrites
-            camera_controller._suppress_state_sync_until = time_module.time() + 5.0
 
             with camera_controller.state_lock:
-                if "azimuth" in camera_data:
-                    camera_controller.state.azimuth = float(camera_data["azimuth"])
-                if "elevation" in camera_data:
-                    camera_controller.state.elevation = float(camera_data["elevation"])
-                if "roll" in camera_data:
-                    camera_controller.state.roll = float(camera_data["roll"])
+                # Check version to determine import method
+                version = camera_data.get("version", 1)
+
+                if version >= 2 and "orientation" in camera_data:
+                    # New quaternion format (version 2+)
+                    orientation = camera_data["orientation"]
+                    if isinstance(orientation, (list, tuple)):
+                        camera_controller.state.orientation = np.array(
+                            orientation, dtype=np.float64
+                        )
+                    logger.debug("Imported quaternion orientation from config")
+                else:
+                    # Legacy Euler angle format (version 1 or missing)
+                    azimuth = float(camera_data.get("azimuth", 45.0))
+                    elevation = float(camera_data.get("elevation", 30.0))
+                    roll = float(camera_data.get("roll", 0.0))
+                    # Convert Euler angles to quaternion
+                    camera_controller.state.set_from_euler(azimuth, elevation, roll)
+                    logger.debug("Converted legacy Euler angles to quaternion")
+
+                # Import distance and look_at (common to both versions)
                 if "distance" in camera_data:
                     camera_controller.state.distance = float(camera_data["distance"])
                 if "look_at" in camera_data:
                     look_at = camera_data["look_at"]
-                    # Handle both list and tuple
                     if isinstance(look_at, (list, tuple)):
                         camera_controller.state.look_at = np.array(
-                            look_at, dtype=np.float32
+                            look_at, dtype=np.float64
                         )
 
             # Log the state we're about to apply

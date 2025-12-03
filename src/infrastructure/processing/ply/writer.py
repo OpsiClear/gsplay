@@ -92,10 +92,12 @@ def write_ply(
     else:
         data.shN = _ensure_shn_shape(data.shN, data.means.shape[0])
 
-    # Normalize to PLY format before saving (log scales, logit opacities)
+    # Normalize to PLY format before saving (log scales, logit opacities, SH colors)
     # This ensures data is in correct format regardless of input format
     # For compressed format, GSTensor.save() checks format flags, but we normalize explicitly for safety
     # For uncompressed format, plywrite() expects PLY format, so normalization is required
+    from gsply.formats import DataFormat
+
     if isinstance(data, GSTensor):
         # Check if data is already in PLY format by checking format flags
         needs_normalize = True
@@ -103,24 +105,32 @@ def write_ply(
             scales_format = data._format.get("scales")
             opacities_format = data._format.get("opacities")
             # Data is in PLY format if scales are log and opacities are logit
-            from gsply.formats import DataFormat
             if scales_format == DataFormat.SCALES_PLY and opacities_format == DataFormat.OPACITIES_PLY:
                 needs_normalize = False
-        
+
         if needs_normalize:
             data = data.normalize(inplace=False)  # Create copy to avoid modifying original
+
+        # Convert sh0 from RGB back to SH format if needed
+        # PLY format expects SH coefficients, not RGB colors
+        if hasattr(data, 'is_sh0_rgb') and data.is_sh0_rgb:
+            data = data.to_sh(inplace=False)
     else:
         # GSData: check format flags
         needs_normalize = True
         if data._format is not None:
             scales_format = data._format.get("scales")
             opacities_format = data._format.get("opacities")
-            from gsply.formats import DataFormat
             if scales_format == DataFormat.SCALES_PLY and opacities_format == DataFormat.OPACITIES_PLY:
                 needs_normalize = False
-        
+
         if needs_normalize:
             data = data.normalize(inplace=False)  # Create copy to avoid modifying original
+
+        # Convert sh0 from RGB back to SH format if needed
+        # PLY format expects SH coefficients, not RGB colors
+        if hasattr(data, 'is_sh0_rgb') and data.is_sh0_rgb:
+            data = data.to_sh(inplace=False)
 
     # Use gsply v0.2.5 native save() methods
     # Data is now guaranteed to be in PLY format (log scales, logit opacities)
@@ -178,33 +188,41 @@ def write_ply_bytes(
     else:
         data.shN = _ensure_shn_shape(data.shN, data.means.shape[0])
 
-    # Normalize to PLY format before saving (log scales, logit opacities)
+    # Normalize to PLY format before saving (log scales, logit opacities, SH colors)
     # This ensures data is in correct format regardless of input format
+    from gsply.formats import DataFormat
+
     if isinstance(data, GSTensor):
         needs_normalize = True
         if data._format is not None:
             scales_format = data._format.get("scales")
             opacities_format = data._format.get("opacities")
-            from gsply.formats import DataFormat
             if scales_format == DataFormat.SCALES_PLY and opacities_format == DataFormat.OPACITIES_PLY:
                 needs_normalize = False
-        
+
         if needs_normalize:
             data = data.normalize(inplace=False)
+
+        # Convert sh0 from RGB back to SH format if needed
+        if hasattr(data, 'is_sh0_rgb') and data.is_sh0_rgb:
+            data = data.to_sh(inplace=False)
     else:
         needs_normalize = True
         if data._format is not None:
             scales_format = data._format.get("scales")
             opacities_format = data._format.get("opacities")
-            from gsply.formats import DataFormat
             if scales_format == DataFormat.SCALES_PLY and opacities_format == DataFormat.OPACITIES_PLY:
                 needs_normalize = False
-        
+
         if needs_normalize:
             data = data.normalize(inplace=False)
 
+        # Convert sh0 from RGB back to SH format if needed
+        if hasattr(data, 'is_sh0_rgb') and data.is_sh0_rgb:
+            data = data.to_sh(inplace=False)
+
     # Use gsply v0.2.5 native save() methods via temporary file
-    # Data is now guaranteed to be in PLY format (log scales, logit opacities)
+    # Data is now guaranteed to be in PLY format (log scales, logit opacities, SH colors)
     with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as tmp:
         tmp_path = tmp.name
 

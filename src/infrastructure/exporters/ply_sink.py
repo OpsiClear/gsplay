@@ -58,8 +58,16 @@ class PlySink(DataSinkProtocol):
         # Convert to GSTensor for saving (uses gsply native save)
         gstensor = data.to_gstensor(device="cpu")
 
+        # Normalize to PLY format (log scales, logit opacities)
+        gstensor = gstensor.normalize(inplace=False)
+
+        # Convert sh0 from RGB back to SH format if needed
+        # PLY format expects SH coefficients, not RGB colors
+        if hasattr(gstensor, 'is_sh0_rgb') and gstensor.is_sh0_rgb:
+            gstensor = gstensor.to_sh(inplace=False)
+
         # Use gsply's native save method
-        gstensor.save(str(output_path))
+        gstensor.save(str(output_path), compressed=False)
 
         logger.debug("Exported %d gaussians to %s", data.n_gaussians, path)
 

@@ -98,6 +98,11 @@ class CompressedPlyExporter:
         # Use inplace=False to avoid modifying original data
         export_data = gaussian_data.normalize(inplace=False)
 
+        # Convert sh0 from RGB back to SH format if needed
+        # PLY format expects SH coefficients, not RGB colors
+        if hasattr(export_data, 'is_sh0_rgb') and export_data.is_sh0_rgb:
+            export_data = export_data.to_sh(inplace=False)
+
         # Use native gsply save() method with compressed=True
         # GSTensor.save() respects the device: GPU compression if on GPU, CPU if on CPU
         # For remote paths, save to temp file first then upload

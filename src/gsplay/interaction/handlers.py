@@ -444,6 +444,7 @@ class HandlerManager:
             (ui.reset_colors_advanced_button, EventType.RESET_COLORS_REQUESTED, {}),
             (ui.reset_pose_button, EventType.RESET_TRANSFORM_REQUESTED, {}),
             (ui.reset_filter_button, EventType.RESET_FILTER_REQUESTED, {}),
+            (ui.center_button, EventType.CENTER_REQUESTED, {}),
         ]
 
         for button, event_type, event_data in button_mappings:

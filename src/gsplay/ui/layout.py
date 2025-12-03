@@ -34,6 +34,7 @@ def create_transform_controls(
     viser.GuiSliderHandle,
     viser.GuiSliderHandle,
     viser.GuiButtonHandle,
+    viser.GuiButtonHandle,
 ]:
     """
     Create scene transform controls (scale and rotation).
@@ -49,7 +50,7 @@ def create_transform_controls(
     -------
     tuple
         (translation_x, translation_y, translation_z, global_scale,
-         rotation_x, rotation_y, rotation_z, reset_button)
+         rotation_x, rotation_y, rotation_z, reset_button, center_button)
     """
     # Scene transformation (translation + scale + rotation combined)
     translate = tuple(
@@ -124,6 +125,7 @@ def create_transform_controls(
         hint="Uniformly scale entire scene (positions and Gaussian sizes)",
     )
 
+    center_button = server.gui.add_button("Center", hint="Center scene at origin")
     reset_button = server.gui.add_button("Reset")
 
     logger.debug("Created transform controls")
@@ -136,6 +138,7 @@ def create_transform_controls(
         rotation_y,
         rotation_z,
         reset_button,
+        center_button,
     )
 
 
@@ -1172,6 +1175,7 @@ def setup_ui_layout(
                     rotation_y,
                     rotation_z,
                     reset_pose,
+                    center_button,
                 ) = create_transform_controls(server, config)
 
             # Filter tab
@@ -1264,6 +1268,7 @@ def setup_ui_layout(
                 rotation_y,
                 rotation_z,
                 reset_pose,
+                center_button,
             ) = create_transform_controls(server, config)
 
         # Filter tab
@@ -1329,6 +1334,7 @@ def setup_ui_layout(
         rotation_y_slider=rotation_y,
         rotation_z_slider=rotation_z,
         reset_pose_button=reset_pose,
+        center_button=center_button,
         # Volume filtering (from dict) - basic
         min_opacity_slider=filter_controls["min_opacity"],
         max_opacity_slider=filter_controls["max_opacity"],

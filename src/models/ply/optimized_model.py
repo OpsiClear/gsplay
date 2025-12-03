@@ -98,10 +98,6 @@ class OptimizedPlyModel(ModelInterface):
         # Cached folder-level format (avoids per-file detection for homogeneous sequences)
         self._cached_folder_format: tuple[PlyFrameEncoding, int | None] | None = None
 
-        # Current frame cache - avoids disk reload on camera rotation
-        self._cached_frame_idx: int | None = None
-        self._cached_frame_data: GSData | GSTensor | None = None
-
         if self.enable_concurrent_prefetch:
             from concurrent.futures import ThreadPoolExecutor
             # Use 2 threads (don't compete with rendering)
@@ -140,15 +136,8 @@ class OptimizedPlyModel(ModelInterface):
 
     @processing_mode.setter
     def processing_mode(self, value: str) -> None:
-        """Set processing mode and invalidate frame cache if changed."""
-        if value != self._processing_mode:
-            self._processing_mode = value
-            self.invalidate_frame_cache()
-
-    def invalidate_frame_cache(self) -> None:
-        """Clear the cached frame data, forcing reload on next request."""
-        self._cached_frame_idx = None
-        self._cached_frame_data = None
+        """Set processing mode."""
+        self._processing_mode = value
 
     def get_recommended_max_scale(self) -> float:
         """
@@ -375,10 +364,6 @@ class OptimizedPlyModel(ModelInterface):
         frame_idx = int(round(normalized_time * (self.total_frames - 1)))
         frame_idx = max(0, min(frame_idx, self.total_frames - 1))
 
-        # Fast path: return cached data if same frame (e.g., camera rotation)
-        if frame_idx == self._cached_frame_idx and self._cached_frame_data is not None:
-            return self._cached_frame_data
-
         previous_frame_idx = self._last_requested_frame
         self._last_requested_frame = frame_idx
         ply_path = self.ply_files[frame_idx]
@@ -512,10 +497,6 @@ class OptimizedPlyModel(ModelInterface):
             )
             if is_cpu_mode:
                 self._schedule_cpu_prefetch(frame_idx, previous_frame_idx)
-
-            # Cache the loaded frame for fast retrieval on camera rotation
-            self._cached_frame_idx = frame_idx
-            self._cached_frame_data = processed_data
 
             return processed_data
 

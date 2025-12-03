@@ -192,9 +192,17 @@ class GPUJpegBackend:
             import torch
             if isinstance(image, torch.Tensor) and image.is_cuda:
                 torch.cuda.synchronize(image.device)
-            
+
             nv_image = self._nvimgcodec.as_image(image)
             result = encoder.encode(nv_image, codec="jpeg", params=params)
+
+            # CRITICAL: Ensure nvImageCodec is done reading from tensor memory
+            # before we return. Without this, the next frame's render could reuse
+            # this tensor's memory while nvImageCodec is still reading -> corruption.
+            if isinstance(image, torch.Tensor) and image.is_cuda:
+                torch.cuda.synchronize(image.device)
+            del nv_image  # Release nvImageCodec's reference to tensor
+
             return result
         except Exception as e:
             # If nvImageCodec fails, attempt to recover CUDA state
@@ -306,6 +314,20 @@ def _set_cached_jpeg(jpeg_bytes: bytes | None) -> None:
     _thread_local.jpeg_bytes = jpeg_bytes
 
 
+def _get_tensor_ref() -> "torch.Tensor | None":
+    """Get the cached tensor reference for the current thread."""
+    return getattr(_thread_local, "tensor_ref", None)
+
+
+def _set_tensor_ref(tensor: "torch.Tensor | None") -> None:
+    """Set the cached tensor reference for the current thread.
+
+    This keeps the tensor alive to prevent PyTorch's memory allocator
+    from reusing the memory while nvImageCodec may still be reading from it.
+    """
+    _thread_local.tensor_ref = tensor
+
+
 @dataclass
 class JpegEncodingService:
     """High-level service for JPEG encoding with JPEG bytes caching.
@@ -314,12 +336,20 @@ class JpegEncodingService:
     It provides:
     - JPEG bytes caching for efficient multi-client streaming
     - Thread-safe operation with per-thread cache isolation
+    - Memory safety by holding tensor references until next encode
 
     Thread Safety
     -------------
     Each renderer thread has its own isolated JPEG cache using
     thread-local storage. This prevents race conditions when multiple
     clients are rendering simultaneously.
+
+    Memory Safety
+    -------------
+    To prevent race conditions with nvImageCodec's internal async operations,
+    we keep a reference to the last encoded tensor until the next encode starts.
+    This prevents PyTorch's memory allocator from reusing that memory while
+    nvImageCodec may still be reading from it.
 
     Example
     -------
@@ -339,9 +369,13 @@ class JpegEncodingService:
 
     # Private state
     _encoder: JpegEncoder = field(init=False, repr=False)
+    # Keep reference to last encoded tensor to prevent memory reuse race condition
+    # This is stored in thread-local storage for thread safety
+    _tensor_ref_lock: threading.Lock = field(init=False, repr=False)
 
     def __post_init__(self):
         self._encoder = JpegEncoder(self.device)
+        self._tensor_ref_lock = threading.Lock()
 
     @property
     def backend_name(self) -> str:
@@ -380,6 +414,12 @@ class JpegEncodingService:
         Encodes immediately while we have exclusive access to the tensor,
         then caches the JPEG bytes for later retrieval via get_cached_jpeg().
 
+        IMPORTANT: This method also stores a reference to the tensor to prevent
+        PyTorch's memory allocator from reusing the memory while nvImageCodec
+        may still have internal async operations reading from it. This prevents
+        the horizontal stripe corruption that occurs when memory is overwritten
+        during JPEG encoding.
+
         Parameters
         ----------
         image : torch.Tensor
@@ -396,7 +436,19 @@ class JpegEncodingService:
         """
         q = quality if quality is not None else self.default_quality
         css = chroma_subsampling if chroma_subsampling is not None else self.default_chroma_subsampling
+
+        # Encode first (while previous frame's tensor reference is still held)
         jpeg_bytes = self._encoder.encode(image, q, css)
+
+        # CRITICAL: Store reference to the NEW tensor AFTER encoding completes.
+        # This ensures the previous frame's tensor memory isn't released until
+        # this frame's encoding is done. The sequence is:
+        # 1. Previous frame's tensor is still referenced (memory protected)
+        # 2. Current frame encodes (may have async internal operations)
+        # 3. After encode() returns (with sync), update reference to current frame
+        # 4. Previous frame's tensor is now released (safe - its encoding is long done)
+        _set_tensor_ref(image)
+
         _set_cached_jpeg(jpeg_bytes)
         return jpeg_bytes
 
@@ -404,8 +456,14 @@ class JpegEncodingService:
         """Get cached JPEG bytes for current thread."""
         return _get_cached_jpeg()
 
-    def clear_cached_jpeg(self) -> None:
-        """Clear the cached JPEG bytes for current thread."""
+    def clear_gpu_frame(self) -> None:
+        """Clear cached GPU tensor reference for current thread.
+
+        This releases the tensor reference, allowing PyTorch's memory allocator
+        to reuse the memory. Should be called during error recovery to ensure
+        potentially corrupted tensor references are released.
+        """
+        _set_tensor_ref(None)
         _set_cached_jpeg(None)
 
 
@@ -488,3 +546,11 @@ def encode(
     return get_service().encode(image, quality, chroma_subsampling)
 
 
+def clear_gpu_frame() -> None:
+    """Clear cached GPU tensor reference for current thread (module-level API).
+
+    This releases the tensor reference, allowing PyTorch's memory allocator
+    to reuse the memory. Should be called during error recovery to ensure
+    potentially corrupted tensor references are released.
+    """
+    return get_service().clear_gpu_frame()

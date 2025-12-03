@@ -84,9 +84,14 @@ class PlyExporter:
         output_path = UniversalPath(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Normalize data to PLY format (log scales, logit opacities) if needed
+        # Convert to PLY format: normalize scales/opacities and convert RGB to SH
         # Use inplace=False to avoid modifying original data
         export_data = gaussian_data.normalize(inplace=False)
+
+        # Convert sh0 from RGB back to SH format if needed
+        # PLY format expects SH coefficients, not RGB colors
+        if hasattr(export_data, 'is_sh0_rgb') and export_data.is_sh0_rgb:
+            export_data = export_data.to_sh(inplace=False)
 
         # Use native gsply save() method
         # For remote paths, save to temp file first then upload
