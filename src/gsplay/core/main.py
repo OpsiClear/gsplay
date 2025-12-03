@@ -59,7 +59,6 @@ def main(
     stream_port: int = -1,
     log_level: str = "INFO",
     gpu: int | None = None,
-    cache_size: int = 100,
     view_only: bool = False,
     compact: bool = False,
 ) -> None:
@@ -82,8 +81,6 @@ def main(
     gpu : int | None
         GPU device number (e.g., 0, 1, 2). If None, defaults to GPU 0 if CUDA is available, otherwise CPU.
         Examples: --gpu 0, --gpu 3
-    cache_size : int
-        Number of frames to cache in memory (default: 100)
     view_only : bool
         Hide input path, config save, and export options from UI (default: False)
     compact : bool
@@ -154,7 +151,6 @@ def main(
             "config": {
                 "ply_folder": str(config),
                 "device": device,
-                "cache_size": cache_size,
             },
         }
         viewer.load_model_from_config(config_dict, config_file=str(config))

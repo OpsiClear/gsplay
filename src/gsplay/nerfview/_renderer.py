@@ -183,26 +183,21 @@ class Renderer(threading.Thread):
                 raise InterruptRenderException
         return self._may_interrupt_trace
 
-    def _broadcast_frame(self, jpeg_quality: int) -> None:
-        """Broadcast frame to stream server using GPU JPEG encoding.
+    def _broadcast_frame(self) -> None:
+        """Broadcast cached JPEG frame to stream server.
 
-        Requires nvImageCodec for GPU encoding. No CPU fallback.
-
-        Parameters
-        ----------
-        jpeg_quality : int
-            JPEG compression quality.
+        The JPEG was already encoded by render_fn via encode_and_cache().
         """
         try:
             from src.gsplay.streaming import get_stream_server
-            from src.gsplay.rendering.jpeg_encoder import encode_from_cache
+            from src.gsplay.rendering.jpeg_encoder import get_cached_jpeg
 
             stream_server = get_stream_server()
             if stream_server is None:
                 return
 
-            # GPU JPEG encoding from cached tensor (set in renderer.py)
-            jpeg_bytes = encode_from_cache(quality=jpeg_quality)
+            # Get pre-encoded JPEG bytes (encoded in renderer.py)
+            jpeg_bytes = get_cached_jpeg()
             if jpeg_bytes is not None:
                 stream_server.broadcast_jpeg(jpeg_bytes)
 
@@ -338,10 +333,10 @@ class Renderer(threading.Thread):
                 depth=depth,
             )
 
-            # Broadcast frame to stream server (GPU JPEG encoding)
-            # Skip if render was interrupted - GPU cache may be incomplete/corrupt
+            # Broadcast frame to stream server (pre-encoded JPEG)
+            # Skip if render was interrupted - cache may be incomplete/corrupt
             if not _skip_gpu_broadcast:
-                self._broadcast_frame(jpeg_quality)
+                self._broadcast_frame()
 
 
 class SharedRenderer(threading.Thread):
@@ -423,26 +418,21 @@ class SharedRenderer(threading.Thread):
         with self._camera_lock:
             return self._shared_camera
 
-    def _broadcast_frame(
-        self, depth: np.ndarray | None, jpeg_quality: int
-    ) -> None:
-        """Broadcast frame using GPU JPEG encoding.
+    def _broadcast_frame(self, depth: np.ndarray | None) -> None:
+        """Broadcast pre-encoded JPEG frame to all clients.
 
-        Encodes once on GPU and sends directly to both:
-        1. Viser clients via BackgroundImageMessage
-        2. Stream server (if active)
+        Uses JPEG bytes already encoded by render_fn via encode_and_cache().
+        Sends directly to both viser clients and stream server.
 
         Parameters
         ----------
         depth : np.ndarray | None
             Depth array (optional).
-        jpeg_quality : int
-            JPEG quality 1-100.
         """
-        from src.gsplay.rendering.jpeg_encoder import encode_from_cache
+        from src.gsplay.rendering.jpeg_encoder import get_cached_jpeg
 
-        # Encode using GPU (from cached tensor set by renderer.py)
-        jpeg_bytes = encode_from_cache(quality=jpeg_quality)
+        # Get pre-encoded JPEG bytes (encoded in renderer.py)
+        jpeg_bytes = get_cached_jpeg()
         if jpeg_bytes is None:
             return
 
@@ -594,8 +584,8 @@ class SharedRenderer(threading.Thread):
             else:
                 jpeg_quality = self.viewer.jpeg_quality_static
 
-            # BROADCAST to ALL clients (GPU JPEG encoding)
-            # Skip if render was interrupted - GPU cache may be incomplete/corrupt
+            # BROADCAST to ALL clients (pre-encoded JPEG)
+            # Skip if render was interrupted - cache may be incomplete/corrupt
             if not _skip_gpu_broadcast:
-                self._broadcast_frame(depth, jpeg_quality)
+                self._broadcast_frame(depth)
 

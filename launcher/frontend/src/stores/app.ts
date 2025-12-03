@@ -165,7 +165,6 @@ async function launchFolder(entry: DirectoryEntry): Promise<void> {
     gpu: gpuStore.selectedGpu(),
     compact: launchSettingsStore.compact(),
     view_only: config.view_only || launchSettingsStore.viewOnly(),
-    cache_size: 100,
   };
 
   try {
@@ -318,7 +317,6 @@ async function relaunchFromHistory(entry: LaunchHistoryEntry): Promise<void> {
     gpu: entry.gpu ?? gpuStore.selectedGpu(),
     compact: entry.compact,
     view_only: config.view_only || entry.view_only,
-    cache_size: 100,
   };
 
   try {

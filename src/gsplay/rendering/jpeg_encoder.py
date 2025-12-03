@@ -4,14 +4,14 @@ Architecture
 ------------
     ┌─────────────────────────────────────────────────────────────────┐
     │                      Public API (Module Level)                   │
-    │  get_service(), set_gpu_frame(), encode(), encode_from_cache()  │
+    │     encode_and_cache(), get_cached_jpeg(), encode()             │
     └─────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
     ┌─────────────────────────────────────────────────────────────────┐
     │                    JpegEncodingService                          │
     │  - Owns encoder instance (lazy-initialized)                     │
-    │  - Manages GPU frame cache for zero-copy encoding               │
+    │  - Caches JPEG bytes in thread-local storage                    │
     │  - Thread-safe encoding                                         │
     └─────────────────────────────────────────────────────────────────┘
                                     │
@@ -33,16 +33,16 @@ Simple encoding::
     from src.gsplay.rendering.jpeg_encoder import encode
     jpeg_bytes = encode(image_tensor, quality=85)
 
-With GPU frame caching (for streaming)::
+With caching for streaming (encode once, broadcast to multiple clients)::
 
-    from src.gsplay.rendering.jpeg_encoder import set_gpu_frame, encode_from_cache
+    from src.gsplay.rendering.jpeg_encoder import encode_and_cache, get_cached_jpeg
 
-    # In renderer, before CPU transfer:
-    set_gpu_frame(result_gpu)
-    result = result_gpu.cpu().numpy()
+    # In renderer - encode immediately while tensor is valid:
+    encode_and_cache(gpu_frame_uint8)
+    result = gpu_frame_uint8.cpu().numpy()
 
-    # In streaming, encode directly from GPU:
-    jpeg_bytes = encode_from_cache(quality=85)
+    # In broadcast - retrieve cached JPEG bytes:
+    jpeg_bytes = get_cached_jpeg()
 """
 
 from __future__ import annotations
@@ -291,33 +291,33 @@ class JpegEncoder:
 # =============================================================================
 
 
-# Thread-local storage for GPU frames
-# Each renderer thread gets its own isolated frame cache
+# Thread-local storage for cached JPEG bytes
+# Each renderer thread gets its own isolated cache
 _thread_local = threading.local()
 
 
-def _get_thread_frame() -> "torch.Tensor | None":
-    """Get the GPU frame for the current thread."""
-    return getattr(_thread_local, "gpu_frame", None)
+def _get_cached_jpeg() -> bytes | None:
+    """Get the cached JPEG bytes for the current thread."""
+    return getattr(_thread_local, "jpeg_bytes", None)
 
 
-def _set_thread_frame(tensor: "torch.Tensor | None") -> None:
-    """Set the GPU frame for the current thread."""
-    _thread_local.gpu_frame = tensor
+def _set_cached_jpeg(jpeg_bytes: bytes | None) -> None:
+    """Set the cached JPEG bytes for the current thread."""
+    _thread_local.jpeg_bytes = jpeg_bytes
 
 
 @dataclass
 class JpegEncodingService:
-    """High-level service for JPEG encoding with GPU frame caching.
+    """High-level service for JPEG encoding with JPEG bytes caching.
 
     This is the main entry point for JPEG encoding in the application.
     It provides:
-    - GPU frame caching for zero-copy encoding
-    - Thread-safe operation with per-thread frame isolation
+    - JPEG bytes caching for efficient multi-client streaming
+    - Thread-safe operation with per-thread cache isolation
 
     Thread Safety
     -------------
-    Each renderer thread has its own isolated GPU frame cache using
+    Each renderer thread has its own isolated JPEG cache using
     thread-local storage. This prevents race conditions when multiple
     clients are rendering simultaneously.
 
@@ -328,9 +328,9 @@ class JpegEncodingService:
     >>> # Simple encoding
     >>> jpeg = service.encode(image, quality=85)
     >>>
-    >>> # With GPU frame caching (for streaming)
-    >>> service.set_gpu_frame(gpu_tensor)  # In renderer thread
-    >>> jpeg = service.encode_from_cache(quality=85)  # Same thread
+    >>> # Encode and cache for streaming
+    >>> jpeg = service.encode_and_cache(gpu_tensor)  # Encode + cache
+    >>> jpeg = service.get_cached_jpeg()  # Retrieve cached bytes
     """
 
     device: str = "cuda:0"
@@ -347,26 +347,6 @@ class JpegEncodingService:
     def backend_name(self) -> str:
         """Name of the active encoding backend."""
         return self._encoder.backend_name
-
-    def set_gpu_frame(self, tensor: "torch.Tensor") -> None:
-        """Cache GPU tensor for zero-copy encoding (thread-local).
-
-        Call this in the renderer BEFORE transferring to CPU.
-        The tensor should be HWC format, uint8 [0,255], contiguous.
-
-        Note: This stores the frame in thread-local storage, so only
-        the same thread can retrieve it. This ensures proper isolation
-        when multiple clients are rendering simultaneously.
-        """
-        _set_thread_frame(tensor)
-
-    def get_gpu_frame(self) -> "torch.Tensor | None":
-        """Get cached GPU frame for current thread (does not remove it)."""
-        return _get_thread_frame()
-
-    def clear_gpu_frame(self) -> None:
-        """Clear the cached GPU frame for current thread."""
-        _set_thread_frame(None)
 
     def encode(
         self,
@@ -389,18 +369,21 @@ class JpegEncodingService:
         css = chroma_subsampling if chroma_subsampling is not None else self.default_chroma_subsampling
         return self._encoder.encode(image, q, css)
 
-    def encode_from_cache(
+    def encode_and_cache(
         self,
+        image: "torch.Tensor",
         quality: int | None = None,
         chroma_subsampling: ChromaSubsamplingType | None = None,
-    ) -> bytes | None:
-        """Encode from cached GPU frame using nvImageCodec.
+    ) -> bytes:
+        """Encode image to JPEG and cache the result (thread-local).
 
-        Uses thread-local storage to retrieve the GPU frame cached by the
-        current renderer thread.
+        Encodes immediately while we have exclusive access to the tensor,
+        then caches the JPEG bytes for later retrieval via get_cached_jpeg().
 
         Parameters
         ----------
+        image : torch.Tensor
+            GPU tensor in HWC format, uint8 [0,255].
         quality : int, optional
             JPEG quality 1-100.
         chroma_subsampling : str, optional
@@ -408,16 +391,22 @@ class JpegEncodingService:
 
         Returns
         -------
-        bytes | None
-            JPEG bytes, or None if no cached frame.
+        bytes
+            JPEG bytes (also cached for later retrieval).
         """
-        gpu_frame = _get_thread_frame()
-        if gpu_frame is None:
-            return None
-
         q = quality if quality is not None else self.default_quality
         css = chroma_subsampling if chroma_subsampling is not None else self.default_chroma_subsampling
-        return self._encoder.encode(gpu_frame, q, css)
+        jpeg_bytes = self._encoder.encode(image, q, css)
+        _set_cached_jpeg(jpeg_bytes)
+        return jpeg_bytes
+
+    def get_cached_jpeg(self) -> bytes | None:
+        """Get cached JPEG bytes for current thread."""
+        return _get_cached_jpeg()
+
+    def clear_cached_jpeg(self) -> None:
+        """Clear the cached JPEG bytes for current thread."""
+        _set_cached_jpeg(None)
 
 
 # =============================================================================
@@ -444,15 +433,40 @@ def get_service(device: str = "cuda:0") -> JpegEncodingService:
     return _default_service
 
 
-def set_gpu_frame(tensor: "torch.Tensor") -> None:
-    """Cache GPU tensor for zero-copy encoding.
+def encode_and_cache(
+    image: "torch.Tensor",
+    quality: int = 85,
+    chroma_subsampling: ChromaSubsamplingType = "420",
+) -> bytes:
+    """Encode GPU tensor to JPEG and cache the result (thread-local).
 
-    Call this in the renderer BEFORE transferring to CPU:
+    Encodes immediately while we have exclusive access to the tensor,
+    avoiding the need to clone for memory safety.
 
-        set_gpu_frame(result_gpu)
-        result = result_gpu.cpu().numpy()  # CPU transfer for viser
+    Parameters
+    ----------
+    image : torch.Tensor
+        GPU tensor in HWC format, uint8 [0,255].
+    quality : int
+        JPEG quality 1-100 (default: 85).
+    chroma_subsampling : str
+        "420" (default), "422", or "444".
+
+    Returns
+    -------
+    bytes
+        JPEG bytes (also cached for get_cached_jpeg retrieval).
     """
-    get_service().set_gpu_frame(tensor)
+    return get_service().encode_and_cache(image, quality, chroma_subsampling)
+
+
+def get_cached_jpeg() -> bytes | None:
+    """Get cached JPEG bytes for the current thread.
+
+    Returns the JPEG bytes cached by the most recent encode_and_cache() call
+    in the current thread.
+    """
+    return get_service().get_cached_jpeg()
 
 
 def encode(
@@ -460,7 +474,7 @@ def encode(
     quality: int = 85,
     chroma_subsampling: ChromaSubsamplingType = "420",
 ) -> bytes:
-    """Encode image to JPEG bytes.
+    """Encode image to JPEG bytes (no caching).
 
     Parameters
     ----------
@@ -472,17 +486,5 @@ def encode(
         "420" (default), "422", or "444".
     """
     return get_service().encode(image, quality, chroma_subsampling)
-
-
-def encode_from_cache(
-    quality: int = 85,
-    chroma_subsampling: ChromaSubsamplingType = "420",
-) -> bytes | None:
-    """Encode from cached GPU frame using nvImageCodec.
-
-    Use this for streaming - encodes directly from the GPU tensor
-    cached by the renderer (zero-copy). Returns None if no cached frame.
-    """
-    return get_service().encode_from_cache(quality, chroma_subsampling)
 
 

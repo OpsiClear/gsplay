@@ -31,6 +31,7 @@ from gsplay_launcher.api.schemas import (
     InstanceListResponse,
     InstanceResponse,
     LogResponse,
+    MsvcStatusResponse,
     PortInfoResponse,
     ProcessInfo,
     SystemStatsResponse,
@@ -190,7 +191,6 @@ def create_instance(
             host=body.host,
             stream_port=body.stream_port,
             gpu=body.gpu,
-            cache_size=body.cache_size,
             view_only=body.view_only,
             compact=body.compact,
             log_level=body.log_level,
@@ -310,6 +310,44 @@ def get_system_info() -> SystemStatsResponse:
     )
 
 
+@router.get(
+    "/system/msvc",
+    response_model=MsvcStatusResponse,
+    summary="Get MSVC compiler status (Windows)",
+)
+def get_msvc_status_endpoint() -> MsvcStatusResponse:
+    """Check MSVC compiler availability for CUDA JIT compilation.
+
+    On Windows, gsplat requires the MSVC compiler (cl.exe) to JIT-compile
+    CUDA kernels on first use. This endpoint checks:
+
+    1. If cl.exe is already in PATH (Developer Command Prompt)
+    2. If vcvars64.bat can be found to load the MSVC environment
+
+    The launcher will automatically use vcvars64.bat if found.
+    """
+    import sys
+    from gsplay_launcher.services.process_manager import get_msvc_status
+
+    if sys.platform != "win32":
+        return MsvcStatusResponse(
+            available=True,
+            in_path=True,
+            vcvars_path=None,
+            message="MSVC not required on this platform",
+            platform=sys.platform,
+        )
+
+    status = get_msvc_status()
+    return MsvcStatusResponse(
+        available=status["available"],
+        in_path=status["in_path"],
+        vcvars_path=status["vcvars_path"],
+        message=status["message"],
+        platform=sys.platform,
+    )
+
+
 # =============================================================================
 # File Browser Routes
 # =============================================================================
@@ -425,7 +463,6 @@ def launch_from_browser(
             port=body.port,
             stream_port=body.stream_port,
             gpu=body.gpu,
-            cache_size=body.cache_size,
             view_only=body.view_only,
             compact=body.compact,
             custom_ip=body.custom_ip,

@@ -16,7 +16,6 @@ export interface Instance {
   encoded_stream_path: string | null;
   config_path: string;
   gpu: number | null;
-  cache_size: number;
   view_only: boolean;
   compact: boolean;
   pid: number | null;
@@ -36,7 +35,6 @@ export interface CreateInstanceRequest {
   name?: string;
   port?: number | null;
   gpu?: number | null;
-  cache_size?: number;
   view_only?: boolean;
   compact?: boolean;
   log_level?: string;
@@ -100,7 +98,6 @@ export interface BrowseLaunchRequest {
   port?: number | null;
   stream_port?: number;
   gpu?: number | null;
-  cache_size?: number;
   view_only?: boolean;
   compact?: boolean;
   custom_ip?: string | null;

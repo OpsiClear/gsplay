@@ -114,7 +114,7 @@ class InstanceManager:
         host: str | None = None,
         stream_port: int = 0,
         gpu: int | None = None,
-        cache_size: int = 100,
+
         view_only: bool = False,
         compact: bool = False,
         log_level: str = "INFO",
@@ -136,8 +136,7 @@ class InstanceManager:
             WebSocket stream port (0 = disabled).
         gpu : int | None
             GPU device number.
-        cache_size : int
-            Frame cache size.
+
         view_only : bool
             Hide editing UI.
         compact : bool
@@ -211,7 +210,7 @@ class InstanceManager:
             host=assigned_host,
             stream_port=stream_port,
             gpu=gpu,
-            cache_size=cache_size,
+
             view_only=view_only,
             compact=compact,
             log_level=log_level,

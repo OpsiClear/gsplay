@@ -74,8 +74,7 @@ class GSPlayInstance:
         Host to bind the gsplay server (0.0.0.0 for external access).
     gpu : int | None
         GPU device number (None for default).
-    cache_size : int
-        Frame cache size for the gsplay.
+
     view_only : bool
         Whether to hide editing UI.
     compact : bool
@@ -105,7 +104,6 @@ class GSPlayInstance:
     host: str = "0.0.0.0"  # Bind to all interfaces for external access
     stream_port: int = -1  # WebSocket stream port (-1 = auto-assign to viser_port+1, 0 = disabled)
     gpu: int | None = None
-    cache_size: int = 100
     view_only: bool = False
     compact: bool = False
     log_level: str = "INFO"
@@ -173,8 +171,7 @@ class GSPlayInstance:
             str(self.port),
             "--host",
             self.host,
-            "--cache-size",
-            str(self.cache_size),
+
             "--log-level",
             self.log_level,
         ]

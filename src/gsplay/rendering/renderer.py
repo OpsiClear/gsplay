@@ -274,19 +274,30 @@ def create_render_function(
             # allows multiple instances to run concurrently without blocking each other.
             
             # Normalize output layout to channels-last for downstream math
+            # gsplat outputs: render_colors [N, H, W, C], render_alphas [N, H, W, 1]
             if render_colors.dim() == 4 and render_colors.shape[-1] not in (3, 4) and render_colors.shape[1] in (3, 4):
+                # NCHW format detected - permute to NHWC
                 render_colors = render_colors.permute(0, 2, 3, 1).contiguous()
                 if render_alphas.dim() == 4:
                     render_alphas = render_alphas.permute(0, 2, 3, 1).contiguous()
                 elif render_alphas.dim() == 3:
                     render_alphas = render_alphas.unsqueeze(-1).contiguous()
             elif render_colors.dim() == 4 and render_colors.shape[-1] in (3, 4):
-                # Ensure contiguity even when already channel-last
+                # Already NHWC format - ensure contiguity
                 render_colors = render_colors.contiguous()
-                if render_alphas.dim() == 4 and render_alphas.shape[-1] == 1:
+                if render_alphas.dim() == 4:
+                    # Always make alpha contiguous regardless of shape[-1]
                     render_alphas = render_alphas.contiguous()
                 elif render_alphas.dim() == 3:
                     render_alphas = render_alphas.unsqueeze(-1).contiguous()
+            else:
+                # Unexpected format - log warning and ensure contiguity
+                logger.warning(
+                    f"Unexpected render output format: colors={render_colors.shape}, "
+                    f"alphas={render_alphas.shape}"
+                )
+                render_colors = render_colors.contiguous()
+                render_alphas = render_alphas.contiguous()
             _t_rasterize = (time.perf_counter() - _checkpoint_rasterize) * 1000
 
             # Post-processing: GPU upscaling + async transfer
@@ -298,6 +309,15 @@ def create_render_function(
             # Single clamp after multiplication - avoids redundant kernel launch
             alpha_mask = render_alphas[0]
             result_gpu = torch.clamp(render_colors[0] * alpha_mask, 0.0, 1.0)
+
+            # Validate output - check for NaN/Inf which can corrupt JPEG encoding
+            if torch.isnan(result_gpu).any() or torch.isinf(result_gpu).any():
+                logger.warning(
+                    "NaN/Inf detected in render output - replacing with zeros. "
+                    f"Colors has_nan={torch.isnan(render_colors).any().item()}, "
+                    f"Alpha has_nan={torch.isnan(render_alphas).any().item()}"
+                )
+                result_gpu = torch.nan_to_num(result_gpu, nan=0.0, posinf=1.0, neginf=0.0)
 
             # GPU-based upscaling (if needed) - faster than CPU
             _checkpoint_upscale = time.perf_counter()
@@ -336,15 +356,16 @@ def create_render_function(
                     # Transfer uint8 to CPU (4x smaller than float32, no redundant conversion)
                     result = gpu_frame_uint8.cpu().numpy()
 
-                # CRITICAL: Sync stream BEFORE caching GPU frame for streaming
+                # CRITICAL: Sync stream BEFORE JPEG encoding
                 # This ensures the tensor data is complete and prevents corruption
-                # if encode_from_cache is called before we return
                 _cuda_stream.synchronize()
 
-                # Cache for zero-copy JPEG encoding (streaming)
-                # Only cache AFTER sync to guarantee data integrity
-                from src.gsplay.rendering.jpeg_encoder import set_gpu_frame
-                set_gpu_frame(gpu_frame_uint8)
+                # Encode to JPEG immediately and cache the bytes
+                # This is more efficient than caching the tensor because:
+                # 1. No clone needed (we encode while we still own the tensor)
+                # 2. Less memory (JPEG bytes ~150KB vs tensor ~6MB for 1080p)
+                from src.gsplay.rendering.jpeg_encoder import encode_and_cache
+                encode_and_cache(gpu_frame_uint8)
             else:
                 # Fallback for non-CUDA devices
                 result_gpu = result_gpu.contiguous()
@@ -355,9 +376,9 @@ def create_render_function(
                 # Transfer uint8 to CPU (4x smaller, no redundant conversion)
                 result = gpu_frame_uint8.detach().cpu().numpy()
 
-                # Cache for zero-copy JPEG encoding (streaming)
-                from src.gsplay.rendering.jpeg_encoder import set_gpu_frame
-                set_gpu_frame(gpu_frame_uint8)
+                # Encode to JPEG immediately and cache the bytes
+                from src.gsplay.rendering.jpeg_encoder import encode_and_cache
+                encode_and_cache(gpu_frame_uint8)
 
             _t_post = (time.perf_counter() - _checkpoint_post) * 1000
 

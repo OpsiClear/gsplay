@@ -37,7 +37,6 @@ class InstanceResponse(BaseModel):
     encoded_stream_path: str | None = None  # Encoded path for proxy access (e.g., /s/TOKEN/)
     config_path: str
     gpu: int | None
-    cache_size: int = 100
     view_only: bool = False
     compact: bool = False
     pid: int | None
@@ -94,7 +93,6 @@ class InstanceResponse(BaseModel):
             encoded_stream_path=encoded_stream_path,
             config_path=instance.config_path,
             gpu=instance.gpu,
-            cache_size=instance.cache_size,
             view_only=instance.view_only,
             compact=instance.compact,
             pid=instance.pid,
@@ -249,3 +247,20 @@ class CleanupStopRequest(BaseModel):
 
     force: bool = Field(False, description="Force kill without graceful shutdown")
     pid: int | None = Field(None, description="Stop specific PID (None = stop all)")
+
+
+# MSVC Status schemas (Windows CUDA JIT compilation)
+
+
+class MsvcStatusResponse(BaseModel):
+    """Response for MSVC compiler availability status.
+
+    On Windows, gsplat requires MSVC for JIT compilation of CUDA kernels.
+    This endpoint helps diagnose compilation issues.
+    """
+
+    available: bool = Field(..., description="Whether MSVC is usable for CUDA JIT compilation")
+    in_path: bool = Field(..., description="Whether cl.exe is already in PATH")
+    vcvars_path: str | None = Field(None, description="Path to vcvars64.bat if found")
+    message: str = Field(..., description="Human-readable status message")
+    platform: str = Field(..., description="Current platform (win32, linux, darwin)")
