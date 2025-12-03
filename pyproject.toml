@@ -16,7 +16,7 @@ dependencies = [
     "tyro>=0.8.0", # CLI argument parsing
     # Gaussian Splatting Rendering
     # gsplat is installed via install.ps1/install.sh with --no-build-isolation
-    "gsmod",  # Configured via [tool.uv.sources] for local editable install
+    "gsmod>=0.1.5",  # Gaussian splatting modifications
     # GIFStream Support
     "pyyaml>=6.0", # Config file parsing
     # Launcher (local)
@@ -96,7 +96,6 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
 gsplay-launcher = { path = "launcher" }
-gsmod = { path = "../gsmod", editable = true }
 
 [tool.ruff]
 target-version = "py312"
