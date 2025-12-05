@@ -4,6 +4,7 @@
 
 import { Component, Show } from "solid-js";
 import { systemStore, gpuStore, browseStore } from "../stores/app";
+import { VERSION } from "../version";
 
 export const Header: Component = () => {
   const stats = () => systemStore.stats();
@@ -12,9 +13,12 @@ export const Header: Component = () => {
   return (
     <header>
       <div class="header-top">
-        <h1>GSPlay</h1>
+        <h1>GSPlay <span class="version">v{VERSION}</span></h1>
         <Show when={config()?.external_url}>
           <span class="external-badge">External</span>
+        </Show>
+        <Show when={config()?.network_url}>
+          <span class="network-badge" title={`URLs use: ${config()!.network_url}`}>Network</span>
         </Show>
       </div>
       <div class="header-stats">

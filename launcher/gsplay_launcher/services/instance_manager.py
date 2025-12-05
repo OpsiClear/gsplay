@@ -119,6 +119,8 @@ class InstanceManager:
         compact: bool = False,
         log_level: str = "INFO",
         custom_ip: str | None = None,
+        viewer_id: str | None = None,
+        stream_token: str | None = None,
     ) -> GSPlayInstance:
         """Create and start a new gsplay instance.
 
@@ -215,6 +217,8 @@ class InstanceManager:
             compact=compact,
             log_level=log_level,
             custom_ip=custom_ip,
+            viewer_id=viewer_id,
+            stream_token=stream_token,
         )
 
         # Start the process
@@ -332,6 +336,56 @@ class InstanceManager:
         if self._sync_instance_status(instance):
             self._persistence.save(self._state)
         return instance
+
+    def get_by_viewer_id(self, viewer_id: str) -> GSPlayInstance:
+        """Get instance by viewer_id (custom or default).
+
+        First tries to find by custom viewer_id, then falls back to instance ID.
+
+        Parameters
+        ----------
+        viewer_id : str
+            Viewer ID to search for.
+
+        Returns
+        -------
+        GSPlayInstance
+            Instance.
+
+        Raises
+        ------
+        InstanceNotFoundError
+            If instance not found.
+        """
+        # First check if it matches any custom viewer_id
+        for instance in self._state.instances.values():
+            if instance.viewer_id == viewer_id:
+                if self._sync_instance_status(instance):
+                    self._persistence.save(self._state)
+                return instance
+
+        # Fall back to instance ID lookup
+        return self.get(viewer_id)
+
+    def get_by_stream_token(self, stream_token: str) -> GSPlayInstance | None:
+        """Get instance by custom stream_token.
+
+        Parameters
+        ----------
+        stream_token : str
+            Stream token to search for.
+
+        Returns
+        -------
+        GSPlayInstance | None
+            Instance if found, None otherwise.
+        """
+        for instance in self._state.instances.values():
+            if instance.stream_token == stream_token:
+                if self._sync_instance_status(instance):
+                    self._persistence.save(self._state)
+                return instance
+        return None
 
     def list_all(self) -> list[GSPlayInstance]:
         """List all instances, pruning any that have already stopped."""

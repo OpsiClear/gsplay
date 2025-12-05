@@ -83,6 +83,10 @@ class GSPlayInstance:
         Logging level for the gsplay.
     custom_ip : str | None
         Custom IP address for URL generation (None = auto-detect).
+    viewer_id : str | None
+        Custom ID for viewer proxy path /v/{id}/ (None = use instance id).
+    stream_token : str | None
+        Custom token for stream proxy path /s/{token}/ (None = use encoded instance id).
     status : InstanceStatus
         Current instance status.
     pid : int | None
@@ -108,6 +112,8 @@ class GSPlayInstance:
     compact: bool = False
     log_level: str = "INFO"
     custom_ip: str | None = None  # Custom IP for URL (None = auto-detect)
+    viewer_id: str | None = None  # Custom ID for /v/{id}/ path (None = use instance id)
+    stream_token: str | None = None  # Custom token for /s/{token}/ path (None = use encoded id)
     status: InstanceStatus = InstanceStatus.PENDING
     pid: int | None = None
     created_at: str = field(default_factory=_now_iso)

@@ -14,6 +14,8 @@ export interface Instance {
   stream_port: number;
   stream_url: string | null;
   encoded_stream_path: string | null;
+  viewer_id: string | null;
+  stream_token: string | null;
   config_path: string;
   gpu: number | null;
   view_only: boolean;
@@ -70,6 +72,7 @@ export interface BrowseConfig {
   root_path: string | null;
   default_custom_ip: string | null;
   external_url: string | null;
+  network_url: string | null;
   view_only: boolean;
   history_limit: number;
 }
@@ -101,6 +104,8 @@ export interface BrowseLaunchRequest {
   view_only?: boolean;
   compact?: boolean;
   custom_ip?: string | null;
+  viewer_id?: string | null;
+  stream_token?: string | null;
 }
 
 // Port types

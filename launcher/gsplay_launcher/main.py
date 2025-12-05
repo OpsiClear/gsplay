@@ -141,6 +141,10 @@ def main(
         str | None,
         tyro.conf.arg(help="External base URL for proxy access (e.g., https://gsplay.4dgst.win)"),
     ] = None,
+    network_url: Annotated[
+        str | None,
+        tyro.conf.arg(help="Persistent base URL for viser viewer and streaming (e.g., https://gsplay.example.com). Port appended automatically."),
+    ] = None,
     view_only: Annotated[
         bool,
         tyro.conf.arg(help="Force all instances to launch in view-only mode (hides data loader UI)"),
@@ -196,6 +200,7 @@ def main(
         browse_path=browse_path_resolved,
         custom_ip=custom_ip,
         external_url=external_url.rstrip('/') if external_url else None,
+        network_url=network_url.rstrip('/') if network_url else None,
         view_only=view_only,
         history_limit=history_limit,
     )
@@ -226,6 +231,10 @@ def main(
         logger.info("  External URL: %s", external_url)
     else:
         logger.info("  External URL: disabled (use --external-url to enable)")
+    if network_url:
+        logger.info("  Network URL: %s", network_url)
+    else:
+        logger.info("  Network URL: disabled (use --network-url for persistent URLs)")
     if view_only:
         logger.info("  View-only mode: enabled (all instances will hide data loader)")
 

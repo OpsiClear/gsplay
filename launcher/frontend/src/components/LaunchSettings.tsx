@@ -69,6 +69,30 @@ export const LaunchSettings: Component = () => {
           </div>
 
           <div class="form-group">
+            <label>Viewer ID</label>
+            <input
+              type="text"
+              placeholder="Auto"
+              style={{ width: "100px" }}
+              value={launchSettingsStore.viewerId()}
+              onInput={(e) => launchSettingsStore.setViewerId(e.currentTarget.value)}
+              title="Custom ID for /v/{id}/ URL path"
+            />
+          </div>
+
+          <div class="form-group">
+            <label>Stream Token</label>
+            <input
+              type="text"
+              placeholder="Auto"
+              style={{ width: "100px" }}
+              value={launchSettingsStore.streamToken()}
+              onInput={(e) => launchSettingsStore.setStreamToken(e.currentTarget.value)}
+              title="Custom token for /s/{token}/ URL path"
+            />
+          </div>
+
+          <div class="form-group">
             <label>Options</label>
             <div style={{ display: "flex", gap: "8px" }}>
               <button

@@ -13,12 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from gsplay_launcher.api.routes import (
-    proxy_router,
-    router,
-    set_file_browser,
-    set_instance_manager,
-)
+from gsplay_launcher.api.dependencies import AppState, STATE_KEY
+from gsplay_launcher.api.routes import api_router, proxy_router
 from gsplay_launcher.config import LauncherConfig
 from gsplay_launcher.services.file_browser import FileBrowserService
 from gsplay_launcher.services.id_encoder import set_config as set_encoder_config
@@ -37,25 +33,7 @@ def set_config(config: LauncherConfig) -> None:
 
 
 def _find_frontend_dir() -> Path:
-    """Find the frontend dist directory.
-
-    Search order:
-    1. GSPLAY_FRONTEND_DIR environment variable (explicit override)
-    2. Package static directory (gsplay_launcher/static/) - works for pip install
-    3. Relative to launcher package source (for development with editable install)
-    4. Current working directory / launcher/frontend/dist (fallback for running from project root)
-
-    Returns
-    -------
-    Path
-        Path to frontend dist directory.
-
-    Raises
-    ------
-    FileNotFoundError
-        If no frontend build is found.
-    """
-    # 1. Environment variable takes precedence (for production deployments)
+    """Find the frontend dist directory."""
     if env_path := os.environ.get("GSPLAY_FRONTEND_DIR"):
         path = Path(env_path).resolve()
         if (path / "index.html").exists():
@@ -63,39 +41,23 @@ def _find_frontend_dir() -> Path:
             return path
         logger.warning("GSPLAY_FRONTEND_DIR set but no index.html found: %s", path)
 
+    cwd = Path.cwd().resolve()
+    for candidate in [cwd / "launcher" / "frontend" / "dist", cwd / "frontend" / "dist"]:
+        if (candidate / "index.html").exists():
+            logger.info("Using frontend from: %s", candidate)
+            return candidate
+
     source_file = Path(__file__).resolve()
-
-    # 2. Package static directory (gsplay_launcher/static/)
-    # This works for both pip install and editable install
-    package_static = source_file.parent.parent / "static"
-    if (package_static / "index.html").exists():
-        logger.info("Using frontend from package static: %s", package_static)
-        return package_static
-
-    # 3. Relative frontend/dist (development fallback - relative to gsplay_launcher package)
-    # Goes from gsplay_launcher/api/app.py -> gsplay_launcher -> launcher -> frontend/dist
     dev_frontend = source_file.parent.parent.parent / "frontend" / "dist"
     if (dev_frontend / "index.html").exists():
         logger.info("Using frontend from dev location: %s", dev_frontend)
         return dev_frontend
 
-    # 4. Check relative to CWD (for running from project root or launcher directory)
-    # This handles editable installs where __file__ points to site-packages
-    cwd = Path.cwd().resolve()
-    
-    # Try: cwd/launcher/frontend/dist (running from project root)
-    cwd_frontend = cwd / "launcher" / "frontend" / "dist"
-    if (cwd_frontend / "index.html").exists():
-        logger.info("Using frontend from cwd/launcher: %s", cwd_frontend)
-        return cwd_frontend
-    
-    # Try: cwd/frontend/dist (running from launcher directory)
-    cwd_frontend2 = cwd / "frontend" / "dist"
-    if (cwd_frontend2 / "index.html").exists():
-        logger.info("Using frontend from cwd/frontend: %s", cwd_frontend2)
-        return cwd_frontend2
+    package_static = source_file.parent.parent / "static"
+    if (package_static / "index.html").exists():
+        logger.info("Using frontend from package static: %s", package_static)
+        return package_static
 
-    # No frontend found - raise error with helpful message
     raise FileNotFoundError(
         "Frontend build not found. Please build the frontend first:\n"
         "  cd launcher/frontend && deno task build\n"
@@ -113,46 +75,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     set_encoder_config(_config)
     logger.debug("ID encoder initialized")
 
-    # Startup: initialize instance manager
+    # Create application state container (replaces global mutable state)
+    state = AppState()
+
+    # Initialize instance manager
     logger.info("Initializing instance manager...")
-    manager = InstanceManager(_config)
-    manager.initialize()
-    set_instance_manager(manager)
+    state.instance_manager = InstanceManager(_config)
+    state.instance_manager.initialize()
 
     # Initialize file browser if configured
     if _config.browse_path and _config.browse_path.is_dir():
         logger.info("Initializing file browser with root: %s", _config.browse_path)
-        browser = FileBrowserService(_config.browse_path)
-        set_file_browser(browser)
+        state.file_browser = FileBrowserService(_config.browse_path)
     else:
         logger.info("File browser disabled (no browse_path configured)")
 
+    # Attach state to app for dependency injection
+    setattr(app.state, STATE_KEY, state)
+
     logger.info("Launcher started on http://%s:%d", _config.host, _config.port)
-
     yield
-
-    # Shutdown: nothing to clean up (processes survive)
     logger.info("Launcher shutting down")
 
 
 def create_app(config: LauncherConfig | None = None) -> FastAPI:
-    """Create and configure FastAPI application.
-
-    Parameters
-    ----------
-    config : LauncherConfig | None
-        Launcher configuration. If None, uses global config.
-
-    Returns
-    -------
-    FastAPI
-        Configured application.
-
-    Raises
-    ------
-    FileNotFoundError
-        If frontend build is not found.
-    """
+    """Create and configure FastAPI application."""
     if config is not None:
         set_config(config)
 
@@ -163,25 +110,19 @@ def create_app(config: LauncherConfig | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS for frontend development
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:5173",  # Vite dev server
-            "http://127.0.0.1:5173",
-        ],
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
-    # API routes
-    app.include_router(router)
-
-    # Proxy routes (WebSocket and HTTP proxy for GSPlay instances)
+    # Include routers
+    app.include_router(api_router)
     app.include_router(proxy_router)
 
-    # Find and serve frontend (required)
+    # Serve frontend
     static_dir = _find_frontend_dir()
     frontend_html = (static_dir / "index.html").read_text(encoding="utf-8")
 
@@ -189,7 +130,6 @@ def create_app(config: LauncherConfig | None = None) -> FastAPI:
     async def dashboard() -> str:
         return frontend_html
 
-    # Mount static assets
     app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="assets")
     logger.info("Serving SolidJS frontend from %s", static_dir)
 

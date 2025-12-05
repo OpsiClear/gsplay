@@ -17,11 +17,12 @@ class CreateInstanceRequest(BaseModel):
     host: str | None = Field(None, description="Host to bind to (uses launcher default if null, 0.0.0.0 for external access)")
     stream_port: int = Field(-1, description="WebSocket stream port (-1 = auto-assign to viser_port+1, 0 = disabled)")
     gpu: int | None = Field(None, description="GPU device number")
-    cache_size: int = Field(100, description="Frame cache size")
     view_only: bool = Field(False, description="Hide editing UI")
     compact: bool = Field(False, description="Use compact/mobile UI")
     log_level: str = Field("INFO", description="Logging level")
     custom_ip: str | None = Field(None, description="Custom IP for Open button URL (auto-detect if null)")
+    viewer_id: str | None = Field(None, description="Custom ID for /v/{id}/ proxy path (auto-generated if null)")
+    stream_token: str | None = Field(None, description="Custom token for /s/{token}/ proxy path (auto-generated if null)")
 
 
 class InstanceResponse(BaseModel):
@@ -35,6 +36,8 @@ class InstanceResponse(BaseModel):
     stream_port: int = 0
     stream_url: str | None = None  # Direct stream URL (for local access)
     encoded_stream_path: str | None = None  # Encoded path for proxy access (e.g., /s/TOKEN/)
+    viewer_id: str | None = None  # Custom ID for /v/{id}/ path
+    stream_token: str | None = None  # Custom token for /s/{token}/ path
     config_path: str
     gpu: int | None
     view_only: bool = False
@@ -50,6 +53,7 @@ class InstanceResponse(BaseModel):
         cls,
         instance: GSPlayInstance,
         external_url: str | None = None,
+        network_url: str | None = None,
     ) -> InstanceResponse:
         """Create response from GSPlayInstance.
 
@@ -58,39 +62,66 @@ class InstanceResponse(BaseModel):
         instance : GSPlayInstance
             Instance to convert.
         external_url : str | None
-            External base URL for encoded stream paths. If provided,
-            encoded_stream_path will be a full URL.
+            External base URL for proxy access (e.g., https://gsplay.4dgst.win).
+            When set, generates proxy paths /v/{id}/ and /s/{token}/.
+        network_url : str | None
+            Persistent base URL for both viewer and stream URLs.
+            Used for proxy paths (/v, /s) when external_url is not set.
+            Also used for direct port-based URLs as fallback.
 
         Returns
         -------
         InstanceResponse
             Response model.
         """
-        # Generate encoded stream path if streaming is enabled
-        # Any non-zero stream_port means streaming is enabled
+        # Determine base URL for proxy paths: external_url takes priority, then network_url
+        proxy_base = external_url or network_url
+
+        # Use custom viewer_id/stream_token if set, otherwise use defaults
+        viewer_id = instance.viewer_id or instance.id
+        stream_token = instance.stream_token
+
+        # Generate proxy paths for viewer and stream
+        viewer_proxy_path = f"/v/{viewer_id}/"
         encoded_stream_path = None
+
         if instance.stream_port != 0:
             try:
-                token = encode_instance_id(instance.id)
-                path = f"/s/{token}/"
-                if external_url:
-                    # Full URL with external base
-                    encoded_stream_path = f"{external_url.rstrip('/')}{path}"
+                # Use custom stream_token if set, otherwise encode instance id
+                if not stream_token:
+                    stream_token = encode_instance_id(instance.id)
+                stream_proxy_path = f"/s/{stream_token}/"
+                if proxy_base:
+                    encoded_stream_path = f"{proxy_base.rstrip('/')}{stream_proxy_path}"
                 else:
                     # Just the path (frontend will use relative URL)
-                    encoded_stream_path = path
+                    encoded_stream_path = stream_proxy_path
             except Exception:
                 pass  # Encoder not initialized yet
+
+        # Generate URLs:
+        # - If proxy_base (external_url or network_url) is set, use proxy paths
+        # - Otherwise fall back to direct port-based URLs from instance
+        if proxy_base:
+            base = proxy_base.rstrip("/")
+            url = f"{base}{viewer_proxy_path}"
+            stream_url = encoded_stream_path  # Use proxy path for stream_url too
+        else:
+            # No custom URLs - use instance's auto-generated URLs (direct port-based)
+            url = instance.url
+            stream_url = instance.stream_url
 
         return cls(
             id=instance.id,
             name=instance.name,
             status=instance.status.value,
             port=instance.port,
-            url=instance.url,
+            url=url,
             stream_port=instance.stream_port,
-            stream_url=instance.stream_url,
+            stream_url=stream_url,
             encoded_stream_path=encoded_stream_path,
+            viewer_id=instance.viewer_id,
+            stream_token=instance.stream_token,
             config_path=instance.config_path,
             gpu=instance.gpu,
             view_only=instance.view_only,
@@ -192,6 +223,7 @@ class BrowseConfigResponse(BaseModel):
     root_path: str | None = None
     default_custom_ip: str | None = None
     external_url: str | None = None  # External base URL for proxy access (e.g., https://gsplay.4dgst.win)
+    network_url: str | None = None  # Persistent base URL for both viser viewer and streaming channel
     view_only: bool = False  # If true, all instances are forced to view-only mode
     history_limit: int = 5  # Maximum number of launch history entries to show in UI
 
@@ -204,10 +236,11 @@ class BrowseLaunchRequest(BaseModel):
     port: int | None = Field(None, description="Port number (auto-assigned if null)")
     stream_port: int = Field(-1, description="WebSocket stream port (-1 = auto-assign to viser_port+1, 0 = disabled)")
     gpu: int | None = Field(None, description="GPU device number")
-    cache_size: int = Field(100, description="Frame cache size")
     view_only: bool = Field(False, description="Hide editing UI")
     compact: bool = Field(False, description="Use compact/mobile UI")
     custom_ip: str | None = Field(None, description="Custom IP for Open button URL (auto-detect if null)")
+    viewer_id: str | None = Field(None, description="Custom ID for /v/{id}/ proxy path (auto-generated if null)")
+    stream_token: str | None = Field(None, description="Custom token for /s/{token}/ proxy path (auto-generated if null)")
 
 
 # Log API schemas

@@ -59,6 +59,7 @@ header {
 }
 
 header h1 { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+header h1 .version { font-size: 10px; font-weight: 400; color: var(--text-tertiary); margin-left: 2px; }
 
 .external-badge {
   font-size: 9px;
@@ -69,6 +70,18 @@ header h1 { font-size: 15px; font-weight: 600; color: var(--text-primary); }
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;
+}
+
+.network-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  cursor: help;
 }
 
 .header-stats {
@@ -521,6 +534,8 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .tag.cyan { background: var(--accent-muted); color: var(--accent); }
 .tag.purple { background: var(--purple-muted); color: var(--purple); }
+.tag.green { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+.tag.orange { background: rgba(249, 115, 22, 0.2); color: #f97316; }
 
 /* Instance viewport */
 .instance-viewport {

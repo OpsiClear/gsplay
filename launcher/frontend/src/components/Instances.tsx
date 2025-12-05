@@ -196,6 +196,18 @@ const InstanceCard: Component<{ instance: Instance }> = (props) => {
         <Show when={props.instance.compact}><span class="tag purple">Compact</span></Show>
       </div>
 
+      {/* Custom IDs: viewer_id and stream_token */}
+      <Show when={props.instance.viewer_id || props.instance.stream_token}>
+        <div class="instance-row meta">
+          <Show when={props.instance.viewer_id}>
+            <span class="tag green" title="Viewer path">/v/{props.instance.viewer_id}/</span>
+          </Show>
+          <Show when={props.instance.stream_token}>
+            <span class="tag orange" title="Stream path">/s/{props.instance.stream_token}/</span>
+          </Show>
+        </div>
+      </Show>
+
       {/* Stream viewport (only when streaming is available) */}
       <Show when={hasStream()}>
         <div class="instance-viewport" onClick={(e) => { e.stopPropagation(); streamStore.toggle(props.instance.id); }}>

@@ -111,7 +111,8 @@
       "Bash(.venv/bin/gsplay_launcher:*)",
       "Bash(git grep:*)",
       "WebFetch(domain:docs.nvidia.com)",
-      "Bash(/home/yeheliu/.deno/bin/deno task build)"
+      "Bash(/home/yeheliu/.deno/bin/deno task build)",
+      "Bash(PYTHONPATH=. .venv/bin/python:*)"
     ],
     "deny": [],
     "ask": []
