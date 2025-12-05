@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, WebSocket
 
 if TYPE_CHECKING:
     from gsplay_launcher.services.file_browser import FileBrowserService
@@ -34,8 +34,16 @@ STATE_KEY = "gsplay_state"
 
 
 def get_app_state(request: Request) -> AppState:
-    """Get application state from request."""
+    """Get application state from request (HTTP endpoints)."""
     state = getattr(request.app.state, STATE_KEY, None)
+    if state is None:
+        raise RuntimeError("Application state not initialized")
+    return state
+
+
+def get_app_state_ws(websocket: WebSocket) -> AppState:
+    """Get application state from websocket (WebSocket endpoints)."""
+    state = getattr(websocket.app.state, STATE_KEY, None)
     if state is None:
         raise RuntimeError("Application state not initialized")
     return state
@@ -44,7 +52,16 @@ def get_app_state(request: Request) -> AppState:
 def get_instance_manager(
     state: AppState = Depends(get_app_state),
 ) -> "InstanceManager":
-    """Get instance manager from application state."""
+    """Get instance manager from application state (HTTP endpoints)."""
+    if state.instance_manager is None:
+        raise RuntimeError("Instance manager not initialized")
+    return state.instance_manager
+
+
+def get_instance_manager_ws(
+    state: AppState = Depends(get_app_state_ws),
+) -> "InstanceManager":
+    """Get instance manager from application state (WebSocket endpoints)."""
     if state.instance_manager is None:
         raise RuntimeError("Instance manager not initialized")
     return state.instance_manager

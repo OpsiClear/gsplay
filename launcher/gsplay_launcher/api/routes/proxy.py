@@ -4,7 +4,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, status
 from fastapi.responses import Response
 
-from gsplay_launcher.api.dependencies import get_instance_manager
+from gsplay_launcher.api.dependencies import get_instance_manager, get_instance_manager_ws
 from gsplay_launcher.models import InstanceStatus
 from gsplay_launcher.services.id_encoder import decode_instance_id
 from gsplay_launcher.services.instance_manager import InstanceManager, InstanceNotFoundError
@@ -50,13 +50,13 @@ async def _proxy_websocket_impl(websocket: WebSocket, instance_id: str, manager:
 
 
 @router.websocket("/v/{instance_id}/")
-async def proxy_websocket_with_slash(websocket: WebSocket, instance_id: str, manager: InstanceManager = Depends(get_instance_manager)) -> None:
+async def proxy_websocket_with_slash(websocket: WebSocket, instance_id: str, manager: InstanceManager = Depends(get_instance_manager_ws)) -> None:
     """Proxy WebSocket connection to a GSPlay instance (with trailing slash)."""
     await _proxy_websocket_impl(websocket, instance_id, manager)
 
 
 @router.websocket("/v/{instance_id}")
-async def proxy_websocket_no_slash(websocket: WebSocket, instance_id: str, manager: InstanceManager = Depends(get_instance_manager)) -> None:
+async def proxy_websocket_no_slash(websocket: WebSocket, instance_id: str, manager: InstanceManager = Depends(get_instance_manager_ws)) -> None:
     """Proxy WebSocket connection to a GSPlay instance (without trailing slash)."""
     await _proxy_websocket_impl(websocket, instance_id, manager)
 
@@ -203,7 +203,7 @@ async def proxy_stream_view(request: Request, token: str, manager: InstanceManag
 
 
 @router.websocket("/s/{token}/ws")
-async def proxy_stream_websocket(websocket: WebSocket, token: str, manager: InstanceManager = Depends(get_instance_manager)) -> None:
+async def proxy_stream_websocket(websocket: WebSocket, token: str, manager: InstanceManager = Depends(get_instance_manager_ws)) -> None:
     """Proxy WebSocket stream connection."""
     await _proxy_stream_websocket_impl(websocket, token, manager)
 
