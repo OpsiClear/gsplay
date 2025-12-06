@@ -201,9 +201,9 @@ class HandlerManager:
             ui.translation_y_slider,
             ui.translation_z_slider,
             ui.global_scale_slider,
-            ui.rotation_x_slider,
-            ui.rotation_y_slider,
-            ui.rotation_z_slider,
+            ui.rotate_x_slider,
+            ui.rotate_y_slider,
+            ui.rotate_z_slider,
         ]
 
         self._setup_slider_group(transform_sliders, "transform")

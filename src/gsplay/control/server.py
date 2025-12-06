@@ -13,6 +13,24 @@ POST /get-state
 
 POST /set-translation
     Set scene translation directly.
+
+POST /rotate-cw
+    Start clockwise camera rotation. Optional body: {"speed": 30.0}
+
+POST /rotate-ccw
+    Start counter-clockwise camera rotation. Optional body: {"speed": 30.0}
+
+POST /rotate-stop
+    Stop camera rotation.
+
+POST /play
+    Start animation playback.
+
+POST /pause
+    Pause animation playback.
+
+POST /toggle-playback
+    Toggle animation playback state.
 """
 
 from __future__ import annotations
@@ -73,6 +91,18 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
             self._handle_get_state()
         elif path == "set-translation":
             self._handle_set_translation()
+        elif path == "rotate-cw":
+            self._handle_rotate_cw()
+        elif path == "rotate-ccw":
+            self._handle_rotate_ccw()
+        elif path == "rotate-stop":
+            self._handle_rotate_stop()
+        elif path == "play":
+            self._handle_play()
+        elif path == "pause":
+            self._handle_pause()
+        elif path == "toggle-playback":
+            self._handle_toggle_playback()
         else:
             self._send_error_json(f"Unknown command: {path}", 404)
 
@@ -213,6 +243,87 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
 
         except Exception as e:
             logger.error(f"set-translation failed: {e}", exc_info=True)
+            self._send_error_json(str(e), 500)
+
+    def _handle_rotate_cw(self) -> None:
+        """Start clockwise camera rotation."""
+        viewer = self.viewer
+        body = self._read_json_body() or {}
+        speed = body.get("speed", 30.0)
+
+        try:
+            viewer.api.rotate_cw(float(speed))
+            self._send_json({"ok": True, "direction": "cw", "speed": speed})
+            logger.info(f"Camera rotation started: CW at {speed} deg/sec")
+        except Exception as e:
+            logger.error(f"rotate-cw failed: {e}", exc_info=True)
+            self._send_error_json(str(e), 500)
+
+    def _handle_rotate_ccw(self) -> None:
+        """Start counter-clockwise camera rotation."""
+        viewer = self.viewer
+        body = self._read_json_body() or {}
+        speed = body.get("speed", 30.0)
+
+        try:
+            viewer.api.rotate_ccw(float(speed))
+            self._send_json({"ok": True, "direction": "ccw", "speed": speed})
+            logger.info(f"Camera rotation started: CCW at {speed} deg/sec")
+        except Exception as e:
+            logger.error(f"rotate-ccw failed: {e}", exc_info=True)
+            self._send_error_json(str(e), 500)
+
+    def _handle_rotate_stop(self) -> None:
+        """Stop camera rotation."""
+        viewer = self.viewer
+
+        try:
+            viewer.api.stop_rotation()
+            self._send_json({"ok": True})
+            logger.info("Camera rotation stopped")
+        except Exception as e:
+            logger.error(f"rotate-stop failed: {e}", exc_info=True)
+            self._send_error_json(str(e), 500)
+
+    def _handle_play(self) -> None:
+        """Start animation playback."""
+        viewer = self.viewer
+
+        try:
+            viewer.api.play()
+            self._send_json({"ok": True, "playing": True})
+            logger.info("Playback started")
+        except Exception as e:
+            logger.error(f"play failed: {e}", exc_info=True)
+            self._send_error_json(str(e), 500)
+
+    def _handle_pause(self) -> None:
+        """Pause animation playback."""
+        viewer = self.viewer
+
+        try:
+            viewer.api.pause()
+            self._send_json({"ok": True, "playing": False})
+            logger.info("Playback paused")
+        except Exception as e:
+            logger.error(f"pause failed: {e}", exc_info=True)
+            self._send_error_json(str(e), 500)
+
+    def _handle_toggle_playback(self) -> None:
+        """Toggle animation playback state."""
+        viewer = self.viewer
+
+        try:
+            is_playing = viewer.api.is_playing()
+            if is_playing:
+                viewer.api.pause()
+            else:
+                viewer.api.play()
+            new_state = not is_playing
+            self._send_json({"ok": True, "playing": new_state})
+            logger.info(f"Playback toggled: {'playing' if new_state else 'paused'}")
+        except Exception as e:
+            logger.error(f"toggle-playback failed: {e}", exc_info=True)
             self._send_error_json(str(e), 500)
 
 

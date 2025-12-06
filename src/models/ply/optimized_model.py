@@ -289,10 +289,10 @@ class OptimizedPlyModel(ModelInterface):
             if n_input == 0:
                 logger.error(f"[OptimizedPlyModel] Input GSData is empty for frame {frame_idx}")
                 return gsdata
-            
+
             # PLY files are always in PLY format, so always denormalize to linear
             processed = gsdata.denormalize(inplace=True)
-            
+
             # Validate after denormalize
             n_after_denorm = processed.means.shape[0]
             if n_after_denorm == 0:
@@ -301,14 +301,22 @@ class OptimizedPlyModel(ModelInterface):
                     f"(input had {n_input} gaussians)"
                 )
                 return processed
-            
+
             # Clamp scales after denormalization
             processed.scales = np.clip(
                 processed.scales,
                 GC.Numerical.MIN_SCALE,
                 GC.Numerical.MAX_SCALE
             )
-            
+
+            # Clamp opacities to valid range [0, 1] (matches GPU path)
+            processed.opacities = np.clip(processed.opacities, 0.0, 1.0)
+
+            # Normalize quaternions (safety check - gsply should do this but ensure it)
+            quat_norms = np.linalg.norm(processed.quats, axis=-1, keepdims=True)
+            quat_norms = np.maximum(quat_norms, 1e-8)
+            processed.quats = processed.quats / quat_norms
+
             # Calculate percentile for first frame
             if self._calculated_max_scale_percentile is None:
                 with monitor.track("percentile_ms"):

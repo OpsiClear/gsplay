@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 
 from gsply import GSData, GSTensor
+from gsmod import GSDataPro
+from gsmod.torch import GSTensorPro
 
 from src.infrastructure.processing_mode import ProcessingMode
 from src.gsplay.config.settings import GSPlayConfig
@@ -182,8 +184,10 @@ class EditManager:
         """
         if not self.config.edits_active:
             # No edits - convert to GSTensor if needed for rendering
-            if isinstance(gaussians, GSData):
-                # Use gsply v0.2.5 GPU loading interface
+            # Check GSDataPro first (subclass of GSData)
+            if isinstance(gaussians, GSDataPro):
+                return GSTensorPro.from_gsdata(gaussians, device=self.device)
+            elif isinstance(gaussians, GSData):
                 return GSTensor.from_gsdata(gaussians, device=self.device)
             return gaussians
 

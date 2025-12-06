@@ -27,11 +27,10 @@ from src.infrastructure.io.path_io import UniversalPath
 from src.gsplay.config.settings import GSPlayConfig, UIHandles, VolumeFilter
 from src.gsplay.core.container import create_edit_manager
 from src.gsplay.interaction.handlers import HandlerManager
-from src.gsplay.ui.layers import create_layer_controls
 from src.gsplay.state.scene_bounds_manager import SceneBoundsManager
+from src.gsplay.initialization.ui_setup import UISetup
 from src.gsplay.rendering.camera import create_supersplat_camera_controls
 from src.gsplay.ui.layout import setup_ui_layout
-from src.gsplay.ui.filter_visualizer import FilterVisualizer
 from src.gsplay.core.api import GSPlayAPI
 from src.gsplay.core.components import ModelComponent, RenderComponent, ExportComponent
 from src.gsplay.interaction.events import EventBus, Event, EventType
@@ -542,17 +541,15 @@ class UniversalGSPlay:
         # Set viewer in handlers
         self.handlers.set_viewer(self.viewer)
 
-        # Add layer controls for CompositeModel
-        self._setup_layer_controls()
+        # Setup UI components using UISetup helper
+        ui_setup = UISetup(self)
+        self.filter_visualizer = ui_setup.setup_all()
 
-        # Setup filter visualizer
-        self._setup_filter_visualizer()
-
-        # Setup auto-learn color controls
-        self._setup_auto_learn_color()
-
-        # Setup export option handlers
-        self._setup_export_handlers()
+        # Set rerender callback for camera auto-rotation
+        if self.camera_controller is not None:
+            self.camera_controller.set_rerender_callback(
+                ui_setup.create_rotation_rerender_callback()
+            )
 
         # Initialize export path now that UI exists (model may have been loaded before UI)
         self._initialize_export_path(force=True)
@@ -694,171 +691,6 @@ class UniversalGSPlay:
         logger.info("Terminate requested via UI")
         if self.playback_controller:
             self.playback_controller.stop()
-
-    def _setup_layer_controls(self) -> None:
-        """Setup layer management UI if model supports layers."""
-        # Use protocol-based check instead of isinstance
-        if hasattr(self.model, "get_layer_info") and hasattr(
-            self.model, "set_layer_visibility"
-        ):
-            logger.info("Setting up layer controls for multi-layer model")
-            layer_controls = create_layer_controls(self.server, self.model)
-            logger.info(f"Layer controls created: {list(layer_controls.keys())}")
-        else:
-            logger.debug("Model does not support layers, skipping layer controls")
-
-    def _setup_filter_visualizer(self) -> None:
-        """Setup filter visualization gizmos and callbacks."""
-        # Create filter visualizer
-        self.filter_visualizer = FilterVisualizer(self.server)
-        logger.debug("Filter visualizer created")
-
-        if not self.ui:
-            return
-
-        # Callback to update visualization when show checkbox changes
-        def on_show_filter_viz_change(_) -> None:
-            if self.filter_visualizer and self.ui and self.ui.show_filter_viz:
-                self.filter_visualizer.visible = self.ui.show_filter_viz.value
-                # Update with current filter values
-                self._update_filter_visualization()
-
-        # Callback to update visualization and config when filter parameters change
-        def on_filter_change(_) -> None:
-            self._update_filter_visualization()
-            # Also sync filter_values to config so filter uses updated rotation values
-            camera_pos, camera_rot = self._get_camera_state()
-            self.config.filter_values = self.ui.get_filter_values(
-                camera_position=camera_pos,
-                camera_rotation=camera_rot,
-            )
-
-        # Register show/hide callback
-        if self.ui.show_filter_viz:
-            self.ui.show_filter_viz.on_update(on_show_filter_viz_change)
-
-        # Register filter type change callback
-        if self.ui.spatial_filter_type:
-            self.ui.spatial_filter_type.on_update(on_filter_change)
-
-        # Register callbacks for sphere filter
-        for control in [
-            self.ui.sphere_center_x,
-            self.ui.sphere_center_y,
-            self.ui.sphere_center_z,
-            self.ui.sphere_radius,
-        ]:
-            if control:
-                control.on_update(on_filter_change)
-
-        # Register callbacks for box filter
-        for control in [
-            self.ui.box_min_x,
-            self.ui.box_min_y,
-            self.ui.box_min_z,
-            self.ui.box_max_x,
-            self.ui.box_max_y,
-            self.ui.box_max_z,
-            self.ui.box_rot_x,
-            self.ui.box_rot_y,
-            self.ui.box_rot_z,
-        ]:
-            if control:
-                control.on_update(on_filter_change)
-
-        # Register callbacks for ellipsoid filter
-        for control in [
-            self.ui.ellipsoid_center_x,
-            self.ui.ellipsoid_center_y,
-            self.ui.ellipsoid_center_z,
-            self.ui.ellipsoid_radius_x,
-            self.ui.ellipsoid_radius_y,
-            self.ui.ellipsoid_radius_z,
-            self.ui.ellipsoid_rot_x,
-            self.ui.ellipsoid_rot_y,
-            self.ui.ellipsoid_rot_z,
-        ]:
-            if control:
-                control.on_update(on_filter_change)
-
-        # Register callbacks for frustum filter
-        for control in [
-            self.ui.frustum_fov,
-            self.ui.frustum_aspect,
-            self.ui.frustum_near,
-            self.ui.frustum_far,
-            self.ui.frustum_pos_x,
-            self.ui.frustum_pos_y,
-            self.ui.frustum_pos_z,
-            self.ui.frustum_rot_x,
-            self.ui.frustum_rot_y,
-            self.ui.frustum_rot_z,
-        ]:
-            if control:
-                control.on_update(on_filter_change)
-
-        # Register "Use Current Camera" button callback
-        if self.ui.frustum_use_camera:
-
-            @self.ui.frustum_use_camera.on_click
-            def on_use_camera_click(_) -> None:
-                self._copy_camera_to_frustum()
-
-        # Callback to update visualization when scene transform changes
-        # This ensures the filter visualization moves with the transformed Gaussians
-        def on_transform_change(_) -> None:
-            self._update_filter_visualization()
-
-        # Register callbacks for scene transformation controls
-        for control in [
-            getattr(self.ui, 'global_scale', None),
-            getattr(self.ui, 'translate_x', None),
-            getattr(self.ui, 'translate_y', None),
-            getattr(self.ui, 'translate_z', None),
-            getattr(self.ui, 'rotate_x', None),
-            getattr(self.ui, 'rotate_y', None),
-            getattr(self.ui, 'rotate_z', None),
-        ]:
-            if control:
-                control.on_update(on_transform_change)
-
-        logger.debug("Filter visualizer callbacks registered")
-
-    def _setup_auto_learn_color(self) -> None:
-        """Setup unified color adjustment callback."""
-        if not self.ui:
-            return
-
-        # Register "Apply" button callback for unified color adjustment
-        if self.ui.apply_adjustment_button:
-
-            @self.ui.apply_adjustment_button.on_click
-            def on_apply_adjustment(_) -> None:
-                self._apply_color_adjustment()
-
-        logger.debug("Color adjustment callback registered")
-
-    def _setup_export_handlers(self) -> None:
-        """Setup handlers for export format/device changes.
-
-        Updates the export path automatically when options change,
-        unless user has manually edited the path.
-        """
-        if not self.ui:
-            return
-
-        def on_export_option_change(_) -> None:
-            self._update_export_path_on_option_change()
-
-        # Register format change handler
-        if self.ui.export_format:
-            self.ui.export_format.on_update(on_export_option_change)
-
-        # Register device change handler
-        if self.ui.export_device:
-            self.ui.export_device.on_update(on_export_option_change)
-
-        logger.debug("Export option handlers registered")
 
     def _apply_color_adjustment(self) -> None:
         """Apply selected color adjustment from unified dropdown.
@@ -1109,7 +941,7 @@ class UniversalGSPlay:
         So the inverse is: inverse_translate -> inverse_rotate -> inverse_scale
         """
         import numpy as np
-        from src.gsplay.config.ui_handles import _camera_to_frustum_euler_deg
+        from src.gsplay.config.rotation_conversions import camera_to_frustum_euler_deg
 
         pos = np.array(camera_pos, dtype=np.float64)
 
@@ -1117,7 +949,7 @@ class UniversalGSPlay:
         if transform_values is None or (
             hasattr(transform_values, "is_neutral") and transform_values.is_neutral()
         ):
-            euler_deg = _camera_to_frustum_euler_deg(camera_rot)
+            euler_deg = camera_to_frustum_euler_deg(camera_rot)
             return tuple(pos), euler_deg
 
         # Get transform components
@@ -1171,7 +1003,7 @@ class UniversalGSPlay:
         # Normalize and convert to frustum frame
         norm = np.sqrt(qw*qw + qx*qx + qy*qy + qz*qz)
         world_rot_quat = (qw/norm, qx/norm, qy/norm, qz/norm)
-        euler_deg = _camera_to_frustum_euler_deg(world_rot_quat)
+        euler_deg = camera_to_frustum_euler_deg(world_rot_quat)
 
         return tuple(float(x) for x in pos_world), euler_deg
 

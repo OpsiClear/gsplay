@@ -90,18 +90,19 @@ def create_view_controls(
     updating_from_camera = [False]  # Use list for mutable closure
 
     # Zoom (logarithmic scale)
+    zoom_min, zoom_max = -8.0, 3.0
     initial_zoom_log = 0.0
     if camera.state is not None and camera.scene_bounds:
         extent = camera.scene_bounds.get("max_size", 10.0)
         default_distance = extent * 2.5
         if camera.state.distance > 0:
             actual_zoom = camera.state.distance / default_distance
-            initial_zoom_log = np.log2(actual_zoom)
+            initial_zoom_log = float(np.clip(np.log2(actual_zoom), zoom_min, zoom_max))
 
     zoom_slider = server.gui.add_slider(
         "Zoom",
-        min=-8.0,
-        max=3.0,
+        min=zoom_min,
+        max=zoom_max,
         step=0.01,
         initial_value=initial_zoom_log,
         hint="Camera distance (log scale: 0=default, -7=0.01x, +1=2x farther)",
@@ -200,6 +201,66 @@ def create_view_controls(
                 )
             camera.apply_state_to_camera()
 
+    # Look-at (camera target) sliders
+    initial_look_at = np.zeros(3)
+    if camera.state is not None:
+        with camera.state_lock:
+            initial_look_at = camera.state.look_at.copy()
+
+    look_at_x_slider = server.gui.add_slider(
+        "Target X",
+        min=-50.0,
+        max=50.0,
+        step=0.1,
+        initial_value=float(initial_look_at[0]),
+        hint="Camera target X coordinate",
+    )
+
+    look_at_y_slider = server.gui.add_slider(
+        "Target Y",
+        min=-50.0,
+        max=50.0,
+        step=0.1,
+        initial_value=float(initial_look_at[1]),
+        hint="Camera target Y coordinate",
+    )
+
+    look_at_z_slider = server.gui.add_slider(
+        "Target Z",
+        min=-50.0,
+        max=50.0,
+        step=0.1,
+        initial_value=float(initial_look_at[2]),
+        hint="Camera target Z coordinate",
+    )
+
+    @look_at_x_slider.on_update
+    def _(_) -> None:
+        if updating_from_camera[0]:
+            return
+        if camera.state is not None:
+            with camera.state_lock:
+                camera.state.look_at[0] = look_at_x_slider.value
+            camera.apply_state_to_camera()
+
+    @look_at_y_slider.on_update
+    def _(_) -> None:
+        if updating_from_camera[0]:
+            return
+        if camera.state is not None:
+            with camera.state_lock:
+                camera.state.look_at[1] = look_at_y_slider.value
+            camera.apply_state_to_camera()
+
+    @look_at_z_slider.on_update
+    def _(_) -> None:
+        if updating_from_camera[0]:
+            return
+        if camera.state is not None:
+            with camera.state_lock:
+                camera.state.look_at[2] = look_at_z_slider.value
+            camera.apply_state_to_camera()
+
     # FOV
     fov_slider = server.gui.add_slider(
         "FOV",
@@ -244,18 +305,20 @@ def create_view_controls(
     def _(_) -> None:
         action = transform_buttons.value.strip()
         if camera.state is not None:
-            with camera.state_lock:
-                if action == "Reset":
-                    camera.state.set_from_euler(45.0, 30.0, 0.0)
-                elif action == "Flip":
-                    # Flip: invert elevation and rotate azimuth 180 degrees
+            if action == "Reset":
+                # Full reset: orientation, distance, AND look_at (camera target)
+                # Use set_preset_view which properly resets all camera state
+                camera.set_preset_view("iso")
+            elif action == "Flip":
+                # Flip: invert elevation and rotate azimuth 180 degrees
+                with camera.state_lock:
                     current_azimuth = camera.state.azimuth
                     current_elevation = camera.state.elevation
                     current_roll = camera.state.roll
                     new_azimuth = (current_azimuth + 180.0) % 360.0
                     new_elevation = -current_elevation
                     camera.state.set_from_euler(new_azimuth, new_elevation, current_roll)
-            camera.apply_state_to_camera()
+                camera.apply_state_to_camera()
 
     # Auto-rotation controls
     rotation_speed_slider = server.gui.add_slider(
@@ -302,6 +365,7 @@ def create_view_controls(
                     elevation = camera.state.elevation
                     roll = camera.state.roll
                     distance = camera.state.distance
+                    look_at = camera.state.look_at.copy()
 
                 # Update UI sliders (prevent circular updates)
                 updating_from_camera[0] = True
@@ -311,6 +375,11 @@ def create_view_controls(
                 azimuth_slider.value = azimuth % 360.0
                 elevation_slider.value = np.clip(elevation, -180.0, 180.0)
                 roll_slider.value = np.clip(roll, -180.0, 180.0)
+
+                # Sync look_at (camera target) sliders
+                look_at_x_slider.value = np.clip(float(look_at[0]), -50.0, 50.0)
+                look_at_y_slider.value = np.clip(float(look_at[1]), -50.0, 50.0)
+                look_at_z_slider.value = np.clip(float(look_at[2]), -50.0, 50.0)
 
                 if camera.scene_bounds:
                     extent = camera.scene_bounds.get("max_size", 10.0)

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from src.domain.entities import GSData, GSTensor
+from src.domain.entities import GSData, GSDataPro, GSTensor, GSTensorPro
 from src.infrastructure.processing_mode import ProcessingMode
 from src.shared.perf import PerfMonitor
 
@@ -136,8 +136,13 @@ class AllCpuStrategy(_BaseStrategy, ProcessingStrategy):
             )
 
         with monitor.track("transfer_ms"):
-            # Use gsply v0.2.5 GPU loading interface - loads directly to target device
-            tensor = GSTensor.from_gsdata(data, device=context.device)
+            # Use appropriate conversion based on data type:
+            # GSDataPro (from color/opacity ops) -> GSTensorPro
+            # GSData -> GSTensor
+            if isinstance(data, GSDataPro):
+                tensor = GSTensorPro.from_gsdata(data, device=context.device)
+            else:
+                tensor = GSTensor.from_gsdata(data, device=context.device)
 
         timings = self._record_total(monitor, {})
         return ProcessingResult(tensor, timings)
@@ -160,7 +165,11 @@ class ColorTransformGpuStrategy(_BaseStrategy, ProcessingStrategy):
             data = context.volume_filter.filter_cpu(data, context.config, scene_bounds)
 
         with monitor.track("transfer_ms"):
-            tensor = GSTensor.from_gsdata(data, device=context.device)
+            # Use appropriate conversion based on data type
+            if isinstance(data, GSDataPro):
+                tensor = GSTensorPro.from_gsdata(data, device=context.device)
+            else:
+                tensor = GSTensor.from_gsdata(data, device=context.device)
 
         # Transform on GPU (filtered data)
         with monitor.track("transform_ms"):
@@ -205,7 +214,11 @@ class TransformGpuStrategy(_BaseStrategy, ProcessingStrategy):
 
         with monitor.track("transfer_ms"):
             # Transfer filtered data to target device
-            tensor = GSTensor.from_gsdata(data, device=context.device)
+            # Use appropriate conversion based on data type
+            if isinstance(data, GSDataPro):
+                tensor = GSTensorPro.from_gsdata(data, device=context.device)
+            else:
+                tensor = GSTensor.from_gsdata(data, device=context.device)
 
         # Transform on GPU (step 2)
         with monitor.track("transform_ms"):
@@ -258,7 +271,11 @@ class ColorGpuStrategy(_BaseStrategy, ProcessingStrategy):
 
         with monitor.track("transfer_ms"):
             # Transfer directly to target device
-            tensor = GSTensor.from_gsdata(data, device=context.device)
+            # Use appropriate conversion based on data type
+            if isinstance(data, GSDataPro):
+                tensor = GSTensorPro.from_gsdata(data, device=context.device)
+            else:
+                tensor = GSTensor.from_gsdata(data, device=context.device)
 
         with monitor.track("color_ms"):
             tensor = context.color_processor.apply_gpu(

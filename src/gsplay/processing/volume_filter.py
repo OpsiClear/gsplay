@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 from gsmod.config.values import FilterValues
-from src.domain.entities import GSData, GSTensor, GSTensorPro
+from src.domain.entities import GSData, GSDataPro, GSTensor, GSTensorPro
 from src.gsplay.config.settings import GSPlayConfig
 
 logger = logging.getLogger(__name__)
@@ -54,43 +54,40 @@ class VolumeFilterService:
         config: GSPlayConfig,
         scene_bounds: dict[str, Any] | None,
     ) -> GSData:
-        """Apply CPU filtering using gsmod's compute_filter_mask with FilterValues.
+        """Apply CPU filtering using gsmod's GSDataPro.filter().
 
-        This supports all filter types including rotated box, ellipsoid, and frustum.
+        Uses GSDataPro's unified filter method that supports:
+        - Opacity (min/max)
+        - Scale (min/max)
+        - Sphere
+        - Box (axis-aligned and rotated via box_rot)
+        - Ellipsoid (with rotation)
+        - Frustum (with rotation)
+        - Invert mode (exclude instead of include)
 
         Returns
         -------
         GSData
-            The filtered data (may be modified in-place, but returned for API consistency
-            with filter_gpu which returns a new GSTensor).
+            The filtered data (GSDataPro if filtering was applied).
         """
         fv = config.filter_values
         if fv.is_neutral():
             return data
 
         try:
-            from gsmod.filter.apply import compute_filter_mask
-        except ImportError as exc:
-            logger.error("gsmod filter module unavailable: %s", exc)
-            return data
-
-        try:
             start_time = time.perf_counter()
             input_count = len(data.means)
 
-            # Use gsmod's compute_filter_mask which supports all FilterValues params
-            mask = compute_filter_mask(data, fv)
+            # Wrap in GSDataPro for optimized CPU filtering (matches filter_gpu pattern)
+            if isinstance(data, GSDataPro):
+                data_pro = data
+            else:
+                data_pro = GSDataPro.from_gsdata(data)
 
-            # Apply mask to data in-place
-            data.means = data.means[mask]
-            data.scales = data.scales[mask]
-            data.quats = data.quats[mask]
-            data.opacities = data.opacities[mask]
-            data.sh0 = data.sh0[mask]
-            if data.shN is not None:
-                data.shN = data.shN[mask]
+            # Use gsmod's optimized CPU filter (inplace=False for non-destructive)
+            filtered = data_pro.filter(fv, inplace=False)
 
-            kept = len(data.means)
+            kept = len(filtered.means)
             filter_time = (time.perf_counter() - start_time) * 1000
             percentage = (kept / input_count * 100.0) if input_count else 0.0
             logger.debug(
@@ -100,10 +97,11 @@ class VolumeFilterService:
                 percentage,
                 filter_time,
             )
+            return filtered
+
         except Exception as exc:  # pragma: no cover - defensive
             logger.error("CPU volume filter failed: %s", exc, exc_info=True)
-
-        return data
+            return data
 
     def filter_gpu(
         self,

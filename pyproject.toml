@@ -1,6 +1,6 @@
 [project]
 name = "gsplay"
-version = "0.1.0"
+version = "0.1.1"
 description = "A real-time player for dynamic 4D Gaussian Splatting scenes (PLY and GIFStream)."
 authors = [{ name = "", email = "opsiclear@gmail.com" }]
 license = { text = "Apache-2.0" }
@@ -16,7 +16,7 @@ dependencies = [
     "tyro>=0.8.0", # CLI argument parsing
     # Gaussian Splatting Rendering
     # gsplat is installed via install.ps1/install.sh with --no-build-isolation
-    "gsmod>=0.1.5",  # Gaussian splatting modifications
+    "gsmod>=0.1.6",  # Gaussian splatting modifications (gsply included as dependency)
     # GIFStream Support
     "pyyaml>=6.0", # Config file parsing
     # Launcher (local)

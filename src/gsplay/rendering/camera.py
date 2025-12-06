@@ -95,6 +95,9 @@ class SuperSplatCamera:
         self._rotation_speed = 20.0  # degrees per second
         self._rotation_axis = "y"  # "y" for azimuth, "x" for elevation
 
+        # Callback to trigger rerender (set by app during initialization)
+        self._rerender_callback: callable | None = None
+
         # Explicit camera state (single source of truth)
         self.state: CameraState | None = None
         self.state_lock = threading.Lock()
@@ -273,6 +276,10 @@ class SuperSplatCamera:
         if client.client_id not in self._initialized_clients:
             return
 
+        # Skip sync during auto-rotation - rotation loop owns the state
+        if self._rotation_active:
+            return
+
         try:
             camera_pos = np.array(client.camera.position)
             look_at = np.array(client.camera.look_at)
@@ -444,6 +451,13 @@ class SuperSplatCamera:
                     # Apply to camera
                     self.apply_state_to_camera()
 
+                    # Trigger rerender to update streaming output
+                    if self._rerender_callback is not None:
+                        try:
+                            self._rerender_callback()
+                        except Exception as e:
+                            logger.debug(f"Rerender callback failed: {e}")
+
                     time.sleep(0.05)  # 20 FPS
 
                 except Exception as e:
@@ -466,6 +480,16 @@ class SuperSplatCamera:
             self._rotation_thread = None
 
         logger.info("Stopped auto-rotation")
+
+    def set_rerender_callback(self, callback: callable) -> None:
+        """Set callback to trigger rerender during auto-rotation.
+
+        Parameters
+        ----------
+        callback : callable
+            Function to call after each rotation frame update
+        """
+        self._rerender_callback = callback
 
     def update_scene_bounds(self, bounds: dict | None) -> None:
         """

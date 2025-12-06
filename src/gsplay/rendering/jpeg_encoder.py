@@ -110,10 +110,10 @@ class EncodingConfig:
 
 
 class GPUJpegBackend:
-    """GPU JPEG encoding using NVIDIA nvImageCodec.
+    """JPEG encoding using NVIDIA nvImageCodec.
 
-    Provides ~47x speedup over CPU encoding with zero-copy support
-    for CUDA tensors.
+    Uses CPU_ONLY backend to avoid nvjpeg GPU encoder errors on consumer GPUs.
+    Hardware JPEG encoding is only available on Jetson Thor (Blackwell).
 
     Thread Safety
     -------------
@@ -129,7 +129,6 @@ class GPUJpegBackend:
 
         self._nvimgcodec = nvimgcodec
         self._device_id = device_id
-        # Thread-local storage for per-thread encoders
         self._thread_local = threading.local()
 
         self._SUBSAMPLING_MAP = {
@@ -144,14 +143,17 @@ class GPUJpegBackend:
     def _get_encoder(self):
         """Get thread-local encoder (created on first access per thread)."""
         if not hasattr(self._thread_local, "encoder"):
+            # Use CPU_ONLY backend - GPU JPEG encoding not available on consumer GPUs
+            backend = self._nvimgcodec.Backend(self._nvimgcodec.BackendKind.CPU_ONLY)
             self._thread_local.encoder = self._nvimgcodec.Encoder(
-                device_id=self._device_id
+                device_id=self._device_id,
+                backends=[backend]
             )
         return self._thread_local.encoder
 
     @property
     def name(self) -> str:
-        return f"nvImageCodec (GPU:{self._device_id})"
+        return f"nvImageCodec (CPU:{self._device_id})"
 
     def encode(
         self,
@@ -166,10 +168,15 @@ class GPUJpegBackend:
             chroma_subsampling,
             self._nvimgcodec.ChromaSubsampling.CSS_420
         )
+        # Use SRGB color spec (RGB was renamed to SRGB in newer nvimgcodec versions)
+        color_spec = getattr(
+            self._nvimgcodec.ColorSpec, 'RGB',
+            getattr(self._nvimgcodec.ColorSpec, 'SRGB', None)
+        )
         params = self._nvimgcodec.EncodeParams(
             quality_type=self._nvimgcodec.QualityType.QUALITY,
             quality_value=float(quality),
-            color_spec=self._nvimgcodec.ColorSpec.RGB,
+            color_spec=color_spec,
             chroma_subsampling=css,
         )
 
@@ -202,6 +209,11 @@ class GPUJpegBackend:
             if isinstance(image, torch.Tensor) and image.is_cuda:
                 torch.cuda.synchronize(image.device)
             del nv_image  # Release nvImageCodec's reference to tensor
+
+            # In newer nvimgcodec versions, encode() returns CodeStream object
+            # instead of bytes. Convert to bytes if needed.
+            if not isinstance(result, bytes):
+                result = bytes(result)
 
             return result
         except Exception as e:

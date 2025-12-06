@@ -15,6 +15,15 @@ import numpy as np
 import viser
 from gsmod import ColorValues, TransformValues, FilterValues
 
+from src.gsplay.config.rotation_conversions import (
+    euler_deg_to_axis_angle as _euler_deg_to_axis_angle,
+    axis_angle_to_euler_deg as _axis_angle_to_euler_deg,
+    quaternion_to_matrix as _quaternion_to_matrix,
+    matrix_to_euler_deg as _matrix_to_euler_deg,
+    camera_to_frustum_axis_angle as _camera_to_frustum_axis_angle,
+    camera_to_frustum_euler_deg,
+)
+
 if TYPE_CHECKING:
     from src.domain.filters import VolumeFilter
 
@@ -46,6 +55,9 @@ class UIHandles:
     azimuth_slider: viser.GuiSliderHandle | None = None
     elevation_slider: viser.GuiSliderHandle | None = None
     roll_slider: viser.GuiSliderHandle | None = None
+    look_at_x_slider: viser.GuiSliderHandle | None = None
+    look_at_y_slider: viser.GuiSliderHandle | None = None
+    look_at_z_slider: viser.GuiSliderHandle | None = None
 
     # Color adjustment controls
     temperature_slider: viser.GuiSliderHandle | None = None
@@ -76,9 +88,10 @@ class UIHandles:
     translation_y_slider: viser.GuiSliderHandle | None = None
     translation_z_slider: viser.GuiSliderHandle | None = None
     global_scale_slider: viser.GuiSliderHandle | None = None
-    rotation_x_slider: viser.GuiSliderHandle | None = None
-    rotation_y_slider: viser.GuiSliderHandle | None = None
-    rotation_z_slider: viser.GuiSliderHandle | None = None
+    # World-axis rotation sliders (truly gimbal-lock free via quaternion multiplication)
+    rotate_x_slider: viser.GuiSliderHandle | None = None
+    rotate_y_slider: viser.GuiSliderHandle | None = None
+    rotate_z_slider: viser.GuiSliderHandle | None = None
     reset_pose_button: viser.GuiButtonHandle | None = None
     center_button: viser.GuiButtonHandle | None = None
 
@@ -190,28 +203,54 @@ class UIHandles:
         )
 
     def get_transform_values(self) -> TransformValues:
-        """Extract current transform values from UI with proper mapping."""
-        # Get Euler angles
-        rot_x = self.rotation_x_slider.value if self.rotation_x_slider else 0.0
-        rot_y = self.rotation_y_slider.value if self.rotation_y_slider else 0.0
-        rot_z = self.rotation_z_slider.value if self.rotation_z_slider else 0.0
+        """Extract current transform values from UI with proper mapping.
 
-        # Convert to quaternion using our consistent function (inverse of _matrix_to_euler_deg)
-        quat = _euler_deg_to_quaternion_xyzw(rot_x, rot_y, rot_z)
+        Uses world-axis rotation (truly gimbal-lock free via quaternion multiplication).
+        Each rotation slider value is applied as rotation around that world axis.
+        The rotations are composed via quaternion multiplication: Z * Y * X order.
+        """
+        from src.gsplay.rendering.quaternion_utils import (
+            quat_from_axis_angle,
+            quat_multiply,
+            quat_normalize,
+        )
 
-        translate = (
+        # Get world-axis rotation values (degrees)
+        rot_x_deg = self.rotate_x_slider.value if self.rotate_x_slider else 0.0
+        rot_y_deg = self.rotate_y_slider.value if self.rotate_y_slider else 0.0
+        rot_z_deg = self.rotate_z_slider.value if self.rotate_z_slider else 0.0
+
+        # Convert to radians
+        rot_x_rad = np.radians(rot_x_deg)
+        rot_y_rad = np.radians(rot_y_deg)
+        rot_z_rad = np.radians(rot_z_deg)
+
+        # Create quaternions for rotation around each world axis
+        # Each slider independently rotates around its world axis
+        # quaternion_utils uses wxyz format
+        quat_x = quat_from_axis_angle(np.array([1.0, 0.0, 0.0]), rot_x_rad)
+        quat_y = quat_from_axis_angle(np.array([0.0, 1.0, 0.0]), rot_y_rad)
+        quat_z = quat_from_axis_angle(np.array([0.0, 0.0, 1.0]), rot_z_rad)
+
+        # Compose rotations: apply X, then Y, then Z (in world coordinates)
+        # For world-axis rotation, order is: quat_z * quat_y * quat_x
+        quat_wxyz = quat_multiply(quat_z, quat_multiply(quat_y, quat_x))
+        quat_wxyz = quat_normalize(quat_wxyz)
+
+        # gsmod uses wxyz format (w, x, y, z) - same as quaternion_utils
+        w, x, y, z = quat_wxyz
+        rotation_wxyz = (float(w), float(x), float(y), float(z))
+
+        translation = (
             float(self.translation_x_slider.value) if self.translation_x_slider else 0.0,
             float(self.translation_y_slider.value) if self.translation_y_slider else 0.0,
             float(self.translation_z_slider.value) if self.translation_z_slider else 0.0,
         )
         scale_value = float(self.global_scale_slider.value) if self.global_scale_slider else 1.0
 
-        try:
-            return TransformValues(translate=translate, scale=scale_value, rotate=quat)
-        except TypeError:
-            return TransformValues(
-                translation=translate, scale=scale_value, rotation=quat
-            )
+        return TransformValues(
+            translation=translation, scale=scale_value, rotation=rotation_wxyz
+        )
 
     def get_filter_values(
         self,
@@ -402,16 +441,20 @@ class UIHandles:
             self.alpha_scaler_slider.value = alpha_scaler
 
     def set_transform_values(self, values: TransformValues) -> None:
-        """Update UI sliders with transform values."""
-        translate = getattr(
-            values, "translate", getattr(values, "translation", (0.0, 0.0, 0.0))
-        )
+        """Update UI sliders with transform values.
+
+        For rotation, decomposes the quaternion into XYZ Euler angles for display.
+        This is only for UI display - the actual rotation computation in
+        get_transform_values() uses gimbal-lock-free world-axis composition.
+        """
+        # gsmod uses 'translation' attribute
+        translation = getattr(values, "translation", (0.0, 0.0, 0.0))
         if self.translation_x_slider:
-            self.translation_x_slider.value = float(translate[0])
+            self.translation_x_slider.value = float(translation[0])
         if self.translation_y_slider:
-            self.translation_y_slider.value = float(translate[1])
+            self.translation_y_slider.value = float(translation[1])
         if self.translation_z_slider:
-            self.translation_z_slider.value = float(translate[2])
+            self.translation_z_slider.value = float(translation[2])
 
         if self.global_scale_slider:
             scale_value = getattr(values, "scale", 1.0)
@@ -421,36 +464,37 @@ class UIHandles:
             else:
                 self.global_scale_slider.value = float(scale_value[0])
 
-        # Convert quaternion to Euler angles for rotation sliders
-        rotate = getattr(
-            values, "rotate", getattr(values, "rotation", (0.0, 0.0, 0.0, 1.0))
-        )
-        if rotate is not None and any(
+        # Convert quaternion to Euler XYZ for rotation slider display
+        # gsmod uses 'rotation' attribute in wxyz format (w, x, y, z)
+        rotation = getattr(values, "rotation", (1.0, 0.0, 0.0, 0.0))
+        if rotation is not None and any(
             s is not None
-            for s in [self.rotation_x_slider, self.rotation_y_slider, self.rotation_z_slider]
+            for s in [self.rotate_x_slider, self.rotate_y_slider, self.rotate_z_slider]
         ):
-            # Convert to numpy array if needed
-            if hasattr(rotate, "tolist"):
-                rotate = tuple(rotate.tolist())
+            # Convert to tuple if needed
+            if hasattr(rotation, "tolist"):
+                rotation = tuple(rotation.tolist())
             else:
-                rotate = tuple(rotate)
+                rotation = tuple(rotation)
 
-            # quaternion format: (x, y, z, w)
-            # Normalize quaternion to have w >= 0 for consistent Euler conversion
-            x, y, z, w = rotate
-            if w < 0:
-                x, y, z, w = -x, -y, -z, -w
+            # gsmod uses wxyz format (w, x, y, z)
+            w, x, y, z = rotation
+            # Normalize quaternion
+            norm = np.sqrt(w*w + x*x + y*y + z*z)
+            if norm > 1e-8:
+                w, x, y, z = w/norm, x/norm, y/norm, z/norm
 
-            # Convert to rotation matrix then to euler
-            R = _quaternion_to_matrix_xyzw((x, y, z, w))
+            # Convert quaternion to rotation matrix (use wxyz version)
+            R = _quaternion_to_matrix((w, x, y, z))
+            # Convert to Euler XYZ in degrees
             rx, ry, rz = _matrix_to_euler_deg(R)
 
-            if self.rotation_x_slider:
-                self.rotation_x_slider.value = float(rx)
-            if self.rotation_y_slider:
-                self.rotation_y_slider.value = float(ry)
-            if self.rotation_z_slider:
-                self.rotation_z_slider.value = float(rz)
+            if self.rotate_x_slider:
+                self.rotate_x_slider.value = float(rx)
+            if self.rotate_y_slider:
+                self.rotate_y_slider.value = float(ry)
+            if self.rotate_z_slider:
+                self.rotate_z_slider.value = float(rz)
 
     def get_alpha_scaler(self) -> float:
         """Read the opacity multiplier from the UI."""
@@ -470,6 +514,7 @@ class UIHandles:
         roll: float,
         distance: float,
         scene_bounds: dict | None = None,
+        look_at: tuple[float, float, float] | None = None,
     ) -> None:
         """Update view control sliders with camera values.
 
@@ -485,6 +530,8 @@ class UIHandles:
             Distance from look-at point
         scene_bounds : dict | None
             Scene bounds for calculating zoom slider (log2 scale)
+        look_at : tuple[float, float, float] | None
+            Camera target point (x, y, z)
         """
         if self.azimuth_slider:
             self.azimuth_slider.value = azimuth
@@ -492,6 +539,15 @@ class UIHandles:
             self.elevation_slider.value = elevation
         if self.roll_slider:
             self.roll_slider.value = roll
+
+        # Look-at (camera target) sliders
+        if look_at is not None:
+            if self.look_at_x_slider:
+                self.look_at_x_slider.value = float(np.clip(look_at[0], -50.0, 50.0))
+            if self.look_at_y_slider:
+                self.look_at_y_slider.value = float(np.clip(look_at[1], -50.0, 50.0))
+            if self.look_at_z_slider:
+                self.look_at_z_slider.value = float(np.clip(look_at[2], -50.0, 50.0))
 
         # Zoom uses log2 scale: zoom_log = log2(distance / default_distance)
         # where default_distance = scene_extent * 2.5
@@ -643,247 +699,4 @@ class UIHandles:
                 self.frustum_rot_y.value = float(ry)
             if self.frustum_rot_z:
                 self.frustum_rot_z.value = float(rz)
-
-
-def _camera_to_frustum_quaternion(
-    camera_rotation: tuple[float, float, float, float],
-) -> tuple[float, float, float, float]:
-    """Convert camera quaternion to frustum rotation quaternion.
-
-    Viser's camera.wxyz is camera-to-world rotation. Apply 180° rotation
-    around X (quaternion 0,1,0,0) to flip viewing direction from +Z to -Z.
-    """
-    w, x, y, z = camera_rotation
-    # q_camera * q_flip where q_flip = (0, 1, 0, 0) for 180° around X
-    # Result: (-x, w, z, -y)
-    return (-x, w, z, -y)
-
-
-def _camera_to_frustum_axis_angle(
-    camera_rotation: tuple[float, float, float, float],
-) -> tuple[float, float, float]:
-    """Convert camera quaternion to axis-angle for frustum rotation.
-
-    Viser's camera.wxyz is camera-to-world rotation. The frustum is created
-    looking along -Z, but viser's camera convention has +Z as the look direction
-    in local space. Apply 180° rotation around X to flip the viewing direction.
-    """
-    R_c2w = _quaternion_to_matrix(camera_rotation)
-    # Flip Y and Z (180° around X) to correct viewing direction
-    FLIP_X = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]])
-    R_frustum = R_c2w @ FLIP_X
-    return _matrix_to_axis_angle(R_frustum)
-
-
-def _camera_to_frustum_euler_deg(
-    camera_rotation: tuple[float, float, float, float],
-) -> tuple[float, float, float]:
-    """Convert camera quaternion to Euler XYZ in degrees for frustum rotation.
-
-    Viser's camera.wxyz is camera-to-world rotation. The frustum is created
-    looking along -Z, but viser's camera convention has +Z as the look direction
-    in local space. Apply 180° rotation around X to flip the viewing direction.
-    """
-    R_c2w = _quaternion_to_matrix(camera_rotation)
-    # Flip Y and Z (180° around X) to correct viewing direction
-    FLIP_X = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]])
-    R_frustum = R_c2w @ FLIP_X
-    return _matrix_to_euler_deg(R_frustum)
-
-
-def _euler_deg_to_axis_angle(
-    rx_deg: float, ry_deg: float, rz_deg: float
-) -> tuple[float, float, float] | None:
-    """Convert Euler angles (degrees, XYZ order) to axis-angle representation."""
-    rx = math.radians(rx_deg)
-    ry = math.radians(ry_deg)
-    rz = math.radians(rz_deg)
-
-    # Skip if no rotation
-    if abs(rx) < 1e-6 and abs(ry) < 1e-6 and abs(rz) < 1e-6:
-        return None
-
-    # Convert Euler XYZ to quaternion
-    # Using extrinsic XYZ (equivalent to intrinsic ZYX)
-    cx, sx = math.cos(rx / 2), math.sin(rx / 2)
-    cy, sy = math.cos(ry / 2), math.sin(ry / 2)
-    cz, sz = math.cos(rz / 2), math.sin(rz / 2)
-
-    # Quaternion from Euler XYZ (extrinsic)
-    qw = cx * cy * cz + sx * sy * sz
-    qx = sx * cy * cz - cx * sy * sz
-    qy = cx * sy * cz + sx * cy * sz
-    qz = cx * cy * sz - sx * sy * cz
-
-    # Convert quaternion to axis-angle
-    # angle = 2 * arccos(w), axis = (x, y, z) / sin(angle/2)
-    angle = 2.0 * math.acos(max(-1.0, min(1.0, qw)))
-    if angle < 1e-6:
-        return None
-
-    sin_half = math.sqrt(max(0.0, 1.0 - qw * qw))
-    if sin_half < 1e-6:
-        return None
-
-    # Return axis-angle as axis * angle
-    return (
-        (qx / sin_half) * angle,
-        (qy / sin_half) * angle,
-        (qz / sin_half) * angle,
-    )
-
-
-def _axis_angle_to_euler_deg(axis_angle: tuple[float, float, float]) -> tuple[float, float, float]:
-    """Convert axis-angle (axis * angle) to Euler XYZ in degrees."""
-    ax, ay, az = axis_angle
-    angle = math.sqrt(ax * ax + ay * ay + az * az)
-    if angle < 1e-8:
-        return (0.0, 0.0, 0.0)
-
-    ux, uy, uz = ax / angle, ay / angle, az / angle
-    half = angle / 2.0
-    s = math.sin(half)
-    w = math.cos(half)
-    x = ux * s
-    y = uy * s
-    z = uz * s
-
-    r00 = 1 - 2 * (y * y + z * z)
-    r01 = 2 * (x * y - w * z)
-    r02 = 2 * (x * z + w * y)
-    r10 = 2 * (x * y + w * z)
-    r11 = 1 - 2 * (x * x + z * z)
-    r12 = 2 * (y * z - w * x)
-    r20 = 2 * (x * z - w * y)
-    r21 = 2 * (y * z + w * x)
-    r22 = 1 - 2 * (x * x + y * y)
-
-    sy = -r20
-    sy = max(-1.0, min(1.0, sy))
-    ry = math.asin(sy)
-
-    if abs(sy) < 0.9999:
-        rx = math.atan2(r21, r22)
-        rz = math.atan2(r10, r00)
-    else:
-        rx = math.atan2(-r12, r11)
-        rz = 0.0
-
-    return (math.degrees(rx), math.degrees(ry), math.degrees(rz))
-
-
-def _matrix_to_axis_angle(R: np.ndarray) -> tuple[float, float, float]:
-    """Convert rotation matrix to axis-angle (axis * angle)."""
-    trace = float(R[0, 0] + R[1, 1] + R[2, 2])
-    angle = math.acos(max(-1.0, min(1.0, (trace - 1.0) / 2.0)))
-    if angle < 1e-6:
-        return (0.0, 0.0, 0.0)
-    denom = 2.0 * math.sin(angle)
-    ax = (R[2, 1] - R[1, 2]) / denom
-    ay = (R[0, 2] - R[2, 0]) / denom
-    az = (R[1, 0] - R[0, 1]) / denom
-    return (ax * angle, ay * angle, az * angle)
-
-
-def _matrix_to_euler_deg(R: np.ndarray) -> tuple[float, float, float]:
-    """Convert rotation matrix to Euler XYZ in degrees."""
-    sy = -R[2, 0]
-    sy = max(-1.0, min(1.0, sy))
-    ry = math.asin(sy)
-
-    if abs(sy) < 0.9999:
-        rx = math.atan2(R[2, 1], R[2, 2])
-        rz = math.atan2(R[1, 0], R[0, 0])
-    else:
-        rx = math.atan2(-R[1, 2], R[1, 1])
-        rz = 0.0
-
-    return (math.degrees(rx), math.degrees(ry), math.degrees(rz))
-
-
-def _quaternion_to_matrix(q: tuple[float, float, float, float]) -> np.ndarray:
-    """Convert quaternion (w, x, y, z) to rotation matrix."""
-    w, x, y, z = q
-    return np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
-    ], dtype=float)
-
-
-def _quaternion_to_matrix_xyzw(q: tuple[float, float, float, float]) -> np.ndarray:
-    """Convert quaternion (x, y, z, w) to rotation matrix.
-
-    gsmod uses (x, y, z, w) format for quaternions.
-    """
-    x, y, z, w = q
-    return np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
-    ], dtype=float)
-
-
-def _matrix_to_quaternion(R: np.ndarray) -> tuple[float, float, float, float]:
-    """Convert rotation matrix to quaternion (w, x, y, z)."""
-    trace = float(R[0, 0] + R[1, 1] + R[2, 2])
-    if trace > 0:
-        s = math.sqrt(trace + 1.0) * 2
-        w = 0.25 * s
-        x = (R[2, 1] - R[1, 2]) / s
-        y = (R[0, 2] - R[2, 0]) / s
-        z = (R[1, 0] - R[0, 1]) / s
-    elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
-        s = math.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2
-        w = (R[2, 1] - R[1, 2]) / s
-        x = 0.25 * s
-        y = (R[0, 1] + R[1, 0]) / s
-        z = (R[0, 2] + R[2, 0]) / s
-    elif R[1, 1] > R[2, 2]:
-        s = math.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2
-        w = (R[0, 2] - R[2, 0]) / s
-        x = (R[0, 1] + R[1, 0]) / s
-        y = 0.25 * s
-        z = (R[1, 2] + R[2, 1]) / s
-    else:
-        s = math.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2
-        w = (R[1, 0] - R[0, 1]) / s
-        x = (R[0, 2] + R[2, 0]) / s
-        y = (R[1, 2] + R[2, 1]) / s
-        z = 0.25 * s
-
-    norm = math.sqrt(w * w + x * x + y * y + z * z)
-    return (w / norm, x / norm, y / norm, z / norm)
-
-
-def _euler_deg_to_quaternion_xyzw(
-    rx_deg: float, ry_deg: float, rz_deg: float
-) -> tuple[float, float, float, float]:
-    """Convert Euler XYZ angles (degrees) to quaternion (x, y, z, w).
-
-    This is the exact inverse of _matrix_to_euler_deg to ensure round-trip consistency.
-    Uses extrinsic XYZ convention (rotate around fixed axes).
-    """
-    rx = math.radians(rx_deg)
-    ry = math.radians(ry_deg)
-    rz = math.radians(rz_deg)
-
-    # Half angles
-    cx, sx = math.cos(rx / 2), math.sin(rx / 2)
-    cy, sy = math.cos(ry / 2), math.sin(ry / 2)
-    cz, sz = math.cos(rz / 2), math.sin(rz / 2)
-
-    # Quaternion from extrinsic XYZ Euler angles
-    # Order: first rotate around X, then Y, then Z (fixed frame)
-    w = cx * cy * cz + sx * sy * sz
-    x = sx * cy * cz - cx * sy * sz
-    y = cx * sy * cz + sx * cy * sz
-    z = cx * cy * sz - sx * sy * cz
-
-    # Normalize to ensure w >= 0 for consistency
-    if w < 0:
-        w, x, y, z = -w, -x, -y, -z
-
-    return (x, y, z, w)
-
 

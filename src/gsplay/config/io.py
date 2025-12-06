@@ -412,12 +412,14 @@ def import_viewer_config(
 
             # Update UI sliders to match imported camera state
             if ui_handles is not None:
+                look_at = camera_controller.state.look_at
                 ui_handles.set_camera_values(
                     azimuth=camera_controller.state.azimuth,
                     elevation=camera_controller.state.elevation,
                     roll=camera_controller.state.roll,
                     distance=camera_controller.state.distance,
                     scene_bounds=camera_controller.scene_bounds,
+                    look_at=tuple(look_at) if look_at is not None else None,
                 )
 
             logger.info("Imported camera pose from config")

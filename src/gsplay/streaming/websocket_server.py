@@ -377,7 +377,7 @@ class WebSocketStreamServer:
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-    <title>GSPlay WebSocket Stream</title>
+    <title>GStream</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
@@ -425,93 +425,34 @@ class WebSocketStreamServer:
             animation: spin 1s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .info-bar {
+        .toolbar {
             height: 36px;
             background: rgba(20,20,20,0.95);
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: center;
             padding: 0 12px;
-            font-size: 11px;
-            color: #888;
+            gap: 8px;
             border-top: 1px solid #222;
         }
-        .info-bar .title {
-            color: #aaa;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .info-bar .badge {
-            background: #059669;
-            color: white;
-            padding: 2px 5px;
-            border-radius: 3px;
-            font-size: 9px;
-            font-weight: 600;
-        }
-        .info-bar .status {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .info-bar .stat {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-        .info-bar .dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: #444;
-        }
-        .info-bar .dot.connected { background: #22c55e; }
-        .info-bar .dot.connecting { background: #eab308; }
-        .info-bar .dot.error { background: #ef4444; }
-        .info-bar button {
+        .toolbar button {
             background: transparent;
             border: 1px solid #333;
             color: #888;
-            padding: 4px 10px;
+            padding: 4px 12px;
             border-radius: 3px;
             cursor: pointer;
-            font-size: 10px;
+            font-size: 11px;
         }
-        .info-bar button:hover {
+        .toolbar button:hover {
             background: #222;
             color: #ccc;
         }
-        .info-bar button.recording {
-            background: #dc2626;
-            border-color: #dc2626;
-            color: white;
-            animation: rec-pulse 1s infinite;
-        }
-        .info-bar button.streaming {
-            background: #059669;
-            border-color: #059669;
+        .toolbar button.active {
+            background: #0891b2;
+            border-color: #0891b2;
             color: white;
         }
-        @keyframes rec-pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
-        }
-        .rec-indicator {
-            position: absolute;
-            top: 12px;
-            right: 12px;
-            background: #dc2626;
-            color: white;
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 600;
-            animation: rec-pulse 1s infinite;
-            display: none;
-        }
-        .rec-indicator.visible { display: block; }
     </style>
 </head>
 <body>
@@ -522,237 +463,72 @@ class WebSocketStreamServer:
                 <span>Connecting...</span>
             </div>
             <img id="stream" alt="Stream">
-            <div class="rec-indicator" id="recIndicator">● REC</div>
         </div>
-        <div class="info-bar">
-            <span class="title">
-                GSPlay Stream
-                <span class="badge">WS</span>
-            </span>
-            <div class="status">
-                <div class="stat">
-                    <span class="dot" id="dot"></span>
-                    <span id="statusText">Connecting</span>
-                </div>
-                <div class="stat" id="fpsContainer">
-                    <span id="fps">--</span> fps
-                </div>
-                <div class="stat" id="latencyContainer">
-                    <span id="latency">--</span> ms
-                </div>
-                <button id="streamBtn" onclick="toggleStream()">⏹ Stop</button>
-                <button id="recordBtn" onclick="toggleRecording()">⏺ Record</button>
-                <button onclick="toggleFullscreen()">Fullscreen</button>
-            </div>
+        <div class="toolbar">
+            <button onclick="rotateCCW()" title="Rotate CCW [Left]">&lt;</button>
+            <button onclick="rotateStop()" title="Stop rotation [Esc]">||</button>
+            <button onclick="rotateCW()" title="Rotate CW [Right]">&gt;</button>
+            <button id="playBtn" onclick="togglePlayback()" title="Play/Pause [Space]">Play</button>
+            <button onclick="toggleFullscreen()" title="Fullscreen [F]">[ ]</button>
         </div>
     </div>
 
     <script>
         const img = document.getElementById('stream');
         const loading = document.getElementById('loading');
-        const dot = document.getElementById('dot');
-        const statusText = document.getElementById('statusText');
-        const fpsEl = document.getElementById('fps');
-        const latencyEl = document.getElementById('latency');
-        const streamBtn = document.getElementById('streamBtn');
-        const recordBtn = document.getElementById('recordBtn');
-        const recIndicator = document.getElementById('recIndicator');
+        const playBtn = document.getElementById('playBtn');
 
         let ws = null;
-        let frameCount = 0;
-        let lastFpsTime = performance.now();
         let currentBlobUrl = null;
         let reconnectTimer = null;
-        let streamEnabled = true;
-
-        // Recording state
-        let isRecording = false;
-        let mediaRecorder = null;
-        let recordedChunks = [];
-        let recordCanvas = null;
-        let recordCtx = null;
-
-        function setStatus(state, text) {
-            dot.className = 'dot ' + state;
-            statusText.textContent = text;
-            if (state === 'connected') {
-                loading.classList.add('hidden');
-            } else {
-                loading.classList.remove('hidden');
-            }
-        }
+        let isPlaying = false;
 
         function connect() {
-            if (!streamEnabled) return;
-            if (ws) {
-                ws.close();
-            }
+            if (ws) ws.close();
 
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = protocol + '//' + location.host + '/';
-
-            setStatus('connecting', 'Connecting...');
-            ws = new WebSocket(wsUrl);
+            ws = new WebSocket(protocol + '//' + location.host + '/');
             ws.binaryType = 'arraybuffer';
 
-            ws.onopen = () => {
-                setStatus('connected', 'Live');
-                updateStreamBtn();
-                measureLatency();
-            };
+            ws.onopen = () => loading.classList.add('hidden');
 
             ws.onmessage = (event) => {
-                if (typeof event.data === 'string') {
-                    if (event.data === 'pong') {
-                        const latency = performance.now() - window._pingTime;
-                        latencyEl.textContent = Math.round(latency / 2);
-                    }
-                    return;
-                }
-
+                if (typeof event.data === 'string') return;
                 const blob = new Blob([event.data], { type: 'image/jpeg' });
                 const url = URL.createObjectURL(blob);
-
-                if (currentBlobUrl) {
-                    URL.revokeObjectURL(currentBlobUrl);
-                }
+                if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
                 currentBlobUrl = url;
                 img.src = url;
-
-                // Draw to recording canvas if recording
-                if (isRecording && recordCtx) {
-                    const tempImg = new Image();
-                    tempImg.onload = () => {
-                        const scale = Math.min(recordCanvas.width / tempImg.width, recordCanvas.height / tempImg.height);
-                        const x = (recordCanvas.width - tempImg.width * scale) / 2;
-                        const y = (recordCanvas.height - tempImg.height * scale) / 2;
-                        recordCtx.fillStyle = '#000';
-                        recordCtx.fillRect(0, 0, recordCanvas.width, recordCanvas.height);
-                        recordCtx.drawImage(tempImg, x, y, tempImg.width * scale, tempImg.height * scale);
-                    };
-                    tempImg.src = url;
-                }
-
-                frameCount++;
-                const now = performance.now();
-                const elapsed = now - lastFpsTime;
-                if (elapsed >= 1000) {
-                    fpsEl.textContent = Math.round(frameCount * 1000 / elapsed);
-                    frameCount = 0;
-                    lastFpsTime = now;
-                }
-            };
-
-            ws.onerror = () => {
-                setStatus('error', 'Error');
             };
 
             ws.onclose = () => {
-                if (streamEnabled) {
-                    setStatus('error', 'Disconnected');
-                    if (reconnectTimer) clearTimeout(reconnectTimer);
-                    reconnectTimer = setTimeout(connect, 2000);
-                } else {
-                    setStatus('error', 'Stopped');
-                }
-                updateStreamBtn();
+                loading.classList.remove('hidden');
+                if (reconnectTimer) clearTimeout(reconnectTimer);
+                reconnectTimer = setTimeout(connect, 2000);
             };
         }
 
-        function disconnect() {
-            if (reconnectTimer) {
-                clearTimeout(reconnectTimer);
-                reconnectTimer = null;
-            }
-            if (ws) {
-                ws.close();
-                ws = null;
-            }
-            setStatus('error', 'Stopped');
-            updateStreamBtn();
+        function getControlUrl() {
+            const streamPort = parseInt(location.port);
+            return location.protocol + '//' + location.hostname + ':' + (streamPort + 1);
         }
 
-        function toggleStream() {
-            streamEnabled = !streamEnabled;
-            if (streamEnabled) {
-                connect();
-            } else {
-                // Stop recording if active
-                if (isRecording) stopRecording();
-                disconnect();
-            }
+        function togglePlayback() {
+            fetch(getControlUrl() + '/toggle-playback', {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        isPlaying = data.playing;
+                        playBtn.textContent = isPlaying ? 'Pause' : 'Play';
+                        playBtn.classList.toggle('active', isPlaying);
+                    }
+                })
+                .catch(() => {});
         }
 
-        function updateStreamBtn() {
-            if (streamEnabled && ws && ws.readyState === WebSocket.OPEN) {
-                streamBtn.textContent = '⏹ Stop';
-                streamBtn.classList.add('streaming');
-            } else {
-                streamBtn.textContent = '▶ Start';
-                streamBtn.classList.remove('streaming');
-            }
-        }
-
-        function measureLatency() {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                window._pingTime = performance.now();
-                ws.send('ping');
-                setTimeout(measureLatency, 2000);
-            }
-        }
-
-        function toggleRecording() {
-            if (isRecording) {
-                stopRecording();
-            } else {
-                startRecording();
-            }
-        }
-
-        function startRecording() {
-            recordCanvas = document.createElement('canvas');
-            recordCanvas.width = 1920;
-            recordCanvas.height = 1080;
-            recordCtx = recordCanvas.getContext('2d');
-
-            const stream = recordCanvas.captureStream(30);
-            mediaRecorder = new MediaRecorder(stream, {
-                mimeType: 'video/webm;codecs=vp9',
-                videoBitsPerSecond: 8000000
-            });
-
-            recordedChunks = [];
-            mediaRecorder.ondataavailable = (e) => {
-                if (e.data.size > 0) recordedChunks.push(e.data);
-            };
-
-            mediaRecorder.onstop = () => {
-                const blob = new Blob(recordedChunks, { type: 'video/webm' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
-                a.download = 'gsplay_stream_' + timestamp + '.webm';
-                a.click();
-                URL.revokeObjectURL(url);
-            };
-
-            mediaRecorder.start(100);
-            isRecording = true;
-            recordBtn.textContent = '⏹ Stop';
-            recordBtn.classList.add('recording');
-            recIndicator.classList.add('visible');
-        }
-
-        function stopRecording() {
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
-            }
-            isRecording = false;
-            recordBtn.textContent = '⏺ Record';
-            recordBtn.classList.remove('recording');
-            recIndicator.classList.remove('visible');
-        }
+        function rotateCW() { fetch(getControlUrl() + '/rotate-cw', {method: 'POST'}).catch(() => {}); }
+        function rotateCCW() { fetch(getControlUrl() + '/rotate-ccw', {method: 'POST'}).catch(() => {}); }
+        function rotateStop() { fetch(getControlUrl() + '/rotate-stop', {method: 'POST'}).catch(() => {}); }
 
         function toggleFullscreen() {
             if (!document.fullscreenElement) {
@@ -764,14 +540,10 @@ class WebSocketStreamServer:
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'f' || e.key === 'F') toggleFullscreen();
-            if (e.key === 's' || e.key === 'S') toggleStream();
-            if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey) {
-                if (e.shiftKey) {
-                    toggleRecording();
-                } else {
-                    connect();
-                }
-            }
+            if (e.key === ' ') { e.preventDefault(); togglePlayback(); }
+            if (e.key === 'ArrowLeft') rotateCCW();
+            if (e.key === 'ArrowRight') rotateCW();
+            if (e.key === 'Escape') rotateStop();
         });
 
         connect();

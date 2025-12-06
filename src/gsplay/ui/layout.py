@@ -39,6 +39,11 @@ def create_transform_controls(
     """
     Create scene transform controls (scale and rotation).
 
+    Uses world-axis rotation sliders (truly gimbal-lock free).
+    Each rotation slider represents cumulative rotation around that world axis.
+    Rotation deltas are applied via quaternion multiplication - no Euler
+    angle decomposition means no singularities at any orientation.
+
     Parameters
     ----------
     server : viser.ViserServer
@@ -50,7 +55,7 @@ def create_transform_controls(
     -------
     tuple
         (translation_x, translation_y, translation_z, global_scale,
-         rotation_x, rotation_y, rotation_z, reset_button, center_button)
+         rotate_x, rotate_y, rotate_z, reset_button, center_button)
     """
     # Scene transformation (translation + scale + rotation combined)
     translate = tuple(
@@ -62,6 +67,11 @@ def create_transform_controls(
         )
     )
     scale_value = getattr(config.transform_values, "scale", 1.0)
+
+    # Scene rotation sliders use world-axis rotation (truly gimbal-lock free)
+    # Each slider represents cumulative rotation around that world axis
+    # Rotation is applied incrementally via quaternion multiplication
+    # Initial values start at 0.0 (no rotation applied yet from sliders)
 
     translation_x = server.gui.add_slider(
         "Translation X",
@@ -90,28 +100,34 @@ def create_transform_controls(
         hint="Move scene along Z axis",
     )
 
-    rotation_x = server.gui.add_slider(
-        "Rotation X",
+    # World-axis rotation sliders (truly gimbal-lock free)
+    # Each slider accumulates rotation around that world axis via quaternion multiplication
+    # Changes are applied incrementally - no Euler angle decomposition needed
+    rotate_x = server.gui.add_slider(
+        "Rotate X",
         min=-180.0,
         max=180.0,
         step=1.0,
-        initial_value=0.0,  # Quaternion can't easily reverse to Euler
+        initial_value=0.0,
+        hint="Cumulative rotation around world X axis (pitch)",
     )
 
-    rotation_y = server.gui.add_slider(
-        "Rotation Y",
+    rotate_y = server.gui.add_slider(
+        "Rotate Y",
         min=-180.0,
         max=180.0,
         step=1.0,
-        initial_value=0.0,  # Quaternion can't easily reverse to Euler
+        initial_value=0.0,
+        hint="Cumulative rotation around world Y axis (yaw)",
     )
 
-    rotation_z = server.gui.add_slider(
-        "Rotation Z",
+    rotate_z = server.gui.add_slider(
+        "Rotate Z",
         min=-180.0,
         max=180.0,
         step=1.0,
-        initial_value=0.0,  # Quaternion can't easily reverse to Euler
+        initial_value=0.0,
+        hint="Cumulative rotation around world Z axis (roll)",
     )
 
     global_scale = server.gui.add_slider(
@@ -134,9 +150,9 @@ def create_transform_controls(
         translation_y,
         translation_z,
         global_scale,
-        rotation_x,
-        rotation_y,
-        rotation_z,
+        rotate_x,
+        rotate_y,
+        rotate_z,
         reset_button,
         center_button,
     )
@@ -1142,7 +1158,6 @@ def setup_ui_layout(
                         cfg_buttons.visible = False
 
                 # Terminate instance button
-                server.gui.add_markdown(content=" ")
                 terminate_button = server.gui.add_button(
                     "Terminate Instance",
                     icon=viser.Icon.POWER,
@@ -1233,7 +1248,6 @@ def setup_ui_layout(
                     cfg_buttons.visible = False
 
             # Terminate instance button
-            server.gui.add_markdown(content=" ")
             terminate_button = server.gui.add_button(
                 "Terminate Instance",
                 icon=viser.Icon.POWER,
@@ -1264,9 +1278,9 @@ def setup_ui_layout(
                 translation_y,
                 translation_z,
                 global_scale,
-                rotation_x,
-                rotation_y,
-                rotation_z,
+                rotate_x,
+                rotate_y,
+                rotate_z,
                 reset_pose,
                 center_button,
             ) = create_transform_controls(server, config)
@@ -1330,9 +1344,9 @@ def setup_ui_layout(
         translation_y_slider=translation_y,
         translation_z_slider=translation_z,
         global_scale_slider=global_scale,
-        rotation_x_slider=rotation_x,
-        rotation_y_slider=rotation_y,
-        rotation_z_slider=rotation_z,
+        rotate_x_slider=rotate_x,
+        rotate_y_slider=rotate_y,
+        rotate_z_slider=rotate_z,
         reset_pose_button=reset_pose,
         center_button=center_button,
         # Volume filtering (from dict) - basic

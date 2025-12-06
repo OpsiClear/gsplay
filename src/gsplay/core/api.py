@@ -117,15 +117,15 @@ class GSPlayAPI:
 
     def play(self) -> None:
         """Start playback."""
-        if self._viewer.ui and self._viewer.ui.auto_play:
-            self._viewer.ui.auto_play.value = " Play"  # PlaybackButton: " Play" = playing
-            logger.debug("Playback started")
+        if self._viewer.playback_controller:
+            self._viewer.playback_controller.play()
+            logger.debug("Playback started via API")
 
     def pause(self) -> None:
         """Pause playback."""
-        if self._viewer.ui and self._viewer.ui.auto_play:
-            self._viewer.ui.auto_play.value = "Pause"  # PlaybackButton: "Pause" = paused
-            logger.debug("Playback paused")
+        if self._viewer.playback_controller:
+            self._viewer.playback_controller.pause()
+            logger.debug("Playback paused via API")
 
     def is_playing(self) -> bool:
         """
@@ -136,10 +136,7 @@ class GSPlayAPI:
         bool
             True if playing, False if paused
         """
-        if self._viewer.ui and self._viewer.ui.auto_play:
-            # PlaybackButton uses " Play" (with space) when playing
-            return self._viewer.ui.auto_play.value.strip() == "Play"
-        return False
+        return self._viewer.config.animation.auto_play
 
     def set_playback_speed(self, fps: float) -> None:
         """
@@ -313,27 +310,32 @@ class GSPlayAPI:
                 self._viewer.ui.translation_z_slider.value = z
             logger.debug(f"Translation set to ({x}, {y}, {z})")
 
-    def set_rotation(self, x: float, y: float, z: float) -> None:
+    def set_rotation(
+        self, x: float = 0.0, y: float = 0.0, z: float = 0.0
+    ) -> None:
         """
-        Set scene rotation.
+        Set scene rotation using world-axis angles (truly gimbal-lock free).
+
+        Each parameter represents rotation around that world axis in degrees.
+        Rotations are composed via quaternion multiplication internally.
 
         Parameters
         ----------
         x : float
-            X rotation (degrees)
+            Rotation around world X axis (degrees, -180 to 180)
         y : float
-            Y rotation (degrees)
+            Rotation around world Y axis (degrees, -180 to 180)
         z : float
-            Z rotation (degrees)
+            Rotation around world Z axis (degrees, -180 to 180)
         """
         if self._viewer.ui:
-            if self._viewer.ui.rotation_x_slider:
-                self._viewer.ui.rotation_x_slider.value = x
-            if self._viewer.ui.rotation_y_slider:
-                self._viewer.ui.rotation_y_slider.value = y
-            if self._viewer.ui.rotation_z_slider:
-                self._viewer.ui.rotation_z_slider.value = z
-            logger.debug(f"Rotation set to ({x}, {y}, {z})")
+            if self._viewer.ui.rotate_x_slider:
+                self._viewer.ui.rotate_x_slider.value = x
+            if self._viewer.ui.rotate_y_slider:
+                self._viewer.ui.rotate_y_slider.value = y
+            if self._viewer.ui.rotate_z_slider:
+                self._viewer.ui.rotate_z_slider.value = z
+            logger.debug(f"Rotation set to x={x}, y={y}, z={z}")
 
     def set_scale(self, scale: float) -> None:
         """

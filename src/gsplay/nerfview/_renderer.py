@@ -110,12 +110,46 @@ RenderAction = Literal["rerender", "move", "static", "update"]
 
 
 @dataclasses.dataclass
-class RenderTask(object):
+class RenderTask:
+    """Task submitted to the renderer."""
+
     action: RenderAction
     camera_state: "CameraState" | None = None
 
 
+@dataclasses.dataclass
+class CachedFrame:
+    """Cached rendered frame with metadata for reuse during interrupts.
+
+    When a render is interrupted (e.g., during rapid camera movement),
+    the renderer can reuse this cached frame if it's still valid for
+    the current animation frame. This prevents visual artifacts while
+    maintaining smooth camera controls.
+    """
+
+    img: np.ndarray
+    depth: np.ndarray | None
+    frame_index: int
+
+    def is_valid_for(self, current_frame_index: int) -> bool:
+        """Check if this cached frame can be used for the given frame index.
+
+        Parameters
+        ----------
+        current_frame_index : int
+            The current animation frame index.
+
+        Returns
+        -------
+        bool
+            True if the cached frame is for the same animation frame.
+        """
+        return self.frame_index == current_frame_index
+
+
 class InterruptRenderException(Exception):
+    """Raised when a render should be interrupted (e.g., camera moved)."""
+
     pass
 
 
@@ -157,10 +191,8 @@ class Renderer(threading.Thread):
         self._may_interrupt_render = False
         self._old_version = False
         
-        # Cache for last complete frame to prevent displaying partial renders
-        # during camera movement. When a render is interrupted, we keep showing
-        # the last known good frame instead of a half-updated image.
-        self._last_complete_frame: tuple | None = None  # (img, depth)
+        # Cache for last complete frame (see CachedFrame docstring)
+        self._cached_frame: CachedFrame | None = None
 
         self._define_transitions()
 
@@ -247,6 +279,12 @@ class Renderer(threading.Thread):
             self._may_interrupt_render = True
         self._render_event.set()
 
+    def _get_current_frame_index(self) -> int:
+        """Get current frame index from viewer's time slider."""
+        if self.viewer.time_slider is not None:
+            return int(self.viewer.time_slider.value)
+        return 0
+
     def run(self):
         while self.running:
             while not self.is_prepared_fn():
@@ -271,6 +309,9 @@ class Renderer(threading.Thread):
                 jpeg_quality = self.viewer.jpeg_quality_move
             else:
                 jpeg_quality = self.viewer.jpeg_quality_static
+
+            # Get current frame index BEFORE render to detect if it changes
+            current_frame_index = self._get_current_frame_index()
 
             try:
                 with self.lock, set_trace_context(self._may_interrupt_trace):
@@ -303,23 +344,19 @@ class Renderer(threading.Thread):
                     self.viewer.render_tab_state.num_view_rays_per_sec = (W * H) / (
                         time.perf_counter() - tic
                     )
-                    # print("FPS:", 1 / (time.perf_counter() - tic))
-                    
-                    # Cache this complete frame for use during future interrupts
-                    self._last_complete_frame = (img, depth)
-                    
+
+                    # Cache this complete frame
+                    self._cached_frame = CachedFrame(img, depth, current_frame_index)
+
             except InterruptRenderException:
-                # Render was interrupted during camera movement.
-                # Instead of skipping the frame update entirely, reuse the last
-                # complete frame if available to prevent blank/frozen display.
-                if self._last_complete_frame is not None:
-                    img, depth = self._last_complete_frame
-                    # Note: We intentionally proceed to send this cached frame,
-                    # providing smoother visual feedback during rapid camera movement
-                    # BUT we skip GPU streaming since the GPU frame cache may be corrupt
+                # Render interrupted - try to reuse cached frame if valid
+                if self._cached_frame is not None and self._cached_frame.is_valid_for(
+                    current_frame_index
+                ):
+                    img, depth = self._cached_frame.img, self._cached_frame.depth
                     _skip_gpu_broadcast = True
                 else:
-                    # No cached frame available yet (e.g., first render), skip update
+                    # No valid cached frame - skip to avoid showing stale content
                     continue
             except Exception:
                 traceback.print_exc()
@@ -380,8 +417,8 @@ class SharedRenderer(threading.Thread):
         self._shared_camera: "CameraState | None" = None
         self._camera_lock = threading.Lock()
 
-        # Cache for last complete frame
-        self._last_complete_frame: tuple | None = None
+        # Cache for last complete frame (see CachedFrame docstring)
+        self._cached_frame: CachedFrame | None = None
 
         self._define_transitions()
 
@@ -499,6 +536,12 @@ class SharedRenderer(threading.Thread):
             self._may_interrupt_render = True
         self._render_event.set()
 
+    def _get_current_frame_index(self) -> int:
+        """Get current frame index from viewer's time slider."""
+        if self.viewer.time_slider is not None:
+            return int(self.viewer.time_slider.value)
+        return 0
+
     def run(self):
         """Main render loop - renders and broadcasts to all clients."""
         while self.running:
@@ -539,6 +582,9 @@ class SharedRenderer(threading.Thread):
             else:
                 jpeg_quality = self.viewer.jpeg_quality_static
 
+            # Get current frame index BEFORE render to detect if it changes
+            current_frame_index = self._get_current_frame_index()
+
             try:
                 with self.lock, set_trace_context(self._may_interrupt_trace):
                     tic = time.perf_counter()
@@ -571,14 +617,18 @@ class SharedRenderer(threading.Thread):
                         time.perf_counter() - tic
                     )
 
-                    self._last_complete_frame = (img, depth)
+                    # Cache this complete frame
+                    self._cached_frame = CachedFrame(img, depth, current_frame_index)
 
             except InterruptRenderException:
-                if self._last_complete_frame is not None:
-                    img, depth = self._last_complete_frame
-                    # Skip GPU broadcast - cache may be corrupt from interrupted render
+                # Render interrupted - try to reuse cached frame if valid
+                if self._cached_frame is not None and self._cached_frame.is_valid_for(
+                    current_frame_index
+                ):
+                    img, depth = self._cached_frame.img, self._cached_frame.depth
                     _skip_gpu_broadcast = True
                 else:
+                    # No valid cached frame - skip to avoid showing stale content
                     continue
             except Exception:
                 traceback.print_exc()

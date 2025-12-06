@@ -22,7 +22,8 @@
 **Key Capabilities:**
 - **Local PLY Playback**: Load and render sequences of `.ply` files directly from disk
 - **Web-Based Launcher**: Manage multiple viewer instances with a modern dashboard UI
-- **Real-Time Streaming**: WebSocket-based live preview streaming from running instances
+- **Real-Time Streaming**: WebSocket-based live preview with GStream minimal viewer
+- **Remote Control API**: HTTP endpoints for programmatic viewer control
 - **Real-Time Performance**: GPU-accelerated rendering at 60+ FPS
 - **Interactive Navigation**: Full camera controls with responsive seek and variable playback speed
 - **Jellyfin Integration** *(Coming Soon)*: Stream pre-compressed 4D scenes from media servers
@@ -33,7 +34,8 @@
 
 - **High-Performance PLY Loading**: Optimized PLY I/O with automatic format detection and frame caching
 - **Multi-Instance Launcher**: Web-based dashboard to launch, monitor, and manage multiple viewer instances
-- **Live Stream Preview**: Real-time WebSocket streaming of viewer output with recording support
+- **GStream Viewer**: Minimal streaming viewer with rotation and playback controls
+- **Remote Control API**: HTTP endpoints for programmatic automation
 - **Responsive Seek**: Debounced and interruptible seek system for smooth timeline scrubbing
 - **Variable Playback Speed**: Rendering speed decoupled from source framerate
 - **Clean Architecture**: Modular design following Clean Architecture principles for maintainability
@@ -156,6 +158,62 @@ Once running, the viewer will print a URL (e.g., `http://localhost:6019`). Open 
 
 ---
 
+## GStream: Minimal Streaming Viewer
+
+When a viewer instance is running, a minimal streaming viewer is available at `http://host:port+1/` (e.g., if viser runs on port 6019, GStream is at port 6020).
+
+### Features
+
+- **Low-latency streaming**: WebSocket-based binary JPEG delivery (~100-150ms)
+- **Rotation controls**: Rotate scene clockwise/counter-clockwise
+- **Playback controls**: Play/Pause animation
+- **Fullscreen mode**: Distraction-free viewing
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| Left Arrow | Rotate counter-clockwise |
+| Right Arrow | Rotate clockwise |
+| Escape | Stop rotation |
+| Space | Toggle play/pause |
+| F | Toggle fullscreen |
+
+---
+
+## Remote Control API
+
+An HTTP control server runs at `http://host:port+2/` for programmatic control.
+
+### Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/rotate-cw` | POST | Start clockwise rotation |
+| `/rotate-ccw` | POST | Start counter-clockwise rotation |
+| `/rotate-stop` | POST | Stop rotation |
+| `/play` | POST | Start animation |
+| `/pause` | POST | Pause animation |
+| `/toggle-playback` | POST | Toggle play/pause |
+| `/center-scene` | POST | Center scene at origin |
+| `/get-state` | POST | Get viewer state (JSON) |
+| `/set-translation` | POST | Set translation `{"x": 0, "y": 0, "z": 0}` |
+
+### Example Usage
+
+```bash
+# Start clockwise rotation at 45 degrees/second
+curl -X POST http://localhost:6021/rotate-cw -d '{"speed": 45}'
+
+# Toggle animation playback
+curl -X POST http://localhost:6021/toggle-playback
+
+# Get current viewer state
+curl -X POST http://localhost:6021/get-state
+```
+
+---
+
 ## System Architecture
 
 
@@ -164,10 +222,13 @@ Following **Clean Architecture** principles for clear separation of concerns:
 ```
 src/
 ├── gsplay/                  # Main viewer application
-│   ├── core/                # App entry point (main.py, app.py)
-│   ├── config/              # Configuration and UI handles
+│   ├── core/                # App entry point (main.py, app.py, api.py)
+│   ├── config/              # Configuration, UI handles, rotation utils
+│   ├── control/             # HTTP control server for remote commands
+│   ├── dispatch/            # Event dispatcher for routing
+│   ├── initialization/      # UI setup and component initialization
 │   ├── rendering/           # Render pipeline and camera
-│   ├── streaming/           # WebSocket stream server
+│   ├── streaming/           # WebSocket stream server (GStream)
 │   ├── ui/                  # UI layout and components
 │   └── nerfview/            # Embedded viser-based viewer
 │
@@ -211,14 +272,17 @@ OptimizedPlyModel (models/ply/optimized_model.py)
     |
     v
 GSPlay Viewer (gsplay/core/app.py)
-  - Provides UI using viser
+  - Provides UI using viser (port N)
   - Drives animation loop
   - Renders using gsplat
     |
-    v
-WebSocket Stream Server (gsplay/streaming/)
-  - JPEG-encoded frame streaming
-  - Connected to launcher for preview
+    +---> GStream Server (port N+1)
+    |       - WebSocket binary JPEG streaming
+    |       - Minimal HTML viewer with controls
+    |
+    +---> Control Server (port N+2)
+            - HTTP API for remote commands
+            - Rotation, playback, state queries
 ```
 
 ### Launcher Architecture
