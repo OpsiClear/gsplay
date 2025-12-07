@@ -94,6 +94,7 @@ class UIHandles:
     rotate_z_slider: viser.GuiSliderHandle | None = None
     reset_pose_button: viser.GuiButtonHandle | None = None
     center_button: viser.GuiButtonHandle | None = None
+    align_up_button: viser.GuiButtonHandle | None = None
 
     # Volume filtering controls - basic
     min_opacity_slider: viser.GuiSliderHandle | None = None

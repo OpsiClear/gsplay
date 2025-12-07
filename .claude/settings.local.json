@@ -112,7 +112,10 @@
       "Bash(git grep:*)",
       "WebFetch(domain:docs.nvidia.com)",
       "Bash(/home/yeheliu/.deno/bin/deno task build)",
-      "Bash(PYTHONPATH=. .venv/bin/python:*)"
+      "Bash(PYTHONPATH=. .venv/bin/python:*)",
+      "WebFetch(domain:stackoverflow.com)",
+      "WebFetch(domain:forums.developer.nvidia.com)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []

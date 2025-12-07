@@ -72,6 +72,7 @@ class EventType(Enum):
     RESET_TRANSFORM_REQUESTED = auto()
     RESET_FILTER_REQUESTED = auto()
     CENTER_REQUESTED = auto()
+    ALIGN_UP_REQUESTED = auto()
     RERENDER_REQUESTED = auto()
     TERMINATE_REQUESTED = auto()
 

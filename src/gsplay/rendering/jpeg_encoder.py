@@ -1,4 +1,4 @@
-"""GPU JPEG encoding using nvImageCodec.
+"""GPU JPEG encoding using torchvision (nvJPEG) or nvImageCodec.
 
 Architecture
 ------------
@@ -17,14 +17,15 @@ Architecture
                                     │
                                     ▼
     ┌─────────────────────────────────────────────────────────────────┐
-    │                       GPUJpegBackend                            │
-    │  - nvImageCodec (~0.5ms for 1080p)                              │
-    │  - Zero-copy from GPU tensor                                    │
+    │                   TorchvisionJpegBackend (default)              │
+    │  - Uses torchvision.io.encode_jpeg with nvJPEG                  │
+    │  - GPU encoding on CUDA tensors                                 │
+    │  - Reliable on consumer GPUs                                    │
     └─────────────────────────────────────────────────────────────────┘
 
 Requirements
 ------------
-    pip install nvidia-nvimgcodec-cu12[nvjpeg]
+    torchvision with CUDA support (nvJPEG)
 
 Usage
 -----
@@ -109,51 +110,32 @@ class EncodingConfig:
 # =============================================================================
 
 
-class GPUJpegBackend:
-    """JPEG encoding using NVIDIA nvImageCodec.
+class TorchvisionJpegBackend:
+    """GPU JPEG encoding using torchvision.io.encode_jpeg with nvJPEG.
 
-    Uses CPU_ONLY backend to avoid nvjpeg GPU encoder errors on consumer GPUs.
-    Hardware JPEG encoding is only available on Jetson Thor (Blackwell).
+    This backend uses PyTorch's native CUDA JPEG encoding which properly
+    handles nvJPEG internally. It's more reliable than nvImageCodec for
+    GPU encoding on consumer GPUs.
 
-    Thread Safety
-    -------------
-    nvImageCodec's Encoder is NOT thread-safe. This backend uses thread-local
-    encoders to allow safe concurrent encoding from multiple renderer threads.
+    Key features:
+    - Native PyTorch CUDA tensor support
+    - Proper nvJPEG integration via torchvision
+    - No external dependencies beyond torchvision
+    - Handles CHW format conversion automatically
+
+    Thread Safety: Thread-safe (torchvision handles this internally)
 
     Requirements:
-        pip install nvidia-nvimgcodec-cu12[nvjpeg]
+        torchvision with CUDA support (nvJPEG)
     """
 
     def __init__(self, device_id: int = 0):
-        from nvidia import nvimgcodec
-
-        self._nvimgcodec = nvimgcodec
-        self._device_id = device_id
-        self._thread_local = threading.local()
-
-        self._SUBSAMPLING_MAP = {
-            "420": nvimgcodec.ChromaSubsampling.CSS_420,
-            "422": nvimgcodec.ChromaSubsampling.CSS_422,
-            "444": nvimgcodec.ChromaSubsampling.CSS_444,
-            ChromaSubsampling.CSS_420: nvimgcodec.ChromaSubsampling.CSS_420,
-            ChromaSubsampling.CSS_422: nvimgcodec.ChromaSubsampling.CSS_422,
-            ChromaSubsampling.CSS_444: nvimgcodec.ChromaSubsampling.CSS_444,
-        }
-
-    def _get_encoder(self):
-        """Get thread-local encoder (created on first access per thread)."""
-        if not hasattr(self._thread_local, "encoder"):
-            # Use CPU_ONLY backend - GPU JPEG encoding not available on consumer GPUs
-            backend = self._nvimgcodec.Backend(self._nvimgcodec.BackendKind.CPU_ONLY)
-            self._thread_local.encoder = self._nvimgcodec.Encoder(
-                device_id=self._device_id,
-                backends=[backend]
-            )
-        return self._thread_local.encoder
+        self._default_device_id = device_id
+        self._logged = False
 
     @property
     def name(self) -> str:
-        return f"nvImageCodec (CPU:{self._device_id})"
+        return f"torchvision (GPU:{self._default_device_id})"
 
     def encode(
         self,
@@ -162,79 +144,39 @@ class GPUJpegBackend:
         chroma_subsampling: ChromaSubsamplingType,
     ) -> bytes:
         import torch
+        from torchvision.io import encode_jpeg
 
-        # Prepare parameters
-        css = self._SUBSAMPLING_MAP.get(
-            chroma_subsampling,
-            self._nvimgcodec.ChromaSubsampling.CSS_420
-        )
-        # Use SRGB color spec (RGB was renamed to SRGB in newer nvimgcodec versions)
-        color_spec = getattr(
-            self._nvimgcodec.ColorSpec, 'RGB',
-            getattr(self._nvimgcodec.ColorSpec, 'SRGB', None)
-        )
-        params = self._nvimgcodec.EncodeParams(
-            quality_type=self._nvimgcodec.QualityType.QUALITY,
-            quality_value=float(quality),
-            color_spec=color_spec,
-            chroma_subsampling=css,
-        )
+        # Log once
+        if not self._logged:
+            device_id = image.device.index if isinstance(image, torch.Tensor) and image.is_cuda else self._default_device_id
+            logger.info(f"JPEG encoder: torchvision (GPU:{device_id}, nvJPEG)")
+            self._logged = True
 
-        # Prepare image
+        # Prepare tensor
         if isinstance(image, torch.Tensor):
-            image = self._prepare_tensor(image)
+            tensor = self._prepare_tensor(image)
         else:
-            image = self._prepare_numpy(image)
+            # Convert numpy to tensor
+            tensor = torch.from_numpy(image)
+            if tensor.dim() == 3 and tensor.shape[-1] in (1, 3):
+                tensor = tensor.permute(2, 0, 1)  # HWC -> CHW
+            tensor = tensor.contiguous()
 
-        # Encode using thread-local encoder
-        # NOTE: We synchronize the CUDA device before encoding because:
-        # 1. The input tensor may have been created on a different stream
-        # 2. nvImageCodec uses its own CUDA context and needs stable memory
-        # 3. Without sync, we can get "Unable to get context for stream" errors
-        encoder = self._get_encoder()
-        
-        try:
-            # Ensure all CUDA operations on this tensor are complete
-            # This is critical when the tensor was created on a non-default stream
-            import torch
-            if isinstance(image, torch.Tensor) and image.is_cuda:
-                torch.cuda.synchronize(image.device)
+        # encode_jpeg expects CHW format, uint8
+        # Returns a 1D tensor of JPEG bytes
+        jpeg_tensor = encode_jpeg(tensor, quality=quality)
 
-            nv_image = self._nvimgcodec.as_image(image)
-            result = encoder.encode(nv_image, codec="jpeg", params=params)
-
-            # CRITICAL: Ensure nvImageCodec is done reading from tensor memory
-            # before we return. Without this, the next frame's render could reuse
-            # this tensor's memory while nvImageCodec is still reading -> corruption.
-            if isinstance(image, torch.Tensor) and image.is_cuda:
-                torch.cuda.synchronize(image.device)
-            del nv_image  # Release nvImageCodec's reference to tensor
-
-            # In newer nvimgcodec versions, encode() returns CodeStream object
-            # instead of bytes. Convert to bytes if needed.
-            if not isinstance(result, bytes):
-                result = bytes(result)
-
-            return result
-        except Exception as e:
-            # If nvImageCodec fails, attempt to recover CUDA state
-            try:
-                import torch
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-            except Exception:
-                pass
-            logger.error(f"nvImageCodec encode failed: {e}")
-            raise
+        # Convert to bytes (ensure CPU tensor for numpy conversion)
+        return jpeg_tensor.cpu().numpy().tobytes()
 
     def _prepare_tensor(self, tensor: "torch.Tensor") -> "torch.Tensor":
-        """Prepare tensor for encoding (GPU path, zero-copy).
+        """Prepare tensor for encoding.
 
-        If tensor is already uint8 (pre-converted in renderer), skip conversion.
+        Converts HWC to CHW format required by torchvision.encode_jpeg.
         """
         import torch
 
-        # Only convert if not already uint8
+        # Convert to uint8 if needed
         if tensor.dtype != torch.uint8:
             if tensor.dtype in (torch.float32, torch.float16):
                 if tensor.max() <= 1.0:
@@ -244,20 +186,21 @@ class GPUJpegBackend:
             else:
                 tensor = tensor.to(torch.uint8)
 
-        # Ensure HWC contiguous layout
+        # Handle batch dimension
         if tensor.dim() == 4:
             tensor = tensor.squeeze(0)
+
+        # Convert HWC to CHW (torchvision requirement)
+        if tensor.dim() == 3 and tensor.shape[-1] in (1, 3, 4):
+            # Likely HWC format, convert to CHW
+            tensor = tensor.permute(2, 0, 1)
+
         return tensor.contiguous()
 
-    def _prepare_numpy(self, image: np.ndarray) -> np.ndarray:
-        """Prepare numpy array for encoding (will upload to GPU)."""
-        if image.dtype in (np.float32, np.float64):
-            if image.max() <= 1.0:
-                return (image * 255).clip(0, 255).astype(np.uint8)
-            return image.clip(0, 255).astype(np.uint8)
-        if image.dtype != np.uint8:
-            return image.astype(np.uint8)
-        return image
+
+class GPUJpegBackend(TorchvisionJpegBackend):
+    """GPU JPEG encoding backend using torchvision.io.encode_jpeg (nvJPEG)."""
+    pass
 
 
 # =============================================================================
@@ -288,7 +231,7 @@ class JpegEncoder:
 
             device_id = int(self._device.split(":")[-1]) if ":" in self._device else 0
             self._backend = GPUJpegBackend(device_id=device_id)
-            logger.info(f"JPEG encoder: {self._backend.name}")
+            # Logging is done per-device in GPUJpegBackend._get_encoder_for_device
             return self._backend
 
     @property

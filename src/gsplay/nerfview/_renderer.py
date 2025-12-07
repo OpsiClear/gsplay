@@ -532,8 +532,28 @@ class SharedRenderer(threading.Thread):
         else:
             self._task = task
 
-        if self._state == "high" and self._task.action in ["move", "rerender"]:
-            self._may_interrupt_render = True
+        # Only interrupt renders for user-driven camera movement, not programmatic rotation.
+        # During auto-rotation, interrupting causes blinks because:
+        # 1. Interrupted render doesn't complete JPEG encoding
+        # 2. _broadcast_frame is skipped when using cached frame
+        # 3. No frame is sent to clients → visible blink
+        # Auto-rotation is smooth and predictable, so interrupts aren't needed.
+        should_interrupt = (
+            self._state == "high" and self._task.action in ["move", "rerender"]
+        )
+        if should_interrupt:
+            # Check if auto-rotation is active - if so, don't interrupt
+            rotation_active = False
+            if self.viewer.universal_viewer is not None:
+                camera_ctrl = getattr(
+                    self.viewer.universal_viewer, "camera_controller", None
+                )
+                if camera_ctrl is not None:
+                    rotation_active = getattr(camera_ctrl, "_rotation_active", False)
+
+            if not rotation_active:
+                self._may_interrupt_render = True
+
         self._render_event.set()
 
     def _get_current_frame_index(self) -> int:

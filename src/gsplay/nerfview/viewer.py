@@ -202,12 +202,18 @@ class GSPlay(object):
 
             # Only update renderer if client has been initialized with our camera state.
             # This prevents viser's default camera from being used for initial renders.
-            # The camera_ui module tracks initialization via _initialized_clients set.
             if self.universal_viewer is not None:
                 camera_ctrl = getattr(self.universal_viewer, "camera_controller", None)
                 if camera_ctrl is not None:
                     if client.client_id not in camera_ctrl._initialized_clients:
                         return  # Skip - client not yet initialized with our camera state
+                    # Skip during rotation - rotation callback handles rendering
+                    if getattr(camera_ctrl, "_rotation_active", False):
+                        return
+                    # Skip briefly after rotation stops (backend state is authoritative)
+                    stop_time = getattr(camera_ctrl, "_rotation_stop_time", 0.0)
+                    if time.time() - stop_time < 0.5:
+                        return
 
             with self.server.atomic():
                 camera_state = self.get_camera_state(client)

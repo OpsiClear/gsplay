@@ -23,6 +23,12 @@ POST /rotate-ccw
 POST /rotate-stop
     Stop camera rotation.
 
+GET /rotation-state
+    Get current rotation state (active, speed, direction).
+
+GET /playback-state
+    Get current animation playback state (playing: true/false).
+
 POST /play
     Start animation playback.
 
@@ -77,9 +83,20 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
         """Handle CORS preflight."""
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
+
+    def do_GET(self) -> None:
+        """Handle GET requests."""
+        path = self.path.strip("/")
+
+        if path == "rotation-state":
+            self._handle_get_rotation_state()
+        elif path == "playback-state":
+            self._handle_get_playback_state()
+        else:
+            self._send_error_json(f"Unknown endpoint: {path}", 404)
 
     def do_POST(self) -> None:
         """Handle POST requests."""
@@ -283,6 +300,37 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
             logger.info("Camera rotation stopped")
         except Exception as e:
             logger.error(f"rotate-stop failed: {e}", exc_info=True)
+            self._send_error_json(str(e), 500)
+
+    def _handle_get_rotation_state(self) -> None:
+        """Get current rotation state."""
+        viewer = self.viewer
+
+        try:
+            if viewer.camera_controller:
+                state = viewer.camera_controller.get_rotation_state()
+                self._send_json({"ok": True, **state})
+            else:
+                self._send_json({
+                    "ok": True,
+                    "active": False,
+                    "speed": 0.0,
+                    "axis": "y",
+                    "direction": "stopped",
+                })
+        except Exception as e:
+            logger.error(f"rotation-state failed: {e}", exc_info=True)
+            self._send_error_json(str(e), 500)
+
+    def _handle_get_playback_state(self) -> None:
+        """Get current playback state."""
+        viewer = self.viewer
+
+        try:
+            is_playing = viewer.api.is_playing()
+            self._send_json({"ok": True, "playing": is_playing})
+        except Exception as e:
+            logger.error(f"playback-state failed: {e}", exc_info=True)
             self._send_error_json(str(e), 500)
 
     def _handle_play(self) -> None:

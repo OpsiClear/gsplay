@@ -445,6 +445,7 @@ class HandlerManager:
             (ui.reset_pose_button, EventType.RESET_TRANSFORM_REQUESTED, {}),
             (ui.reset_filter_button, EventType.RESET_FILTER_REQUESTED, {}),
             (ui.center_button, EventType.CENTER_REQUESTED, {}),
+            (ui.align_up_button, EventType.ALIGN_UP_REQUESTED, {}),
         ]
 
         for button, event_type, event_data in button_mappings:

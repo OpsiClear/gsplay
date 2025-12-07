@@ -6,7 +6,7 @@ Extracts UI setup logic from the main app class for better separation of concern
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from src.gsplay.ui.layers import create_layer_controls
 from src.gsplay.ui.filter_visualizer import FilterVisualizer
@@ -255,38 +255,3 @@ class UISetup:
             self.ui.export_device.on_update(on_export_option_change)
 
         logger.debug("Export option handlers registered")
-
-    def create_rotation_rerender_callback(self) -> Callable[[], None]:
-        """Create callback for auto-rotation that updates camera and rerenders.
-
-        This callback gets fresh camera state from a connected viser client
-        and updates the renderer's shared camera before triggering rerender.
-
-        Returns
-        -------
-        Callable[[], None]
-            The rerender callback function
-        """
-        from src.gsplay.nerfview._renderer import RenderTask
-
-        viewer = self._viewer
-
-        def rotation_rerender() -> None:
-            nerfview = viewer.render_component.get_viewer()
-            if nerfview is None or nerfview._renderer is None:
-                return
-
-            # Get camera state from any connected client
-            clients = list(viewer.server.get_clients().values())
-            if not clients:
-                return
-
-            # Use first client's camera (all should be synced during rotation)
-            client = clients[0]
-            camera_state = nerfview.get_camera_state(client)
-
-            # Update renderer's shared camera and submit render task
-            nerfview._renderer.update_camera(camera_state)
-            nerfview._renderer.submit(RenderTask("move", camera_state))
-
-        return rotation_rerender

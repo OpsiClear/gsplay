@@ -452,6 +452,154 @@ class UniversalGSPlay:
             self.server, self.scene_bounds_manager.get_bounds()
         )
 
+        # Set render callback for rotation
+        def rotation_render_callback(delta_angle: float, axis: str):
+            """Apply rotation directly to c2w matrix and submit render.
+
+            SINGLE SOURCE OF TRUTH: SharedRenderer._shared_camera.c2w
+            - No quaternion conversion
+            - No syncing with viser during rotation
+            - Works directly with the c2w matrix
+
+            Parameters
+            ----------
+            delta_angle : float
+                Rotation angle in radians for this frame
+            axis : str
+                Rotation axis ("y" for horizontal, "x" for vertical)
+            """
+            import numpy as np
+            from src.gsplay.nerfview.viewer import CameraState
+            from src.gsplay.nerfview._renderer import RenderTask
+
+            try:
+                viewer = self.render_component.get_viewer()
+                if viewer is None or viewer._renderer is None:
+                    return
+
+                # Get current camera state (SINGLE SOURCE OF TRUTH)
+                current = viewer._renderer.get_camera_state()
+                if current is None:
+                    return
+
+                c2w = current.c2w.copy()
+
+                # Extract camera position and rotation from c2w
+                R = c2w[:3, :3]  # 3x3 rotation matrix
+                camera_pos = c2w[:3, 3]  # camera position
+
+                # Get look_at point (center of rotation)
+                cam_ctrl = self.camera_controller
+                if cam_ctrl is not None and cam_ctrl.state is not None:
+                    with cam_ctrl.state_lock:
+                        look_at = cam_ctrl.state.look_at.copy()
+                else:
+                    # Fallback: assume looking at origin
+                    look_at = np.array([0.0, 0.0, 0.0])
+
+                # Create rotation matrix for this frame
+                if axis == "y":
+                    # Rotation around camera's up direction (follows view orientation)
+                    from src.gsplay.rendering.quaternion_utils import quat_from_axis_angle, quat_to_rotation_matrix
+                    up_dir = R @ np.array([0.0, 1.0, 0.0])  # Camera's local up in world coords
+                    q_delta = quat_from_axis_angle(up_dir, delta_angle)
+                    R_delta = quat_to_rotation_matrix(q_delta)
+                else:
+                    # Rotation around X axis (vertical orbit)
+                    cos_a = np.cos(delta_angle)
+                    sin_a = np.sin(delta_angle)
+                    R_delta = np.array([
+                        [1, 0, 0],
+                        [0, cos_a, -sin_a],
+                        [0, sin_a, cos_a]
+                    ], dtype=np.float32)
+
+                # Rotate camera position around look_at point
+                offset = camera_pos - look_at
+                new_offset = R_delta @ offset
+                new_camera_pos = look_at + new_offset
+
+                # Rotate camera orientation (R_delta @ R preserves orthogonality)
+                new_R = R_delta @ R
+
+                # Build new c2w matrix
+                new_c2w = np.eye(4, dtype=np.float32)
+                new_c2w[:3, :3] = new_R
+                new_c2w[:3, 3] = new_camera_pos
+
+                # Create camera state and submit
+                camera_state = CameraState(
+                    fov=current.fov,
+                    aspect=current.aspect,
+                    c2w=new_c2w
+                )
+
+                # Update shared camera and submit render (atomic operation)
+                viewer._renderer.update_camera(camera_state)
+                viewer._renderer.submit(RenderTask("move", camera_state))
+
+                # Sync camera.state so viser UI sliders stay updated
+                # Convert rotation matrix back to quaternion
+                from src.gsplay.rendering.quaternion_utils import rotation_matrix_to_quat
+                orientation = rotation_matrix_to_quat(new_R)
+                distance = float(np.linalg.norm(new_camera_pos - look_at))
+
+                if cam_ctrl is not None and cam_ctrl.state is not None:
+                    with cam_ctrl.state_lock:
+                        cam_ctrl.state.orientation = orientation
+                        cam_ctrl.state.distance = distance
+                        # look_at stays the same (center of rotation)
+
+                    # Trigger slider sync to update UI
+                    cam_ctrl.trigger_slider_sync()
+
+            except Exception as e:
+                logger.error(f"Rotation render failed: {e}", exc_info=True)
+
+        self.camera_controller.set_render_callback(rotation_render_callback)
+
+        # Set callback to sync viser cameras at end of rotation
+        def sync_viser_from_c2w():
+            """Sync viser cameras from final c2w state after rotation stops."""
+            import numpy as np
+
+            try:
+                viewer = self.render_component.get_viewer()
+                if viewer is None or viewer._renderer is None:
+                    return
+
+                current = viewer._renderer.get_camera_state()
+                if current is None:
+                    return
+
+                c2w = current.c2w
+
+                # Extract directly from c2w matrix
+                camera_pos = c2w[:3, 3]           # Position: 4th column
+                up_dir = -c2w[:3, 1]              # Up: -Y in OpenCV convention
+
+                # Use stored look_at (center of rotation)
+                cam_ctrl = self.camera_controller
+                if cam_ctrl is not None and cam_ctrl.state is not None:
+                    with cam_ctrl.state_lock:
+                        look_at = cam_ctrl.state.look_at.copy()
+                else:
+                    look_at = np.array([0.0, 0.0, 0.0])
+
+                # Apply to all viser clients
+                for client in self.server.get_clients().values():
+                    with client.atomic():
+                        client.camera.position = tuple(camera_pos)
+                        client.camera.look_at = tuple(look_at)
+                        client.camera.up_direction = tuple(up_dir)
+
+                logger.debug("Synced viser cameras from final c2w")
+
+            except Exception as e:
+                logger.debug(f"Sync viser from c2w failed: {e}")
+
+        self.camera_controller.set_sync_viser_callback(sync_viser_from_c2w)
+
         # Create UI (includes camera UI right after Info panel)
         self.ui = setup_ui_layout(
             self.server, self.config, self.camera_controller, viewer_app=self
@@ -544,12 +692,6 @@ class UniversalGSPlay:
         # Setup UI components using UISetup helper
         ui_setup = UISetup(self)
         self.filter_visualizer = ui_setup.setup_all()
-
-        # Set rerender callback for camera auto-rotation
-        if self.camera_controller is not None:
-            self.camera_controller.set_rerender_callback(
-                ui_setup.create_rotation_rerender_callback()
-            )
 
         # Initialize export path now that UI exists (model may have been loaded before UI)
         self._initialize_export_path(force=True)

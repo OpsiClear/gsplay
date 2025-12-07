@@ -152,15 +152,10 @@ async def _proxy_stream_impl(request: Request, token: str, path: str, manager: I
                 method=request.method, url=backend_url,
                 headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")},
             )
-            content = response.content
-            if path in ("", "view") and b"text/html" in response.headers.get("content-type", "").encode():
-                base_path = f"/s/{token}"
-                content = content.replace(
-                    b"const wsUrl = protocol + '//' + location.host + '/';",
-                    f"const wsUrl = protocol + '//' + location.host + '{base_path}/ws';".encode()
-                )
+            # Streaming HTML is now proxy-aware (detects /s/{token}/ path automatically)
             return Response(
-                content=content, status_code=response.status_code,
+                content=response.content,
+                status_code=response.status_code,
                 headers={k: v for k, v in response.headers.items() if k.lower() not in ("content-encoding", "transfer-encoding", "content-length")},
             )
         except httpx.ConnectError:
@@ -212,3 +207,68 @@ async def proxy_stream_websocket(websocket: WebSocket, token: str, manager: Inst
 async def proxy_stream_status(request: Request, token: str, manager: InstanceManager = Depends(get_instance_manager)) -> Response:
     """Proxy stream status endpoint for debugging."""
     return await _proxy_stream_impl(request, token, "status", manager)
+
+
+# =============================================================================
+# Control Proxy (HTTP POST) - /c/{token}/{endpoint}
+# =============================================================================
+
+async def _proxy_control_impl(request: Request, token: str, endpoint: str, manager: InstanceManager) -> Response:
+    """Internal implementation for control HTTP proxy.
+
+    Control server runs on viser_port + 2.
+    """
+    instance = _resolve_stream_instance(token, manager)
+    if instance is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invalid token")
+
+    if instance.status not in _PROXY_ALLOWED_STATUSES:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Instance not running")
+
+    # Control server is on viser_port + 2
+    control_port = instance.port + 2
+    backend_host = "127.0.0.1" if instance.host == "0.0.0.0" else instance.host
+    backend_url = f"http://{backend_host}:{control_port}/{endpoint}"
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.request(
+                method=request.method,
+                url=backend_url,
+                headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")},
+                content=await request.body() if request.method in ("POST", "PUT", "PATCH") else None,
+            )
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ("content-encoding", "transfer-encoding", "content-length")},
+            )
+        except httpx.ConnectError:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Cannot connect to control server at port {control_port}")
+        except httpx.TimeoutException:
+            raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "Control request timed out")
+
+
+@router.post("/c/{token}/{endpoint}")
+async def proxy_control_post(request: Request, token: str, endpoint: str, manager: InstanceManager = Depends(get_instance_manager)) -> Response:
+    """Proxy POST control commands to GSPlay instance (rotate, playback, etc.)."""
+    return await _proxy_control_impl(request, token, endpoint, manager)
+
+
+@router.get("/c/{token}/{endpoint}")
+async def proxy_control_get(request: Request, token: str, endpoint: str, manager: InstanceManager = Depends(get_instance_manager)) -> Response:
+    """Proxy GET control queries to GSPlay instance (rotation-state, etc.)."""
+    return await _proxy_control_impl(request, token, endpoint, manager)
+
+
+@router.options("/c/{token}/{endpoint}")
+async def proxy_control_options(token: str, endpoint: str) -> Response:
+    """Handle CORS preflight for control endpoints."""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+        },
+    )

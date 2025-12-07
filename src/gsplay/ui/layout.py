@@ -35,6 +35,7 @@ def create_transform_controls(
     viser.GuiSliderHandle,
     viser.GuiButtonHandle,
     viser.GuiButtonHandle,
+    viser.GuiButtonHandle,
 ]:
     """
     Create scene transform controls (scale and rotation).
@@ -1186,9 +1187,9 @@ def setup_ui_layout(
                     translation_y,
                     translation_z,
                     global_scale,
-                    rotation_x,
-                    rotation_y,
-                    rotation_z,
+                    rotate_x,
+                    rotate_y,
+                    rotate_z,
                     reset_pose,
                     center_button,
                 ) = create_transform_controls(server, config)

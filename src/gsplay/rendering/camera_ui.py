@@ -238,6 +238,7 @@ def create_view_controls(
     def _(_) -> None:
         if updating_from_camera[0]:
             return
+        camera.stop_auto_rotation()
         if camera.state is not None:
             with camera.state_lock:
                 camera.state.look_at[0] = look_at_x_slider.value
@@ -247,6 +248,7 @@ def create_view_controls(
     def _(_) -> None:
         if updating_from_camera[0]:
             return
+        camera.stop_auto_rotation()
         if camera.state is not None:
             with camera.state_lock:
                 camera.state.look_at[1] = look_at_y_slider.value
@@ -256,6 +258,7 @@ def create_view_controls(
     def _(_) -> None:
         if updating_from_camera[0]:
             return
+        camera.stop_auto_rotation()
         if camera.state is not None:
             with camera.state_lock:
                 camera.state.look_at[2] = look_at_z_slider.value
@@ -284,6 +287,7 @@ def create_view_controls(
 
     @ortho_buttons.on_click
     def _(_) -> None:
+        camera.stop_auto_rotation()
         view = ortho_buttons.value.strip()
         if camera.state is not None:
             with camera.state_lock:
@@ -303,6 +307,7 @@ def create_view_controls(
 
     @transform_buttons.on_click
     def _(_) -> None:
+        camera.stop_auto_rotation()
         action = transform_buttons.value.strip()
         if camera.state is not None:
             if action == "Reset":
@@ -326,73 +331,112 @@ def create_view_controls(
         min=5.0,
         max=180.0,
         step=5.0,
-        initial_value=30.0,
+        initial_value=abs(camera._rotation_speed),
         hint="Rotation speed in degrees per second",
     )
 
+    # Flag to prevent circular updates
+    updating_rotation_ui = [False]
+
     @rotation_speed_slider.on_update
     def _(_) -> None:
-        camera._rotation_speed = rotation_speed_slider.value
+        if updating_rotation_ui[0]:
+            return
+        # Update speed while preserving direction
+        if camera._rotation_active:
+            direction = 1.0 if camera._rotation_speed > 0 else -1.0
+            camera.set_rotation_speed(rotation_speed_slider.value * direction)
+        else:
+            # Just update the stored speed for next start
+            camera._rotation_speed = rotation_speed_slider.value
 
     rotate_buttons = server.gui.add_button_group(
         "Rotate",
-        (" CW ", "Stop", "CCW "),
+        (" ↻ ", "Stop", " ↺ "),
     )
 
     @rotate_buttons.on_click
     def _(_) -> None:
+        if updating_rotation_ui[0]:
+            return
         action = rotate_buttons.value.strip()
-        if action == "CW":
+        if action == "↻":
             camera.start_auto_rotation(axis="y", speed=rotation_speed_slider.value)
-        elif action == "CCW":
+        elif action == "↺":
             camera.start_auto_rotation(axis="y", speed=-rotation_speed_slider.value)
         elif action == "Stop":
             camera.stop_auto_rotation()
 
-    # Create sync function that can be called after all controls are set up
+    # Register observer to sync UI when rotation state changes from any source
+    def on_rotation_state_change(is_active: bool, speed: float, axis: str) -> None:
+        """Sync rotation UI when state changes (e.g., from streaming API)."""
+        updating_rotation_ui[0] = True
+        try:
+            # Update speed slider to match current speed
+            rotation_speed_slider.value = abs(speed)
+
+            # Update button group to reflect current state
+            if not is_active:
+                rotate_buttons.value = "Stop"
+            elif speed > 0:
+                rotate_buttons.value = " ↻ "
+            else:
+                rotate_buttons.value = " ↺ "
+        except Exception as e:
+            logger.debug(f"Error syncing rotation UI: {e}")
+        finally:
+            updating_rotation_ui[0] = False
+
+    camera.add_rotation_observer(on_rotation_state_change)
+
+    # Create slider sync function (will be registered with camera controller)
+    def sync_sliders_with_camera():
+        """Sync UI sliders with camera state (quaternion-based)."""
+        if camera.state is None:
+            return
+
+        try:
+            # Read Euler angles from quaternion state properties
+            with camera.state_lock:
+                azimuth = camera.state.azimuth
+                elevation = camera.state.elevation
+                roll = camera.state.roll
+                distance = camera.state.distance
+                look_at = camera.state.look_at.copy()
+
+            # Update UI sliders (prevent circular updates)
+            updating_from_camera[0] = True
+
+            # Clamp elevation to slider range (-180 to 180)
+            # With quaternions, elevation is already in -90 to 90 range
+            azimuth_slider.value = azimuth % 360.0
+            elevation_slider.value = np.clip(elevation, -180.0, 180.0)
+            roll_slider.value = np.clip(roll, -180.0, 180.0)
+
+            # Sync look_at (camera target) sliders
+            look_at_x_slider.value = np.clip(float(look_at[0]), -50.0, 50.0)
+            look_at_y_slider.value = np.clip(float(look_at[1]), -50.0, 50.0)
+            look_at_z_slider.value = np.clip(float(look_at[2]), -50.0, 50.0)
+
+            if camera.scene_bounds:
+                extent = camera.scene_bounds.get("max_size", 10.0)
+                default_distance = extent * 2.5
+                if default_distance > 0 and distance > 0:
+                    actual_zoom = distance / default_distance
+                    zoom_slider.value = np.clip(np.log2(actual_zoom), -8.0, 3.0)
+
+            updating_from_camera[0] = False
+
+        except Exception as e:
+            logger.debug(f"Error syncing camera sliders: {e}")
+            updating_from_camera[0] = False
+
+    # Register slider sync callback with camera controller
+    camera.set_slider_sync_callback(sync_sliders_with_camera)
+
+    # Create sync function that sets up client callbacks
     def setup_camera_sync():
-        """Set up camera sync callbacks."""
-
-        def sync_sliders_with_camera():
-            """Sync UI sliders with camera state (quaternion-based)."""
-            if camera.state is None:
-                return
-
-            try:
-                # Read Euler angles from quaternion state properties
-                with camera.state_lock:
-                    azimuth = camera.state.azimuth
-                    elevation = camera.state.elevation
-                    roll = camera.state.roll
-                    distance = camera.state.distance
-                    look_at = camera.state.look_at.copy()
-
-                # Update UI sliders (prevent circular updates)
-                updating_from_camera[0] = True
-
-                # Clamp elevation to slider range (-180 to 180)
-                # With quaternions, elevation is already in -90 to 90 range
-                azimuth_slider.value = azimuth % 360.0
-                elevation_slider.value = np.clip(elevation, -180.0, 180.0)
-                roll_slider.value = np.clip(roll, -180.0, 180.0)
-
-                # Sync look_at (camera target) sliders
-                look_at_x_slider.value = np.clip(float(look_at[0]), -50.0, 50.0)
-                look_at_y_slider.value = np.clip(float(look_at[1]), -50.0, 50.0)
-                look_at_z_slider.value = np.clip(float(look_at[2]), -50.0, 50.0)
-
-                if camera.scene_bounds:
-                    extent = camera.scene_bounds.get("max_size", 10.0)
-                    default_distance = extent * 2.5
-                    if default_distance > 0 and distance > 0:
-                        actual_zoom = distance / default_distance
-                        zoom_slider.value = np.clip(np.log2(actual_zoom), -8.0, 3.0)
-
-                updating_from_camera[0] = False
-
-            except Exception as e:
-                logger.debug(f"Error syncing camera sliders: {e}")
-                updating_from_camera[0] = False
+        """Set up camera sync callbacks for new clients."""
 
         @server.on_client_connect
         def _(client: viser.ClientHandle) -> None:

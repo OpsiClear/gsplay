@@ -377,177 +377,266 @@ class WebSocketStreamServer:
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-    <title>GStream</title>
+    <title>GSPlay</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
-            width: 100%;
-            height: 100%;
+            width: 100%; height: 100%;
             overflow: hidden;
-            background: #000;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-        .viewport {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-        }
-        .stream-area {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            position: relative;
+            background: #0a0a0a;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif;
+            -webkit-font-smoothing: antialiased;
         }
         #stream {
-            width: 100%;
-            height: 100%;
+            position: fixed;
+            inset: 0;
+            width: 100%; height: 100%;
             object-fit: contain;
         }
         .loading {
-            position: absolute;
-            color: #666;
-            font-size: 14px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 12px;
-        }
-        .loading.hidden { display: none; }
-        .spinner {
-            width: 24px;
-            height: 24px;
-            border: 2px solid #333;
-            border-top-color: #666;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .toolbar {
-            height: 36px;
-            background: rgba(20,20,20,0.95);
+            position: fixed;
+            inset: 0;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 0 12px;
-            gap: 8px;
-            border-top: 1px solid #222;
+            background: #0a0a0a;
+            z-index: 10;
+            transition: opacity 0.3s;
         }
-        .toolbar button {
+        .loading.hidden { opacity: 0; pointer-events: none; }
+        .spinner {
+            width: 20px; height: 20px;
+            border: 1.5px solid rgba(255,255,255,0.1);
+            border-top-color: rgba(255,255,255,0.4);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .controls {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+            background: linear-gradient(transparent, rgba(0,0,0,0.6));
+            opacity: 0;
+            transition: opacity 0.25s;
+            z-index: 20;
+        }
+        .controls:hover, .controls.visible { opacity: 1; }
+        .bar {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            background: rgba(255,255,255,0.08);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 10px;
+            padding: 4px;
+        }
+        .bar button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px; height: 44px;
             background: transparent;
-            border: 1px solid #333;
-            color: #888;
-            padding: 4px 12px;
-            border-radius: 3px;
+            border: none;
+            border-radius: 10px;
+            color: rgba(255,255,255,0.7);
             cursor: pointer;
-            font-size: 11px;
+            transition: all 0.15s;
+            -webkit-tap-highlight-color: transparent;
         }
-        .toolbar button:hover {
-            background: #222;
-            color: #ccc;
+        .bar button:hover {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
         }
-        .toolbar button.active {
-            background: #0891b2;
-            border-color: #0891b2;
-            color: white;
+        .bar button:active { transform: scale(0.92); background: rgba(255,255,255,0.15); }
+        .bar button.on {
+            background: rgba(255,255,255,0.2);
+            color: #fff;
+        }
+        .bar button svg { width: 22px; height: 22px; }
+        .sep { width: 1px; height: 24px; background: rgba(255,255,255,0.1); margin: 0 6px; }
+        @media (hover: none) {
+            .controls { opacity: 1; background: none; padding: 16px; }
+            .bar { background: rgba(0,0,0,0.6); padding: 6px; }
+            .bar button { width: 48px; height: 48px; }
+            .bar button svg { width: 24px; height: 24px; }
         }
     </style>
 </head>
 <body>
-    <div class="viewport">
-        <div class="stream-area">
-            <div class="loading" id="loading">
-                <div class="spinner"></div>
-                <span>Connecting...</span>
-            </div>
-            <img id="stream" alt="Stream">
-        </div>
-        <div class="toolbar">
-            <button onclick="rotateCCW()" title="Rotate CCW [Left]">&lt;</button>
-            <button onclick="rotateStop()" title="Stop rotation [Esc]">||</button>
-            <button onclick="rotateCW()" title="Rotate CW [Right]">&gt;</button>
-            <button id="playBtn" onclick="togglePlayback()" title="Play/Pause [Space]">Play</button>
-            <button onclick="toggleFullscreen()" title="Fullscreen [F]">[ ]</button>
+    <div class="loading" id="loading"><div class="spinner"></div></div>
+    <img id="stream" alt="">
+    <div class="controls" id="controls">
+        <div class="bar">
+            <button id="ccwBtn" title="Rotate left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
+            <button id="pauseRotBtn" title="Stop rotation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M10 8v8M14 8v8"/></svg></button>
+            <button id="cwBtn" title="Rotate right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+            <div class="sep"></div>
+            <button id="playBtn" title="Play/Pause"><svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><svg id="pauseIcon" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg></button>
+            <div class="sep"></div>
+            <button id="fsBtn" title="Fullscreen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg></button>
         </div>
     </div>
+<script>
+const img = document.getElementById('stream');
+const loading = document.getElementById('loading');
+const controls = document.getElementById('controls');
+const playBtn = document.getElementById('playBtn');
+const playIcon = document.getElementById('playIcon');
+const pauseIcon = document.getElementById('pauseIcon');
+const ccwBtn = document.getElementById('ccwBtn');
+const pauseRotBtn = document.getElementById('pauseRotBtn');
+const cwBtn = document.getElementById('cwBtn');
+const fsBtn = document.getElementById('fsBtn');
 
-    <script>
-        const img = document.getElementById('stream');
-        const loading = document.getElementById('loading');
-        const playBtn = document.getElementById('playBtn');
+let ws, blobUrl, reconnect, hideTimer;
+let isPlaying = false, rotDir = 'stopped';
 
-        let ws = null;
-        let currentBlobUrl = null;
-        let reconnectTimer = null;
-        let isPlaying = false;
+function showControls() {
+    controls.classList.add('visible');
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => controls.classList.remove('visible'), 3000);
+}
+document.addEventListener('mousemove', showControls);
+document.addEventListener('touchstart', showControls);
 
-        function connect() {
-            if (ws) ws.close();
+function connect() {
+    if (ws) ws.close();
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const m = location.pathname.match(/^(\/s\/[^/]+)/);
+    ws = new WebSocket(proto + '//' + location.host + (m ? m[1] + '/ws' : '/'));
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => loading.classList.add('hidden');
+    ws.onmessage = e => {
+        if (typeof e.data === 'string') return;
+        const url = URL.createObjectURL(new Blob([e.data], {type: 'image/jpeg'}));
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        blobUrl = url;
+        img.src = url;
+    };
+    ws.onclose = () => {
+        loading.classList.remove('hidden');
+        clearTimeout(reconnect);
+        reconnect = setTimeout(connect, 2000);
+    };
+}
 
-            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(protocol + '//' + location.host + '/');
-            ws.binaryType = 'arraybuffer';
+function api(endpoint) {
+    const m = location.pathname.match(/^\/s\/([^/]+)/);
+    if (m) return location.origin + '/c/' + m[1] + '/' + endpoint;
+    const p = parseInt(location.port);
+    return isNaN(p) ? null : location.protocol + '//' + location.hostname + ':' + (p+1) + '/' + endpoint;
+}
 
-            ws.onopen = () => loading.classList.add('hidden');
+function updatePlayUI() {
+    playIcon.style.display = isPlaying ? 'none' : 'block';
+    pauseIcon.style.display = isPlaying ? 'block' : 'none';
+    playBtn.classList.toggle('on', isPlaying);
+}
+function updateRotUI() {
+    ccwBtn.classList.toggle('on', rotDir === 'ccw');
+    pauseRotBtn.classList.toggle('on', rotDir === 'stopped');
+    cwBtn.classList.toggle('on', rotDir === 'cw');
+}
 
-            ws.onmessage = (event) => {
-                if (typeof event.data === 'string') return;
-                const blob = new Blob([event.data], { type: 'image/jpeg' });
-                const url = URL.createObjectURL(blob);
-                if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
-                currentBlobUrl = url;
-                img.src = url;
-            };
+// Optimistic updates with poll suppression
+let lastAction = 0;
+function act(endpoint, update) {
+    lastAction = Date.now();
+    update();  // Optimistic UI update
+    const u = api(endpoint);
+    if (u) fetch(u, {method:'POST'}).catch(()=>{});
+}
 
-            ws.onclose = () => {
-                loading.classList.remove('hidden');
-                if (reconnectTimer) clearTimeout(reconnectTimer);
-                reconnectTimer = setTimeout(connect, 2000);
-            };
-        }
+playBtn.onclick = () => {
+    isPlaying = !isPlaying; updatePlayUI();
+    lastAction = Date.now();
+    const u = api('toggle-playback');
+    if (u) fetch(u, {method:'POST'}).then(r=>r.json()).then(d => {
+        if (d.ok) { isPlaying = d.playing; updatePlayUI(); }
+    }).catch(()=>{ isPlaying = !isPlaying; updatePlayUI(); });
+};
+ccwBtn.onclick = () => act('rotate-ccw', () => { rotDir = 'ccw'; updateRotUI(); });
+cwBtn.onclick = () => act('rotate-cw', () => { rotDir = 'cw'; updateRotUI(); });
+pauseRotBtn.onclick = () => act('rotate-stop', () => { rotDir = 'stopped'; updateRotUI(); });
+fsBtn.onclick = () => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
+    else document.exitFullscreen().catch(()=>{});
+};
 
-        function getControlUrl() {
-            const streamPort = parseInt(location.port);
-            return location.protocol + '//' + location.hostname + ':' + (streamPort + 1);
-        }
+function poll() {
+    if (Date.now() - lastAction < 1500) return;  // Skip poll after recent action
+    const u1 = api('playback-state'), u2 = api('rotation-state');
+    if (u1) fetch(u1).then(r=>r.json()).then(d => {
+        if (d.ok && d.playing !== isPlaying) { isPlaying = d.playing; updatePlayUI(); }
+    }).catch(()=>{});
+    if (u2) fetch(u2).then(r=>r.json()).then(d => {
+        if (d.ok && d.direction !== rotDir) { rotDir = d.direction; updateRotUI(); }
+    }).catch(()=>{});
+}
+setTimeout(poll, 500);
+setInterval(poll, 1000);
 
-        function togglePlayback() {
-            fetch(getControlUrl() + '/toggle-playback', {method: 'POST'})
-                .then(r => r.json())
-                .then(data => {
-                    if (data.ok) {
-                        isPlaying = data.playing;
-                        playBtn.textContent = isPlaying ? 'Pause' : 'Play';
-                        playBtn.classList.toggle('active', isPlaying);
-                    }
-                })
-                .catch(() => {});
-        }
+document.addEventListener('keydown', e => {
+    if (e.key === 'f' || e.key === 'F') fsBtn.click();
+    if (e.key === ' ') { e.preventDefault(); playBtn.click(); }
+    if (e.key === 'ArrowLeft') ccwBtn.click();
+    if (e.key === 'ArrowRight') cwBtn.click();
+    if (e.key === 'Escape') pauseRotBtn.click();
+});
 
-        function rotateCW() { fetch(getControlUrl() + '/rotate-cw', {method: 'POST'}).catch(() => {}); }
-        function rotateCCW() { fetch(getControlUrl() + '/rotate-ccw', {method: 'POST'}).catch(() => {}); }
-        function rotateStop() { fetch(getControlUrl() + '/rotate-stop', {method: 'POST'}).catch(() => {}); }
+// Touch-based rotation (swipe to spin)
+let touchStartX = 0, touchActive = false, touchDir = null;
+function startRotation(dir) {
+    if (touchDir === dir) return;
+    touchDir = dir;
+    rotDir = dir; updateRotUI();  // Immediate UI feedback
+    const u = api('rotate-' + dir);
+    if (u) fetch(u, {method:'POST'}).catch(()=>{
+        // Revert on failure
+        if (touchDir === dir) { touchDir = null; rotDir = 'stopped'; updateRotUI(); }
+    });
+}
+function stopRotation() {
+    if (!touchDir) return;
+    touchDir = null;
+    rotDir = 'stopped'; updateRotUI();  // Immediate UI feedback
+    const u = api('rotate-stop');
+    if (u) fetch(u, {method:'POST'}).catch(()=>{});
+}
+img.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+        touchStartX = e.touches[0].clientX;
+        touchActive = true;
+        img.style.opacity = '0.9';
+    }
+}, {passive: true});
+img.addEventListener('touchmove', e => {
+    if (!touchActive || e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 40) {
+        startRotation(dx > 0 ? 'cw' : 'ccw');
+    } else if (Math.abs(dx) < 20 && touchDir) {
+        stopRotation();
+    }
+}, {passive: true});
+img.addEventListener('touchend', () => {
+    touchActive = false;
+    img.style.opacity = '1';
+    stopRotation();
+}, {passive: true});
+img.addEventListener('touchcancel', () => {
+    touchActive = false;
+    img.style.opacity = '1';
+    stopRotation();
+}, {passive: true});
 
-        function toggleFullscreen() {
-            if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen().catch(() => {});
-            } else {
-                document.exitFullscreen().catch(() => {});
-            }
-        }
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'f' || e.key === 'F') toggleFullscreen();
-            if (e.key === ' ') { e.preventDefault(); togglePlayback(); }
-            if (e.key === 'ArrowLeft') rotateCCW();
-            if (e.key === 'ArrowRight') rotateCW();
-            if (e.key === 'Escape') rotateStop();
-        });
-
-        connect();
-    </script>
+connect();
+showControls();
+</script>
 </body>
 </html>"""
 

@@ -21,14 +21,10 @@ import viser
 # Import CameraState from its new home
 from src.gsplay.rendering.camera_state import CameraState
 
-# Import quaternion utilities
+# Import quaternion utilities (only those needed for camera state management)
 from src.gsplay.rendering.quaternion_utils import (
-    quat_from_axis_angle,
     quat_from_look_at,
-    quat_multiply,
-    quat_normalize,
     quat_to_rotation_matrix,
-    rotation_matrix_to_quat,
 )
 
 # Re-export factory functions from camera_ui for backward compatibility
@@ -89,14 +85,23 @@ class SuperSplatCamera:
         self.world_axis_handle: viser.SceneNodeHandle | None = None
         self.world_axis_visible = False
 
-        # Auto-rotation state
+        # Auto-rotation state (single source of truth)
         self._rotation_thread: threading.Thread | None = None
         self._rotation_active = False
-        self._rotation_speed = 20.0  # degrees per second
+        self._rotation_speed = 20.0  # degrees per second (positive=CW, negative=CCW)
         self._rotation_axis = "y"  # "y" for azimuth, "x" for elevation
 
-        # Callback to trigger rerender (set by app during initialization)
-        self._rerender_callback: callable | None = None
+        # Rotation state observers (callbacks notified on state change)
+        self._rotation_observers: list[callable] = []
+
+        # Render callback (set by viewer to trigger renders during rotation)
+        self._render_callback: callable | None = None
+
+        # Sync viser callback (called at end of rotation to sync viser cameras)
+        self._sync_viser_callback: callable | None = None
+
+        # Slider sync callback (called during rotation to update UI sliders)
+        self._slider_sync_callback: callable | None = None
 
         # Explicit camera state (single source of truth)
         self.state: CameraState | None = None
@@ -106,6 +111,12 @@ class SuperSplatCamera:
         # Clients not in this set will have their on_update events ignored
         # (to prevent viser's default camera from overwriting our state)
         self._initialized_clients: set[int] = set()
+
+        # Timestamp when rotation stopped - used to ignore on_update briefly after stop
+        self._rotation_stop_time: float = 0.0
+
+        # Store viser's up direction before rotation starts (to restore on stop)
+        self._pre_rotation_up: np.ndarray | None = None
 
         # Initialize
         self._setup_grid()
@@ -170,14 +181,13 @@ class SuperSplatCamera:
             break
 
         if first_client is None:
-            # No clients - use default state based on scene bounds
-            if self.scene_bounds is not None and "center" in self.scene_bounds:
-                center = np.array(self.scene_bounds["center"])
+            # No clients - use origin as default look_at
+            center = np.array([0.0, 0.0, 0.0])
+            if self.scene_bounds is not None and "size" in self.scene_bounds:
                 size = np.array(self.scene_bounds["size"])
                 extent = float(np.linalg.norm(size))
                 distance = extent * 2.5
             else:
-                center = np.array([0.0, 0.0, 0.0])
                 distance = 10.0
 
             # Default isometric view (45 deg azimuth, 30 deg elevation)
@@ -249,6 +259,10 @@ class SuperSplatCamera:
         # to recompute position/look_at/up_direction with wrong convention, causing 180° flip.
         # Instead, only set position/look_at/up_direction which are unambiguous.
         target_clients = clients or list(self.server.get_clients().values())
+
+        # Update stop time to prevent on_update from overriding
+        self._rotation_stop_time = time.time()
+
         for client in target_clients:
             with client.atomic():
                 client.camera.position = tuple(camera_pos)
@@ -256,6 +270,44 @@ class SuperSplatCamera:
                 client.camera.up_direction = tuple(up_dir)
 
         logger.debug(f"Applied state to camera: distance={distance:.2f}")
+
+    def set_render_callback(self, callback: callable) -> None:
+        """Set callback to trigger renders during rotation.
+
+        Parameters
+        ----------
+        callback : callable
+            Function that takes (delta_angle, axis) and applies rotation to c2w.
+        """
+        self._render_callback = callback
+
+    def set_sync_viser_callback(self, callback: callable) -> None:
+        """Set callback to sync viser cameras from c2w at end of rotation.
+
+        Parameters
+        ----------
+        callback : callable
+            Function with no arguments that syncs viser cameras from _shared_camera.c2w.
+        """
+        self._sync_viser_callback = callback
+
+    def set_slider_sync_callback(self, callback: callable) -> None:
+        """Set callback to sync UI sliders with camera state during rotation.
+
+        Parameters
+        ----------
+        callback : callable
+            Function with no arguments that updates UI sliders from camera.state.
+        """
+        self._slider_sync_callback = callback
+
+    def trigger_slider_sync(self) -> None:
+        """Trigger slider sync callback if set."""
+        if self._slider_sync_callback is not None:
+            try:
+                self._slider_sync_callback()
+            except Exception as e:
+                logger.debug(f"Slider sync callback error: {e}")
 
     def sync_state_from_client(self, client) -> None:
         """
@@ -280,16 +332,23 @@ class SuperSplatCamera:
         if self._rotation_active:
             return
 
+        # Skip sync briefly after rotation stops (allows viser sync to complete)
+        if time.time() - self._rotation_stop_time < 0.5:
+            return
+
         try:
             camera_pos = np.array(client.camera.position)
             look_at = np.array(client.camera.look_at)
             up_dir = np.array(client.camera.up_direction)
 
             distance = float(np.linalg.norm(camera_pos - look_at))
+
+            # Compute orientation using our convention (look=-Z, up=+Y)
+            # This ensures consistent quaternion convention throughout the system
             orientation = quat_from_look_at(camera_pos, look_at, up_dir)
 
             with self.state_lock:
-                self.state.orientation = quat_normalize(orientation)
+                self.state.orientation = orientation
                 self.state.distance = distance
                 self.state.look_at = look_at.copy()
 
@@ -326,6 +385,7 @@ class SuperSplatCamera:
         view : str
             One of: "top", "bottom", "front", "back", "left", "right", "iso"
         """
+        self.stop_auto_rotation()
         if self.scene_bounds is None or "center" not in self.scene_bounds:
             logger.warning("No scene bounds available for preset views")
             return
@@ -363,6 +423,72 @@ class SuperSplatCamera:
 
         logger.info(f"Set camera to {view} view")
 
+    # === Rotation State Management ===
+
+    def add_rotation_observer(self, callback: callable) -> None:
+        """Register a callback to be notified when rotation state changes.
+
+        Parameters
+        ----------
+        callback : callable
+            Function that takes (is_active: bool, speed: float, axis: str)
+        """
+        if callback not in self._rotation_observers:
+            self._rotation_observers.append(callback)
+
+    def remove_rotation_observer(self, callback: callable) -> None:
+        """Unregister a rotation state observer."""
+        if callback in self._rotation_observers:
+            self._rotation_observers.remove(callback)
+
+    def _notify_rotation_observers(self) -> None:
+        """Notify all observers of rotation state change."""
+        for callback in self._rotation_observers:
+            try:
+                callback(
+                    self._rotation_active,
+                    self._rotation_speed,
+                    self._rotation_axis,
+                )
+            except Exception as e:
+                logger.debug(f"Rotation observer callback error: {e}")
+
+    def get_rotation_state(self) -> dict:
+        """Get current rotation state.
+
+        Returns
+        -------
+        dict
+            {"active": bool, "speed": float, "axis": str, "direction": str}
+            direction is "cw", "ccw", or "stopped"
+        """
+        if not self._rotation_active:
+            direction = "stopped"
+        elif self._rotation_speed > 0:
+            direction = "cw"
+        else:
+            direction = "ccw"
+
+        return {
+            "active": self._rotation_active,
+            "speed": abs(self._rotation_speed),
+            "axis": self._rotation_axis,
+            "direction": direction,
+        }
+
+    def set_rotation_speed(self, speed: float) -> None:
+        """Set rotation speed without changing active state.
+
+        Parameters
+        ----------
+        speed : float
+            Speed in degrees per second (sign determines direction)
+        """
+        old_speed = self._rotation_speed
+        self._rotation_speed = speed
+        if old_speed != speed:
+            self._notify_rotation_observers()
+
     def focus_on_bounds(
         self, bounds: dict | None = None, duration: float = 0.5
     ) -> None:
@@ -376,6 +502,7 @@ class SuperSplatCamera:
         duration : float
             Animation duration in seconds (not currently implemented)
         """
+        self.stop_auto_rotation()
         if bounds is None:
             bounds = self.scene_bounds
 
@@ -402,7 +529,8 @@ class SuperSplatCamera:
         """
         Start continuous camera rotation around the scene.
 
-        Uses quaternion multiplication for smooth rotation without gimbal lock.
+        Rotation works directly on SharedRenderer._shared_camera.c2w.
+        No quaternion conversion needed - uses rotation matrices directly.
 
         Parameters
         ----------
@@ -419,16 +547,27 @@ class SuperSplatCamera:
             logger.warning("Cannot start rotation - state not initialized")
             return
 
+        # Save viser's current up direction before rotation
+        for client in self.server.get_clients().values():
+            self._pre_rotation_up = np.array(client.camera.up_direction)
+            break
+        if self._pre_rotation_up is None:
+            self._pre_rotation_up = np.array([0.0, 1.0, 0.0])
+
         self._rotation_active = True
         self._rotation_axis = axis
         self._rotation_speed = speed
 
-        def rotation_loop():
-            """Continuous rotation using quaternion multiplication."""
-            last_time = time.time()
+        # Notify observers of state change
+        self._notify_rotation_observers()
 
-            # Define rotation axis in world coordinates
-            world_axis = np.array([0.0, 1.0, 0.0]) if axis == "y" else np.array([1.0, 0.0, 0.0])
+        def rotation_loop():
+            """Continuous rotation working directly on c2w matrix.
+
+            Single source of truth: SharedRenderer._shared_camera.c2w
+            No quaternion conversion - works directly with rotation matrices.
+            """
+            last_time = time.time()
 
             while self._rotation_active:
                 try:
@@ -439,24 +578,13 @@ class SuperSplatCamera:
                     # Calculate rotation angle for this frame
                     angle_rad = np.radians(self._rotation_speed * dt)
 
-                    # Create rotation quaternion
-                    delta_quat = quat_from_axis_angle(world_axis, angle_rad)
-
-                    # Apply rotation to current orientation
-                    with self.state_lock:
-                        self.state.orientation = quat_normalize(
-                            quat_multiply(delta_quat, self.state.orientation)
-                        )
-
-                    # Apply to camera
-                    self.apply_state_to_camera()
-
-                    # Trigger rerender to update streaming output
-                    if self._rerender_callback is not None:
+                    # Trigger render callback with delta angle
+                    # The callback will apply rotation directly to c2w
+                    if self._render_callback is not None:
                         try:
-                            self._rerender_callback()
+                            self._render_callback(angle_rad, axis)
                         except Exception as e:
-                            logger.debug(f"Rerender callback failed: {e}")
+                            logger.error(f"Render callback error: {e}", exc_info=True)
 
                     time.sleep(0.05)  # 20 FPS
 
@@ -474,22 +602,26 @@ class SuperSplatCamera:
         if not self._rotation_active:
             return
 
+        # Record stop time FIRST - on_update checks this before _rotation_active
+        self._rotation_stop_time = time.time()
+
+        # Now stop rotation
         self._rotation_active = False
         if self._rotation_thread:
             self._rotation_thread.join(timeout=1.0)
             self._rotation_thread = None
 
+        # Notify observers (UI button state)
+        self._notify_rotation_observers()
+
+        # Sync viser cameras from current renderer state
+        if self._sync_viser_callback is not None:
+            try:
+                self._sync_viser_callback()
+            except Exception as e:
+                logger.debug(f"Sync viser callback error: {e}")
+
         logger.info("Stopped auto-rotation")
-
-    def set_rerender_callback(self, callback: callable) -> None:
-        """Set callback to trigger rerender during auto-rotation.
-
-        Parameters
-        ----------
-        callback : callable
-            Function to call after each rotation frame update
-        """
-        self._rerender_callback = callback
 
     def update_scene_bounds(self, bounds: dict | None) -> None:
         """
