@@ -102,15 +102,16 @@ src/
 │       └── composite_model.py  # CompositeModel (multi-layer scenes)
 │
 ├── gsplay/                  # Presentation layer
-│   ├── main.py              # Main entry point
-│   ├── app.py               # UniversalGSPlay application
-│   ├── config.py            # GSPlayConfig, UIHandles
-│   ├── rendering.py         # Render function creation
-│   ├── handlers.py          # UI event handlers
-│   ├── ui.py                # UI layout creation
-│   ├── supersplat_camera.py # Camera controls
-│   ├── components/          # Modular components
-│   └── nerfview/            # Embedded nerfview gsplay
+│   ├── core/                # Main entry point (main.py, app.py, api.py)
+│   ├── config/              # GSPlayConfig, UIHandles, rotation utils
+│   ├── rendering/           # Render pipeline, camera controller, quaternion utils
+│   │   ├── camera.py        # CameraController with mode-based ownership
+│   │   ├── camera_state.py  # CameraState (spherical coords primary)
+│   │   ├── quaternion_utils.py # Quaternion math utilities
+│   │   └── renderer.py      # Render function creation
+│   ├── ui/                  # UI layout and components
+│   ├── interaction/         # Event handlers
+│   └── nerfview/            # Embedded nerfview viewer
 │
 └── shared/                  # Cross-cutting concerns
     ├── math.py              # Math utils (knn, quaternions)
@@ -146,13 +147,15 @@ infrastructure/ ---------+
 - `composite/composite_model.py`: CompositeModel (multi-layer scenes)
 
 **Presentation Layer** (`src/gsplay/`):
-- `main.py`: Main entry point
-- `app.py`: UniversalGSPlay orchestration
-- `config.py`: GSPlayConfig, UIHandles
-- `supersplat_camera.py`: Camera controls with animation in View panel
+- `core/main.py`: Main entry point
+- `core/app.py`: UniversalGSPlay orchestration, bake view logic
+- `config/`: GSPlayConfig, UIHandles
+- `rendering/camera.py`: CameraController with mode-based ownership
+- `rendering/camera_state.py`: CameraState using spherical coordinates
+- `rendering/quaternion_utils.py`: Quaternion math (wxyz format)
 
 **Shared Utilities** (`src/shared/`):
-- `math.py`: knn, set_random_seed, rotation utilities
+- `math.py`: knn, set_random_seed
 - `exceptions.py`: Custom exceptions
 
 ### Critical Implementation Details
@@ -199,6 +202,54 @@ Core dependencies (defined in pyproject.toml):
 - **tyro**: Type-safe CLI argument parsing
 - **numpy/torch**: Numerical computation
 
+## Camera System & Viser Convention
+
+### Viser Look-At Convention (CRITICAL)
+
+Viser uses a **different look-at convention** than standard OpenGL:
+
+**Viser convention:**
+- `forward = normalize(look_at - position)` [toward target]
+- `right = normalize(cross(forward, up_hint))`
+- `up = cross(forward, right)` [NOTE: `forward × right`, not `right × forward`!]
+- `R = [right, up, forward]` [camera looks down **+Z** toward target]
+
+**OpenGL convention (DO NOT USE with viser):**
+- `up = cross(right, forward)`
+- `R = [right, up, -forward]` [camera looks down **-Z**]
+
+### Bake View Implementation
+
+The "Bake View" feature rotates/translates the model to preserve the current view when camera resets to default isometric position (az=45°, el=30°).
+
+**Key files:**
+- `src/gsplay/core/app.py`: `_bake_camera_view()` - main bake logic
+- `src/gsplay/rendering/camera.py`: `apply_to_viser()` - camera state application
+
+**Critical implementation rules:**
+
+1. **Use viser's wxyz directly for R_current**: Read `camera.wxyz` from viser (what rendering uses)
+
+2. **Use `viser_look_at_matrix()` for R_default**: Matches viser's internal computation
+   ```python
+   def viser_look_at_matrix(position, target):
+       forward = normalize(target - position)
+       right = normalize(cross(forward, up_hint))
+       up = cross(forward, right)  # NOT cross(right, forward)!
+       return column_stack([right, up, forward])  # NOT -forward!
+   ```
+
+3. **Never set `camera.wxyz` explicitly**: Let viser compute it from position/look_at/up
+   - `apply_to_viser()` sets only `position`, `look_at`, `up_direction`
+   - `_bake_camera_view()` sets only `position`, `look_at`, `up_direction`
+
+4. **View preservation formula:**
+   ```
+   R_delta = R_default @ R_current.T
+   R_new_model = R_delta @ R_old_model
+   t_new = R_delta @ t_old + t_delta + center_correction
+   ```
+
 ## Key Gotchas
 
 1. **PyTorch First**: Install PyTorch before running `uv pip install -e .`
@@ -207,3 +258,4 @@ Core dependencies (defined in pyproject.toml):
 4. **Scale Filtering**: UI "Max Scale" slider controls filtering (auto-initialized to 99.5th percentile from first frame)
 5. **No Circular Imports**: Domain layer cannot import from infrastructure or models. Use dependency inversion.
 6. **Single GSTensor**: Use src.domain.entities.GSTensor (consolidated, no duplicates)
+7. **Viser Camera Convention**: Never use `quat_from_euler_deg` to set `camera.wxyz` - it uses OpenGL convention which differs from viser's internal look-at computation. Always let viser compute wxyz from position/look_at/up.

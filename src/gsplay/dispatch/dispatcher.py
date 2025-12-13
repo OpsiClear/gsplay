@@ -56,6 +56,7 @@ class EventDispatcher:
             (EventType.RESET_TRANSFORM_REQUESTED, app._on_reset_transform_requested),
             (EventType.RESET_FILTER_REQUESTED, app._on_reset_filter_requested),
             (EventType.CENTER_REQUESTED, app._on_center_requested),
+            (EventType.BAKE_VIEW_REQUESTED, app._on_bake_view_requested),
             (EventType.RERENDER_REQUESTED, app._on_rerender_requested),
             (EventType.TERMINATE_REQUESTED, app._on_terminate_requested),
         ]

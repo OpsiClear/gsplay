@@ -95,6 +95,10 @@ class OptimizedPlyModel(ModelInterface):
         self._profiling_bus.subscribe(self._throughput_observer)
         self._last_requested_frame: int | None = None
 
+        # Frame-level cache: avoid re-reading PLY when same frame is requested
+        self._cached_frame_idx: int | None = None
+        self._cached_frame_data: 'GSData | GSTensor | None' = None
+
         # Cached folder-level format (avoids per-file detection for homogeneous sequences)
         self._cached_folder_format: tuple[PlyFrameEncoding, int | None] | None = None
 
@@ -136,8 +140,39 @@ class OptimizedPlyModel(ModelInterface):
 
     @processing_mode.setter
     def processing_mode(self, value: str) -> None:
-        """Set processing mode."""
-        self._processing_mode = value
+        """Set processing mode and invalidate frame cache."""
+        if self._processing_mode != value:
+            self._processing_mode = value
+            self.invalidate_frame_cache()
+
+    def invalidate_frame_cache(self) -> None:
+        """Invalidate cached frame data, forcing reload on next request."""
+        self._cached_frame_idx = None
+        self._cached_frame_data = None
+
+    def _clone_frame_data(self, data: 'GSData | GSTensor') -> 'GSData | GSTensor':
+        """Clone frame data to prevent in-place modifications from corrupting cache.
+
+        Parameters
+        ----------
+        data : GSData | GSTensor
+            Frame data to clone
+
+        Returns
+        -------
+        GSData | GSTensor
+            Cloned frame data
+        """
+        if hasattr(data, 'clone'):
+            # GSTensor has clone() method
+            return data.clone()
+        elif hasattr(data, 'copy'):
+            # GSData might have copy()
+            return data.copy()
+        else:
+            # Fallback: return as-is (shouldn't happen)
+            logger.warning("Frame data type %s has no clone/copy method", type(data).__name__)
+            return data
 
     def get_recommended_max_scale(self) -> float:
         """
@@ -164,7 +199,6 @@ class OptimizedPlyModel(ModelInterface):
     def add_frame_observer(self, observer: FrameLoadObserver) -> None:
         """Allow external components to subscribe to frame-load events."""
         self._profiling_bus.subscribe(observer)
-
 
     def _log_folder_format_hint(self) -> None:
         """Emit a one-time log summarizing the detected folder encoding and cache it."""
@@ -237,10 +271,22 @@ class OptimizedPlyModel(ModelInterface):
             # Calculate percentile for first frame
             if self._calculated_max_scale_percentile is None:
                 with monitor.track("percentile_ms"):
-                    self._calculated_max_scale_percentile = torch.quantile(
-                        gstensor_gpu.scales.flatten(),
-                        GC.Filtering.DEFAULT_PERCENTILE,
-                    ).item()
+                    scales_flat = gstensor_gpu.scales.flatten()
+                    # torch.quantile has a limit (~16M elements), use sampling for large tensors
+                    max_quantile_size = 16_000_000
+                    if scales_flat.numel() > max_quantile_size:
+                        # Random sampling for large tensors
+                        indices = torch.randperm(scales_flat.numel(), device=scales_flat.device)[:max_quantile_size]
+                        scales_sample = scales_flat[indices]
+                        self._calculated_max_scale_percentile = torch.quantile(
+                            scales_sample,
+                            GC.Filtering.DEFAULT_PERCENTILE,
+                        ).item()
+                    else:
+                        self._calculated_max_scale_percentile = torch.quantile(
+                            scales_flat,
+                            GC.Filtering.DEFAULT_PERCENTILE,
+                        ).item()
 
         with monitor.track("color_ms"):
             # Only convert SH to RGB if no higher-order SH coefficients
@@ -371,6 +417,11 @@ class OptimizedPlyModel(ModelInterface):
         """
         frame_idx = int(round(normalized_time * (self.total_frames - 1)))
         frame_idx = max(0, min(frame_idx, self.total_frames - 1))
+
+        # Fast path: return cloned cached frame if same frame is requested
+        # Clone is necessary because downstream edits (apply_edits) modify in-place
+        if self._cached_frame_idx == frame_idx and self._cached_frame_data is not None:
+            return self._clone_frame_data(self._cached_frame_data)
 
         previous_frame_idx = self._last_requested_frame
         self._last_requested_frame = frame_idx
@@ -505,6 +556,10 @@ class OptimizedPlyModel(ModelInterface):
             )
             if is_cpu_mode:
                 self._schedule_cpu_prefetch(frame_idx, previous_frame_idx)
+
+            # Cache this frame for subsequent requests with same frame_idx
+            self._cached_frame_idx = frame_idx
+            self._cached_frame_data = processed_data
 
             return processed_data
 

@@ -206,6 +206,11 @@ input::placeholder { color: var(--text-tertiary); }
 /* GPU select */
 .gpu-select { width: 280px; }
 
+/* Input width variants (responsive - see mobile overrides) */
+.input-name { width: 150px; }
+.input-port { width: 80px; }
+.input-id { width: 100px; }
+
 /* Toggle buttons */
 .toggle-btn {
   height: var(--input-height);
@@ -220,6 +225,7 @@ input::placeholder { color: var(--text-tertiary); }
 }
 
 .toggle-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.toggle-btn:active { transform: scale(0.97); }
 .toggle-btn.active { background: var(--accent-muted); color: var(--accent); }
 
 /* Buttons */
@@ -862,6 +868,25 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Starting indicator */
+.starting-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #fde047;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.spinner-small {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(253, 224, 71, 0.3);
+  border-top-color: #fde047;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
 .stream-footer {
   display: flex;
   justify-content: space-between;
@@ -1079,21 +1104,58 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   header h1 { font-size: 14px; }
   .header-stats { font-size: 10px; }
 
-  /* Buttons - slightly larger touch targets on mobile */
+  /* Buttons - larger touch targets on mobile (min 44px for WCAG) */
+  button {
+    padding: 8px 12px;
+    font-size: 12px;
+    min-height: 44px;
+  }
+
   .btn-sm {
-    padding: 4px 8px;
-    font-size: 10px;
+    padding: 6px 10px;
+    font-size: 11px;
+    min-height: 44px;
+  }
+
+  .toggle-btn {
+    min-height: 44px;
+    padding: 0 12px;
+    font-size: 12px;
   }
 
   .btn-group .btn-icon {
-    width: 32px;
-    min-width: 32px;
-    flex: 0 0 32px;
+    width: 44px;
+    min-width: 44px;
+    flex: 0 0 44px;
+    min-height: 44px;
+  }
+
+  /* Inputs - full width and larger touch targets */
+  input, select {
+    min-height: 44px;
+    font-size: 14px;
+  }
+
+  .input-name,
+  .input-port,
+  .input-id,
+  .gpu-select {
+    width: 100%;
+  }
+
+  /* Labels - slightly larger for readability */
+  label {
+    font-size: 11px;
   }
 
   /* Console */
-  .console-content { font-size: 10px; }
+  .console-content { font-size: 11px; }
 
-  /* Card inner - reduce max height on mobile */
-  .card-inner { max-height: 250px; }
+  /* Card inner - adaptive height on mobile */
+  .card-inner { max-height: 200px; }
+
+  /* Breadcrumb - better scroll padding */
+  .breadcrumb {
+    padding-bottom: 8px;
+  }
 }

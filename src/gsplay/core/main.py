@@ -29,6 +29,8 @@ from pathlib import Path
 from typing import Annotated
 
 import torch
+# Pre-import torchvision to avoid circular import issues when imported from threads
+import torchvision  # noqa: F401
 import tyro
 
 from src.gsplay.core.app import UniversalGSPlay

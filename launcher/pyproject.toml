@@ -2,7 +2,7 @@
 name = "gsplay-launcher"
 version = "0.1.0"
 description = "FastAPI launcher for managing GSPlay instances"
-license = { text = "Apache-2.0" }
+license = { text = "AGPL-3.0" }
 requires-python = ">=3.12,<3.13"
 
 dependencies = [

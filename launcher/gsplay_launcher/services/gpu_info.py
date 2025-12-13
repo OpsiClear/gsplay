@@ -11,6 +11,20 @@ import psutil
 logger = logging.getLogger(__name__)
 
 
+def _safe_int(value: str, default: int = 0) -> int:
+    """Safely parse an integer from nvidia-smi output.
+
+    nvidia-smi can return '[N/A]' for unavailable values.
+    """
+    value = value.strip()
+    if not value or value == "[N/A]" or value.startswith("["):
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class SystemStats:
     """System CPU and memory statistics."""
@@ -105,7 +119,7 @@ class GpuInfoService:
             self._last_result = result
             return result
 
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError) as e:
             logger.warning("Failed to query GPU info: %s", e)
             return self._last_result
 
@@ -131,12 +145,12 @@ class GpuInfoService:
             if len(parts) >= 6:
                 gpus.append(
                     GpuInfo(
-                        index=int(parts[0]),
+                        index=_safe_int(parts[0]),
                         name=parts[1],
-                        memory_used=int(parts[2]),
-                        memory_total=int(parts[3]),
-                        utilization=int(parts[4]),
-                        temperature=int(parts[5]),
+                        memory_used=_safe_int(parts[2]),
+                        memory_total=_safe_int(parts[3]),
+                        utilization=_safe_int(parts[4]),
+                        temperature=_safe_int(parts[5]),
                     )
                 )
         return gpus

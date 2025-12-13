@@ -46,8 +46,10 @@ import viser
 import viser.transforms as vt
 from viser._messages import BackgroundImageMessage
 
+from src.gsplay.rendering.jpeg_encoder import get_cached_jpeg
+
 if TYPE_CHECKING:
-    from .viewer import CameraState, GSPlay
+    from .viewer import RenderCamera, GSPlay
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +116,7 @@ class RenderTask:
     """Task submitted to the renderer."""
 
     action: RenderAction
-    camera_state: "CameraState" | None = None
+    camera_state: "RenderCamera" | None = None
 
 
 @dataclasses.dataclass
@@ -358,11 +360,26 @@ class Renderer(threading.Thread):
                 else:
                     # No valid cached frame - skip to avoid showing stale content
                     continue
-            except Exception:
+            except Exception as e:
+                # Graceful error handling instead of fatal exit
+                self._consecutive_failures = getattr(self, "_consecutive_failures", 0) + 1
+                logger.error(f"Render error ({self._consecutive_failures}): {e}")
                 traceback.print_exc()
-                os._exit(1)
+
+                if self._consecutive_failures > 5:
+                    logger.warning("Multiple render failures, pausing briefly")
+                    time.sleep(1.0)
+                    self._consecutive_failures = 0
+
+                # Use cached frame if available
+                if self._cached_frame is not None:
+                    img, depth = self._cached_frame.img, self._cached_frame.depth
+                    _skip_gpu_broadcast = True
+                else:
+                    continue
             else:
-                # Normal render completed - safe to broadcast GPU frame
+                # Normal render completed - reset failure count
+                self._consecutive_failures = 0
                 _skip_gpu_broadcast = False
 
             self.client.scene.set_background_image(
@@ -413,12 +430,11 @@ class SharedRenderer(threading.Thread):
         self._may_interrupt_render = False
         self._old_version = False
 
-        # Shared camera state (updated by any client)
-        self._shared_camera: "CameraState | None" = None
-        self._camera_lock = threading.Lock()
-
         # Cache for last complete frame (see CachedFrame docstring)
         self._cached_frame: CachedFrame | None = None
+
+        # Rotation slider sync throttle
+        self._last_slider_sync: float = 0.0
 
         self._define_transitions()
 
@@ -441,21 +457,52 @@ class SharedRenderer(threading.Thread):
                 raise InterruptRenderException
         return self._may_interrupt_trace
 
-    def update_camera(self, camera_state: "CameraState") -> None:
-        """Update shared camera state.
+    def _get_render_camera(self) -> "RenderCamera | None":
+        """Get camera for rendering - from viser or headless state.
 
-        Parameters
-        ----------
-        camera_state : CameraState
-            New camera state from the client that moved.
+        Priority:
+        1. If viser clients exist: read from viser (source of truth)
+        2. If no clients: use headless camera state (for streaming)
         """
-        with self._camera_lock:
-            self._shared_camera = camera_state
+        clients = list(self.server.get_clients().values())
+        if clients:
+            return self.viewer.get_camera_state(clients[0])
+        # Fall back to headless camera for streaming without browser
+        return self._get_headless_camera()
 
-    def get_camera_state(self) -> "CameraState | None":
-        """Get the current shared camera state."""
-        with self._camera_lock:
-            return self._shared_camera
+    def _get_headless_camera(self) -> "RenderCamera | None":
+        """Build RenderCamera from headless state when no clients connected.
+
+        This enables continued rendering during rotation when viser window
+        is closed, allowing streaming to continue.
+        """
+        camera_ctrl = self._get_camera_controller()
+        if camera_ctrl is None:
+            return None
+        if camera_ctrl._headless_wxyz is None or camera_ctrl._headless_position is None:
+            return None
+
+        import viser.transforms as vt
+        from src.gsplay.nerfview.viewer import RenderCamera
+
+        wxyz = camera_ctrl._headless_wxyz
+        position = camera_ctrl._headless_position
+
+        # Build c2w using same construction as viewer.py
+        R = vt.SO3(wxyz).as_matrix()
+        c2w = np.concatenate(
+            [
+                np.concatenate([R, position[:, None]], 1),
+                [[0, 0, 0, 1]],
+            ],
+            0,
+        )
+
+        return RenderCamera(
+            fov=camera_ctrl._headless_fov,
+            aspect=camera_ctrl._headless_aspect,
+            c2w=c2w,
+        )
 
     def _broadcast_frame(self, depth: np.ndarray | None) -> None:
         """Broadcast pre-encoded JPEG frame to all clients.
@@ -468,12 +515,12 @@ class SharedRenderer(threading.Thread):
         depth : np.ndarray | None
             Depth array (optional).
         """
-        from src.gsplay.rendering.jpeg_encoder import get_cached_jpeg
-
         # Get pre-encoded JPEG bytes (encoded in renderer.py)
         jpeg_bytes = get_cached_jpeg()
         if jpeg_bytes is None:
+            logger.warning("[BROADCAST] No cached JPEG - frame not sent!")
             return
+
 
         # Encode depth if present
         depth_bytes = _encode_depth_png(depth)
@@ -562,34 +609,207 @@ class SharedRenderer(threading.Thread):
             return int(self.viewer.time_slider.value)
         return 0
 
+    def _get_camera_controller(self):
+        """Get camera controller from viewer's universal_viewer."""
+        if self.viewer.universal_viewer is None:
+            return None
+        ctrl = getattr(self.viewer.universal_viewer, "camera_controller", None)
+        # Debug: Log when rotation is active but we might miss it
+        if ctrl is not None and getattr(ctrl, "_rotation_active", False):
+            if not hasattr(self, "_last_rotation_log") or time.time() - self._last_rotation_log > 3:
+                logger.info(f"[ROTATION] Detected rotation_active=True on camera_controller")
+                self._last_rotation_log = time.time()
+        return ctrl
+
+    def _build_camera_state_for_rotation(self, camera_ctrl):
+        """Build camera state for rotation using the same construction as viewer.py.
+
+        This builds c2w using np.concatenate in the exact same way as
+        viewer.py's get_camera_state() to ensure identical memory layout.
+
+        Parameters
+        ----------
+        camera_ctrl : CameraController
+            Camera controller with current rotation state
+
+        Returns
+        -------
+        RenderCamera or None
+            Camera state for rendering, or None if unavailable
+        """
+        if camera_ctrl is None or camera_ctrl._state is None:
+            return self._get_render_camera()
+
+        from src.gsplay.nerfview.viewer import RenderCamera
+        from src.gsplay.rendering.quaternion_utils import quat_from_euler_deg
+
+        # Get spherical state thread-safely
+        with camera_ctrl._lock:
+            state = camera_ctrl._state
+            azimuth = state._azimuth
+            elevation = state._elevation
+            roll = state._roll
+            distance = state._distance
+            look_at = state.look_at.copy()
+            fov = state.fov
+            aspect = state.aspect
+
+        # Build quaternion from euler angles
+        wxyz = quat_from_euler_deg(azimuth, elevation, roll)
+
+        # Build rotation matrix using viser's SO3 (same as viewer.py)
+        R = vt.SO3(wxyz).as_matrix()
+
+        # Compute position from spherical
+        forward = -R[:, 2]
+        position = look_at.astype(np.float64) - forward * distance
+
+        # Build c2w using EXACT same construction as viewer.py's get_camera_state()
+        # This ensures identical memory layout and dtype
+        c2w = np.concatenate(
+            [
+                np.concatenate(
+                    [R, position[:, None]], 1
+                ),
+                [[0, 0, 0, 1]],
+            ],
+            0,
+        )
+
+        # Get fov/aspect from viser if defaults
+        viser_camera = self._get_render_camera()
+        if viser_camera is not None:
+            if abs(fov - 1.0) < 0.01 or abs(aspect - 1.0) < 0.01:
+                fov = viser_camera.fov
+                aspect = viser_camera.aspect
+        else:
+            if abs(fov - 1.0) < 0.01:
+                fov = 0.82
+            if abs(aspect - 1.0) < 0.01:
+                aspect = 16.0 / 9.0
+
+        return RenderCamera(
+            fov=fov,
+            aspect=aspect,
+            c2w=c2w,
+        )
+
+    def _get_camera_state_from_controller(self):
+        """Get camera state directly from CameraController.
+
+        DEPRECATED: Use _build_camera_state_for_rotation instead.
+        This method is kept for fallback compatibility.
+        """
+        camera_ctrl = self._get_camera_controller()
+        if camera_ctrl is None or camera_ctrl._state is None:
+            return self._get_render_camera()
+
+        from src.gsplay.nerfview.viewer import RenderCamera
+
+        with camera_ctrl._lock:
+            state = camera_ctrl._state
+            fov = state.fov
+            aspect = state.aspect
+            c2w = state.c2w.copy()
+
+        if np.isnan(c2w).any() or np.isinf(c2w).any():
+            viser_camera = self._get_render_camera()
+            if viser_camera is not None:
+                return viser_camera
+            logger.warning("Camera c2w invalid and no viser camera - using identity")
+            c2w = np.eye(4, dtype=np.float32)
+            c2w[2, 3] = 5.0
+
+        viser_camera = self._get_render_camera()
+        if viser_camera is not None:
+            if abs(fov - 1.0) < 0.01 or abs(aspect - 1.0) < 0.01:
+                fov = viser_camera.fov
+                aspect = viser_camera.aspect
+        else:
+            if abs(fov - 1.0) < 0.01:
+                fov = 0.82
+            if abs(aspect - 1.0) < 0.01:
+                aspect = 16.0 / 9.0
+
+        return RenderCamera(
+            fov=fov,
+            aspect=aspect,
+            c2w=c2w,
+        )
+
     def run(self):
-        """Main render loop - renders and broadcasts to all clients."""
+        """Main render loop - renders and broadcasts to all clients.
+
+        During rotation, polls camera state from CameraController at 20 FPS.
+        Otherwise waits for explicit render events from user camera movement.
+        """
         while self.running:
             while not self.is_prepared_fn():
                 time.sleep(0.1)
 
-            if not self._render_event.wait(0.2):
-                # No explicit task - check if we have a camera state for static render
-                camera_state = self.get_camera_state()
-                if camera_state is not None:
-                    self.submit(RenderTask("static", camera_state))
-                else:
+            # Check if rotation is active
+            camera_ctrl = self._get_camera_controller()
+            rotation_active = (
+                camera_ctrl is not None
+                and getattr(camera_ctrl, "_rotation_active", False)
+            )
+
+            if rotation_active:
+                # =====================================================================
+                # ROTATION RENDERING - VISER ROUND-TRIP REQUIRED
+                # =====================================================================
+                #
+                # We push wxyz directly to viser, then read back camera state.
+                # Building c2w locally produces black renders for unknown reasons,
+                # even though the matrices appear mathematically identical.
+                # =====================================================================
+
+                # Clear pending events, don't interrupt during rotation
+                self._render_event.clear()
+                self._may_interrupt_render = False
+
+                # Advance rotation using quaternion math (pushes directly to viser)
+                camera_ctrl.rotation_step()
+
+                # Throttle slider sync to every 250ms
+                current_time = time.perf_counter()
+                if current_time - self._last_slider_sync > 0.25:
+                    camera_ctrl.trigger_slider_sync()
+                    self._last_slider_sync = current_time
+
+                # rotation_step() already pushed to viser (or stored headless state)
+
+                # Get camera for rendering (from viser or headless state)
+                camera_state = self._get_render_camera()
+                if camera_state is None:
+                    time.sleep(0.05)
                     continue
 
-            self._render_event.clear()
-            task = self._task
-            if task is None:
-                continue
+                task = RenderTask("move", camera_state)
+                render_start = time.perf_counter()
+            else:
+                # Normal mode: wait for explicit render events or periodic static renders
+                if not self._render_event.wait(0.2):
+                    # Timeout - do a static render with fresh camera from viser
+                    camera_state = self._get_render_camera()
+                    if camera_state is not None:
+                        self.submit(RenderTask("static", camera_state))
+                    continue
+
+                self._render_event.clear()
+                task = self._task
+                if task is None:
+                    continue
 
             if self._state == "high" and task.action == "static":
                 continue
 
             self._state = self.transitions[self._state][task.action]
 
-            # Use shared camera state if task doesn't have one
+            # Use task's camera state, or get fresh from viser
             camera_state = task.camera_state
             if camera_state is None:
-                camera_state = self.get_camera_state()
+                camera_state = self._get_render_camera()
             if camera_state is None:
                 continue
 
@@ -650,15 +870,37 @@ class SharedRenderer(threading.Thread):
                 else:
                     # No valid cached frame - skip to avoid showing stale content
                     continue
-            except Exception:
+            except Exception as e:
+                # Graceful error handling instead of fatal exit
+                self._consecutive_failures = getattr(self, "_consecutive_failures", 0) + 1
+                logger.error(f"SharedRenderer error ({self._consecutive_failures}): {e}")
                 traceback.print_exc()
-                os._exit(1)
+
+                if self._consecutive_failures > 5:
+                    logger.warning("Multiple render failures, pausing briefly")
+                    time.sleep(1.0)
+                    self._consecutive_failures = 0
+
+                # Use cached frame if available
+                if self._cached_frame is not None:
+                    img, depth = self._cached_frame.img, self._cached_frame.depth
+                    _skip_gpu_broadcast = True
+                else:
+                    continue
             else:
-                # Normal render completed - safe to broadcast GPU frame
+                # Normal render completed - reset failure count
+                self._consecutive_failures = 0
                 _skip_gpu_broadcast = False
 
             # BROADCAST to ALL clients (pre-encoded JPEG)
-            # Skip if render was interrupted - cache may be incomplete/corrupt
             if not _skip_gpu_broadcast:
                 self._broadcast_frame(depth)
+
+            # Frame rate limiting for rotation mode (~20 FPS)
+            # This prevents overwhelming the GPU and ensures smooth rotation
+            if rotation_active:
+                elapsed = time.perf_counter() - render_start
+                target_frame_time = 0.05  # 20 FPS
+                if elapsed < target_frame_time:
+                    time.sleep(target_frame_time - elapsed)
 

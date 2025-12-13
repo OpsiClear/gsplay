@@ -87,7 +87,23 @@ def create_view_controls(
         setup_sync_func should be called after all controls are created to set up camera sync
     """
     # Flag to prevent circular updates (will be shared via closure)
-    updating_from_camera = [False]  # Use list for mutable closure
+    # Using timestamp approach because slider callbacks fire asynchronously
+    # after synchronous flag would be reset
+    _sync_until = [0.0]  # Block slider callbacks until this time
+
+    def is_user_interaction() -> bool:
+        """Check if this is a real user interaction (not programmatic sync).
+
+        Returns False (skip processing) if:
+        - Recently synced from camera (within cooldown window)
+        - App owns camera (rotation, presets, cooldown period)
+        """
+        # Block during sync cooldown (slider callbacks are async)
+        if time.perf_counter() < _sync_until[0]:
+            return False
+        if camera.is_app_controlled():
+            return False
+        return True
 
     # Zoom (logarithmic scale)
     zoom_min, zoom_max = -8.0, 3.0
@@ -110,16 +126,22 @@ def create_view_controls(
 
     @zoom_slider.on_update
     def _(_) -> None:
-        if updating_from_camera[0]:
+        if not is_user_interaction():
             return
-        camera.stop_auto_rotation()
         if camera.state is not None and camera.scene_bounds:
             extent = camera.scene_bounds.get("max_size", 10.0)
             default_distance = extent * 2.5
             zoom_multiplier = 2.0**zoom_slider.value
             new_distance = default_distance * zoom_multiplier
             with camera.state_lock:
-                camera.state.distance = new_distance
+                # Use set_from_orbit to update distance (distance is a computed property)
+                camera.state.set_from_orbit(
+                    camera.state.azimuth,
+                    camera.state.elevation,
+                    camera.state.roll,
+                    new_distance,
+                    camera.state.look_at,
+                )
             camera.apply_state_to_camera()
 
     # Manual orbit - initialize with current state values
@@ -142,8 +164,8 @@ def create_view_controls(
 
     elevation_slider = server.gui.add_slider(
         "Elevation",
-        min=-180.0,
-        max=180.0,
+        min=-89.0,
+        max=89.0,
         step=1.0,
         initial_value=initial_elevation,
     )
@@ -158,12 +180,10 @@ def create_view_controls(
 
     @azimuth_slider.on_update
     def _(_) -> None:
-        if updating_from_camera[0]:
+        if not is_user_interaction():
             return
-        camera.stop_auto_rotation()
         if camera.state is not None:
             with camera.state_lock:
-                # Use set_from_euler to update quaternion orientation
                 camera.state.set_from_euler(
                     azimuth_slider.value,
                     camera.state.elevation,
@@ -173,12 +193,10 @@ def create_view_controls(
 
     @elevation_slider.on_update
     def _(_) -> None:
-        if updating_from_camera[0]:
+        if not is_user_interaction():
             return
-        camera.stop_auto_rotation()
         if camera.state is not None:
             with camera.state_lock:
-                # Use set_from_euler to update quaternion orientation
                 camera.state.set_from_euler(
                     camera.state.azimuth,
                     elevation_slider.value,
@@ -188,12 +206,10 @@ def create_view_controls(
 
     @roll_slider.on_update
     def _(_) -> None:
-        if updating_from_camera[0]:
+        if not is_user_interaction():
             return
-        camera.stop_auto_rotation()
         if camera.state is not None:
             with camera.state_lock:
-                # Use set_from_euler to update quaternion orientation
                 camera.state.set_from_euler(
                     camera.state.azimuth,
                     camera.state.elevation,
@@ -236,9 +252,8 @@ def create_view_controls(
 
     @look_at_x_slider.on_update
     def _(_) -> None:
-        if updating_from_camera[0]:
+        if not is_user_interaction():
             return
-        camera.stop_auto_rotation()
         if camera.state is not None:
             with camera.state_lock:
                 camera.state.look_at[0] = look_at_x_slider.value
@@ -246,9 +261,8 @@ def create_view_controls(
 
     @look_at_y_slider.on_update
     def _(_) -> None:
-        if updating_from_camera[0]:
+        if not is_user_interaction():
             return
-        camera.stop_auto_rotation()
         if camera.state is not None:
             with camera.state_lock:
                 camera.state.look_at[1] = look_at_y_slider.value
@@ -256,9 +270,8 @@ def create_view_controls(
 
     @look_at_z_slider.on_update
     def _(_) -> None:
-        if updating_from_camera[0]:
+        if not is_user_interaction():
             return
-        camera.stop_auto_rotation()
         if camera.state is not None:
             with camera.state_lock:
                 camera.state.look_at[2] = look_at_z_slider.value
@@ -367,69 +380,82 @@ def create_view_controls(
         elif action == "Stop":
             camera.stop_auto_rotation()
 
-    # Register observer to sync UI when rotation state changes from any source
-    def on_rotation_state_change(is_active: bool, speed: float, axis: str) -> None:
-        """Sync rotation UI when state changes (e.g., from streaming API)."""
-        updating_rotation_ui[0] = True
-        try:
-            # Update speed slider to match current speed
-            rotation_speed_slider.value = abs(speed)
-
-            # Update button group to reflect current state
-            if not is_active:
-                rotate_buttons.value = "Stop"
-            elif speed > 0:
-                rotate_buttons.value = " ↻ "
-            else:
-                rotate_buttons.value = " ↺ "
-        except Exception as e:
-            logger.debug(f"Error syncing rotation UI: {e}")
-        finally:
-            updating_rotation_ui[0] = False
-
-    camera.add_rotation_observer(on_rotation_state_change)
+    # Note: Observer pattern was removed in refactoring. Rotation state sync
+    # is now handled directly via trigger_slider_sync() callback in CameraController.
 
     # Create slider sync function (will be registered with camera controller)
-    def sync_sliders_with_camera():
-        """Sync UI sliders with camera state (quaternion-based)."""
-        if camera.state is None:
+    def sync_sliders_with_camera(force: bool = False):
+        """Sync UI sliders with camera state.
+
+        Extracts azimuth/elevation/distance/look_at directly from viser's camera
+        (source of truth for what user sees). Roll comes from our state since
+        viser's orbit control doesn't preserve roll.
+
+        Parameters
+        ----------
+        force : bool
+            If True, bypass is_app_controlled() check (used by preset views)
+        """
+        # Skip during rotation to prevent feedback loop - rotation_step()
+        # writes directly to viser, slider sync would read stale values
+        if not force and camera.is_app_controlled():
+            return
+
+        # Get viser client for extracting current camera state
+        clients = list(server.get_clients().values())
+        if not clients:
             return
 
         try:
-            # Read Euler angles from quaternion state properties
-            with camera.state_lock:
-                azimuth = camera.state.azimuth
-                elevation = camera.state.elevation
-                roll = camera.state.roll
-                distance = camera.state.distance
-                look_at = camera.state.look_at.copy()
+            client = clients[0]
+            pos = np.asarray(client.camera.position, dtype=np.float64)
+            target = np.asarray(client.camera.look_at, dtype=np.float64)
 
-            # Update UI sliders (prevent circular updates)
-            updating_from_camera[0] = True
+            # Extract spherical coords from viser's camera (matches what user sees)
+            offset = pos - target
+            distance = float(np.linalg.norm(offset))
+            if distance < 1e-6:
+                return
 
-            # Clamp elevation to slider range (-180 to 180)
-            # With quaternions, elevation is already in -90 to 90 range
-            azimuth_slider.value = azimuth % 360.0
-            elevation_slider.value = np.clip(elevation, -180.0, 180.0)
-            roll_slider.value = np.clip(roll, -180.0, 180.0)
+            offset_norm = offset / distance
 
-            # Sync look_at (camera target) sliders
-            look_at_x_slider.value = np.clip(float(look_at[0]), -50.0, 50.0)
-            look_at_y_slider.value = np.clip(float(look_at[1]), -50.0, 50.0)
-            look_at_z_slider.value = np.clip(float(look_at[2]), -50.0, 50.0)
+            # Extract elevation from Y component
+            elevation = float(np.degrees(np.arcsin(np.clip(offset_norm[1], -1.0, 1.0))))
 
-            if camera.scene_bounds:
-                extent = camera.scene_bounds.get("max_size", 10.0)
-                default_distance = extent * 2.5
-                if default_distance > 0 and distance > 0:
-                    actual_zoom = distance / default_distance
-                    zoom_slider.value = np.clip(np.log2(actual_zoom), -8.0, 3.0)
+            # Extract azimuth from XZ plane
+            horiz_dist = np.sqrt(offset[0] ** 2 + offset[2] ** 2)
+            if horiz_dist > 1e-6:
+                azimuth = float(np.degrees(np.arctan2(offset[0], offset[2]))) % 360.0
+            else:
+                azimuth = azimuth_slider.value  # Keep current at poles
 
-            updating_from_camera[0] = False
+            # Roll comes from our state (viser doesn't preserve it)
+            roll = camera.state.roll if camera.state else 0.0
+
+            # Block slider callbacks for 100ms (async callbacks may fire later)
+            _sync_until[0] = time.perf_counter() + 0.1
+
+            # Update sliders (batched for proper GUI refresh)
+            with client.atomic():
+                azimuth_slider.value = azimuth
+                elevation_slider.value = np.clip(elevation, -89.0, 89.0)
+                roll_slider.value = np.clip(roll, -180.0, 180.0)
+
+                # Sync look_at (camera target) sliders
+                look_at_x_slider.value = np.clip(float(target[0]), -50.0, 50.0)
+                look_at_y_slider.value = np.clip(float(target[1]), -50.0, 50.0)
+                look_at_z_slider.value = np.clip(float(target[2]), -50.0, 50.0)
+
+                # Sync zoom slider
+                if camera.scene_bounds:
+                    extent = camera.scene_bounds.get("max_size", 10.0)
+                    default_distance = extent * 2.5
+                    if default_distance > 0 and distance > 0:
+                        actual_zoom = distance / default_distance
+                        zoom_slider.value = np.clip(np.log2(actual_zoom), -8.0, 3.0)
 
         except Exception as e:
             logger.debug(f"Error syncing camera sliders: {e}")
-            updating_from_camera[0] = False
 
     # Register slider sync callback with camera controller
     camera.set_slider_sync_callback(sync_sliders_with_camera)
@@ -448,6 +474,14 @@ def create_view_controls(
                         camera.apply_state_to_camera([client])
                         # Mark client as initialized - now on_update will sync state
                         camera.mark_client_initialized(client)
+                        # Sync fov/aspect from viser immediately after initialization.
+                        # This is needed because the on_update that fires during
+                        # apply_state_to_camera is skipped (client not initialized yet).
+                        # Without this, fov/aspect stay at defaults and rotation renders wrong.
+                        if camera._state is not None:
+                            with camera._lock:
+                                camera._state.fov = client.camera.fov
+                                camera._state.aspect = client.camera.aspect
                     except Exception:
                         pass  # Client may have disconnected
 
@@ -458,6 +492,11 @@ def create_view_controls(
                 # Sync state from user interactions (ignored until client initialized)
                 camera.sync_state_from_client(client)
                 sync_sliders_with_camera()
+
+        @server.on_client_disconnect
+        def _(client: viser.ClientHandle) -> None:
+            # Clean up client tracking to prevent memory leak
+            camera.remove_client(client)
 
     return (zoom_slider, azimuth_slider, elevation_slider, roll_slider, setup_camera_sync)
 

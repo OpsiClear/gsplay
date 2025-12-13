@@ -1,150 +1,54 @@
-# Contributing to Universal 4D Viewer
+# Contributing to gsplay
 
-Thank you for your interest in contributing! This document provides guidelines for contributing to the project.
+Thank you for your interest in contributing!
 
-## Code of Conduct
+## Attribution
 
-Be respectful, constructive, and professional in all interactions.
+This project builds upon excellent open-source work:
+- **[nerfview](https://github.com/hangg7/nerfview)** - The original NeRF viewer (MIT License)
+- **[viser](https://github.com/nerfstudio-project/viser)** - Web-based 3D visualization framework (MIT License)
 
-## Quick Start for Contributors
+## Copyright Agreement
+
+By submitting a pull request or any contribution to this project, you agree that:
+
+1. **Copyright Assignment**: All contributions become the exclusive property of **OpsiClear LLC**
+2. **License Grant**: Your contributions will be licensed under AGPL-3.0 as part of this project
+3. **Original Work**: You certify that your contribution is your original work or you have the right to submit it
+
+## Quick Start
 
 1. **Fork and Clone**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/universal_4d_viewer.git --recursive
-   cd universal_4d_viewer
+   git clone https://github.com/opsiclear/gsplay.git
+   cd gsplay
    ```
 
-2. **Set Up Development Environment**
+2. **Set Up Environment**
    ```bash
-   # Create virtual environment and install dependencies
-   uv venv
-   source .venv/bin/activate  # Windows: .\.venv\Scripts\Activate.ps1
-
-   # Install PyTorch for your CUDA version
-   uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-
-   # Install package in editable mode
+   uv venv && source .venv/bin/activate
+   uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
    uv pip install -e .
    ```
 
-3. **Create Feature Branch**
+3. **Create Branch, Make Changes, Submit PR**
    ```bash
-   git checkout -b feature/your-feature-name
+   git checkout -b feature/your-feature
+   # Make changes, add tests
+   git commit -m "Add your feature"
+   git push origin feature/your-feature
+   # Open PR on GitHub
    ```
 
-## Development Guidelines
+## Guidelines
 
-### Code Style
-
-- **Type Hints**: Use Python 3.10+ type syntax for all function signatures
-- **CLI Arguments**: Use `tyro` for type-safe CLI parsing
-- **Logging**: Use `logging` module instead of print statements
-- **Execution**: Always use `uv run` for script execution
-- **Imports**: Use absolute imports (e.g., `from src.domain.entities import GSTensor`)
-
-### Clean Architecture
-
-Follow the dependency rule: code can only depend on layers below it.
-
-```
-domain/          <- Core business logic (no external dependencies)
-  |
-models/ & infrastructure/ <- Application & I/O layers
-  |
-viewer/          <- Presentation layer
-```
-
-See [CLAUDE.md](../CLAUDE.md) for detailed architecture documentation.
-
-### Testing
-
-```bash
-# Run all tests
-pytest tests/ -v
-
-# With coverage
-pytest tests/ -v --cov=src --cov-report=html
-
-# Specific test file
-pytest tests/test_ply_loader.py -v
-```
-
-Write tests for:
-- New features and functionality
-- Bug fixes
-- Edge cases and error handling
-
-## Pull Request Process
-
-1. **Make Your Changes**
-   - Follow code style guidelines
-   - Add tests for new functionality
-   - Update docstrings and comments
-
-2. **Run Tests**
-   ```bash
-   pytest tests/ -v --cov=src
-   ```
-
-3. **Update Documentation**
-   - Update README.md for user-facing changes
-   - Update CLAUDE.md for architecture changes
-   - Add docstrings to new functions/classes
-
-4. **Commit Changes**
-   ```bash
-   git add .
-   git commit -m "Brief description of changes"
-   ```
-
-   Commit message format:
-   - Start with a verb (Add, Fix, Update, Remove)
-   - Keep first line under 72 characters
-   - Add details in the body if needed
-
-5. **Push and Create PR**
-   ```bash
-   git push origin feature/your-feature-name
-   ```
-
-   In your PR:
-   - Provide clear title and description
-   - Reference related issues
-   - Include screenshots/videos for UI changes
-   - List any breaking changes
-
-## Areas for Contribution
-
-### High Priority
-- Performance optimization (PLY loading, rendering, GPU utilization)
-- Documentation improvements (tutorials, examples, API docs)
-- Test coverage expansion
-- Better error handling and messages
-
-### Feature Ideas
-- Support for additional formats (OBJ, COLMAP, etc.)
-- Recording/export functionality
-- Quality presets for different hardware
-- Multi-GPU support
-- Web streaming optimization
-
-### Bug Fixes
-Check [GitHub Issues](https://github.com/OpsiClear/universal_4d_viewer/issues) for known bugs.
-
-## Common Gotchas
-
-1. **PyTorch First**: Install PyTorch before running `uv pip install -e .`
-2. **Hard Refresh**: If you see "viser Version mismatch", do Ctrl+Shift+R in browser
-3. **Clean Architecture**: Never import from outer layers into inner layers
-
-See [CLAUDE.md](../CLAUDE.md) for complete list of conventions and gotchas.
+- **Python 3.12+** with type hints
+- **Use `uv run`** for script execution
+- **Use logging** instead of print statements
+- **Follow Clean Architecture** - see [CLAUDE.md](../CLAUDE.md)
+- **Add tests** for new functionality
 
 ## Questions?
 
-- **Architecture & Conventions**: See [CLAUDE.md](../CLAUDE.md)
-- **User Documentation**: See [README.md](../README.md)
-- **Issues & Discussions**: [GitHub Issues](https://github.com/OpsiClear/universal_4d_viewer/issues)
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the MIT License.
+- Architecture: [CLAUDE.md](../CLAUDE.md)
+- Issues: [GitHub Issues](https://github.com/opsiclear/gsplay/issues)

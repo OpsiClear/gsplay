@@ -25,25 +25,18 @@ logger = logging.getLogger(__name__)
 
 def create_transform_controls(
     server: viser.ViserServer, config: GSPlayConfig
-) -> tuple[
-    viser.GuiSliderHandle,
-    viser.GuiSliderHandle,
-    viser.GuiSliderHandle,
-    viser.GuiSliderHandle,
-    viser.GuiSliderHandle,
-    viser.GuiSliderHandle,
-    viser.GuiSliderHandle,
-    viser.GuiButtonHandle,
-    viser.GuiButtonHandle,
-    viser.GuiButtonHandle,
-]:
+) -> dict:
     """
-    Create scene transform controls (scale and rotation).
+    Create scene transform controls (translation, scale, rotation, pivot).
 
     Uses world-axis rotation sliders (truly gimbal-lock free).
     Each rotation slider represents cumulative rotation around that world axis.
     Rotation deltas are applied via quaternion multiplication - no Euler
     angle decomposition means no singularities at any orientation.
+
+    Supports full gsmod 0.1.7 TransformValues:
+    - Per-axis scaling (scale_x, scale_y, scale_z)
+    - Rotation/scale pivot point (center)
 
     Parameters
     ----------
@@ -54,11 +47,12 @@ def create_transform_controls(
 
     Returns
     -------
-    tuple
-        (translation_x, translation_y, translation_z, global_scale,
-         rotate_x, rotate_y, rotate_z, reset_button, center_button)
+    dict
+        Dictionary of all transform control handles
     """
-    # Scene transformation (translation + scale + rotation combined)
+    controls = {}
+
+    # Get initial values from config
     translate = tuple(
         float(x)
         for x in getattr(
@@ -67,14 +61,17 @@ def create_transform_controls(
             getattr(config.transform_values, "translation", (0.0, 0.0, 0.0)),
         )
     )
-    scale_value = getattr(config.transform_values, "scale", 1.0)
+    scale_value = getattr(config.transform_values, "scale", (1.0, 1.0, 1.0))
+    center_value = getattr(config.transform_values, "center", None)
 
-    # Scene rotation sliders use world-axis rotation (truly gimbal-lock free)
-    # Each slider represents cumulative rotation around that world axis
-    # Rotation is applied incrementally via quaternion multiplication
-    # Initial values start at 0.0 (no rotation applied yet from sliders)
+    # Handle both scalar and tuple scale for backward compatibility
+    if isinstance(scale_value, (int, float)):
+        scale_xyz = (float(scale_value), float(scale_value), float(scale_value))
+    else:
+        scale_xyz = (float(scale_value[0]), float(scale_value[1]), float(scale_value[2]))
 
-    translation_x = server.gui.add_slider(
+    # === Translation Controls ===
+    controls["translation_x"] = server.gui.add_slider(
         "Translation X",
         min=-10.0,
         max=10.0,
@@ -83,7 +80,7 @@ def create_transform_controls(
         hint="Move scene along X axis",
     )
 
-    translation_y = server.gui.add_slider(
+    controls["translation_y"] = server.gui.add_slider(
         "Translation Y",
         min=-10.0,
         max=10.0,
@@ -92,7 +89,7 @@ def create_transform_controls(
         hint="Move scene along Y axis",
     )
 
-    translation_z = server.gui.add_slider(
+    controls["translation_z"] = server.gui.add_slider(
         "Translation Z",
         min=-10.0,
         max=10.0,
@@ -101,10 +98,37 @@ def create_transform_controls(
         hint="Move scene along Z axis",
     )
 
-    # World-axis rotation sliders (truly gimbal-lock free)
+    # === Per-axis Scale Controls (gsmod 0.1.7) ===
+    controls["scale_x"] = server.gui.add_slider(
+        "Scale X",
+        min=0.1,
+        max=5.0,
+        step=0.01,
+        initial_value=scale_xyz[0],
+        hint="Scale scene along X axis",
+    )
+
+    controls["scale_y"] = server.gui.add_slider(
+        "Scale Y",
+        min=0.1,
+        max=5.0,
+        step=0.01,
+        initial_value=scale_xyz[1],
+        hint="Scale scene along Y axis",
+    )
+
+    controls["scale_z"] = server.gui.add_slider(
+        "Scale Z",
+        min=0.1,
+        max=5.0,
+        step=0.01,
+        initial_value=scale_xyz[2],
+        hint="Scale scene along Z axis",
+    )
+
+    # === Rotation Controls (world-axis, gimbal-lock free) ===
     # Each slider accumulates rotation around that world axis via quaternion multiplication
-    # Changes are applied incrementally - no Euler angle decomposition needed
-    rotate_x = server.gui.add_slider(
+    controls["rotate_x"] = server.gui.add_slider(
         "Rotate X",
         min=-180.0,
         max=180.0,
@@ -113,7 +137,7 @@ def create_transform_controls(
         hint="Cumulative rotation around world X axis (pitch)",
     )
 
-    rotate_y = server.gui.add_slider(
+    controls["rotate_y"] = server.gui.add_slider(
         "Rotate Y",
         min=-180.0,
         max=180.0,
@@ -122,7 +146,7 @@ def create_transform_controls(
         hint="Cumulative rotation around world Y axis (yaw)",
     )
 
-    rotate_z = server.gui.add_slider(
+    controls["rotate_z"] = server.gui.add_slider(
         "Rotate Z",
         min=-180.0,
         max=180.0,
@@ -131,32 +155,71 @@ def create_transform_controls(
         hint="Cumulative rotation around world Z axis (roll)",
     )
 
-    global_scale = server.gui.add_slider(
-        "Scale",
-        min=0.1,
-        max=5.0,
-        step=0.01,
-        initial_value=float(scale_value)
-        if isinstance(scale_value, (int, float))
-        else scale_value[0],
-        hint="Uniformly scale entire scene (positions and Gaussian sizes)",
+    # === Pivot Point Controls (gsmod 0.1.7 center parameter) ===
+    # Initially hidden, shown when checkbox is enabled
+    controls["use_pivot"] = server.gui.add_checkbox(
+        "Use Pivot",
+        initial_value=center_value is not None,
+        hint="Enable pivot point for rotation/scaling (default: origin)",
     )
 
-    center_button = server.gui.add_button("Center", hint="Center scene at origin")
-    reset_button = server.gui.add_button("Reset")
+    pivot_visible = center_value is not None
+    pivot_x = center_value[0] if center_value else 0.0
+    pivot_y = center_value[1] if center_value else 0.0
+    pivot_z = center_value[2] if center_value else 0.0
 
-    logger.debug("Created transform controls")
-    return (
-        translation_x,
-        translation_y,
-        translation_z,
-        global_scale,
-        rotate_x,
-        rotate_y,
-        rotate_z,
-        reset_button,
-        center_button,
+    controls["pivot_x"] = server.gui.add_slider(
+        "Pivot X",
+        min=-20.0,
+        max=20.0,
+        step=0.1,
+        initial_value=pivot_x,
+        visible=pivot_visible,
+        hint="X coordinate of rotation/scale pivot point",
     )
+
+    controls["pivot_y"] = server.gui.add_slider(
+        "Pivot Y",
+        min=-20.0,
+        max=20.0,
+        step=0.1,
+        initial_value=pivot_y,
+        visible=pivot_visible,
+        hint="Y coordinate of rotation/scale pivot point",
+    )
+
+    controls["pivot_z"] = server.gui.add_slider(
+        "Pivot Z",
+        min=-20.0,
+        max=20.0,
+        step=0.1,
+        initial_value=pivot_z,
+        visible=pivot_visible,
+        hint="Z coordinate of rotation/scale pivot point",
+    )
+
+    controls["copy_center"] = server.gui.add_button(
+        "Bake View",
+        visible=True,
+        hint="Bake current camera view into model transform, then reset camera to default",
+    )
+
+    # Visibility toggle for pivot controls
+    @controls["use_pivot"].on_update
+    def _update_pivot_visibility(_):
+        visible = controls["use_pivot"].value
+        controls["pivot_x"].visible = visible
+        controls["pivot_y"].visible = visible
+        controls["pivot_z"].visible = visible
+
+    # === Action Buttons ===
+    controls["center_button"] = server.gui.add_button(
+        "Center", hint="Center scene at origin"
+    )
+    controls["reset_button"] = server.gui.add_button("Reset")
+
+    logger.debug("Created transform controls with per-axis scale and pivot support")
+    return controls
 
 
 def create_config_menu(
@@ -170,6 +233,7 @@ def create_config_menu(
     viser.GuiButtonGroupHandle,
     viser.GuiButtonGroupHandle,
     viser.GuiButtonGroupHandle,
+    viser.GuiSliderHandle,
 ]:
     """
     Create Config menu with processing mode, grid, world axis, and config export/import.
@@ -261,6 +325,50 @@ def create_config_menu(
             camera_controller.world_axis_handle.visible = is_visible
             camera_controller.world_axis_visible = is_visible
 
+    # Setup ambient-only lighting (default lights not used by other elements)
+    server.scene.enable_default_lights(False)
+    server.scene.add_light_ambient(
+        name="/ambient_light",
+        color=(255, 255, 255),
+        intensity=1.0,
+    )
+
+    # Reference sphere control - renders semi-transparent sphere at scene center
+    reference_sphere_slider = server.gui.add_slider(
+        "Reference",
+        min=0.0,
+        max=10.0,
+        step=0.1,
+        initial_value=0.0,
+        hint="Reference sphere radius (m). 0 = off.",
+    )
+
+    # Store sphere handle for persistence
+    _reference_sphere_handle = None
+
+    @reference_sphere_slider.on_update
+    def _(_) -> None:
+        nonlocal _reference_sphere_handle
+        radius = reference_sphere_slider.value
+
+        # Remove existing sphere if any
+        if _reference_sphere_handle is not None:
+            try:
+                _reference_sphere_handle.remove()
+            except Exception:
+                pass
+            _reference_sphere_handle = None
+
+        # Create new sphere if radius > 0
+        if radius > 0:
+            _reference_sphere_handle = server.scene.add_icosphere(
+                name="/reference_sphere",
+                radius=radius,
+                position=(0.0, 0.0, 0.0),
+                color=(255, 255, 255),  # White
+                opacity=0.3,
+            )
+
     # Config file path input
     config_path_input = server.gui.add_text(
         "Config Path",
@@ -300,6 +408,7 @@ def create_config_menu(
         config_buttons,
         grid_buttons,
         world_axis_buttons,
+        reference_sphere_slider,
     )
 
 
@@ -519,11 +628,11 @@ def create_volume_filter_controls(
         hint="Select spatial filter type",
     )
 
-    # Show filter visualization toggle
+    # Show filter visualization toggle (includes interactive handle)
     controls["show_filter_viz"] = server.gui.add_checkbox(
         "Show Filter",
         initial_value=False,
-        hint="Show wireframe visualization of the spatial filter",
+        hint="Show wireframe visualization with interactive drag handles",
     )
 
     # === Sphere Filter ===
@@ -531,67 +640,73 @@ def create_volume_filter_controls(
     sphere_radius = fv.sphere_radius if fv and fv.sphere_radius != float("inf") else 10.0
 
     controls["sphere_center_x"] = server.gui.add_slider(
-        "Sphere Center X", min=-20.0, max=20.0, step=0.1,
+        "Center X", min=-20.0, max=20.0, step=0.1,
         initial_value=sphere_center[0], visible=False,
     )
     controls["sphere_center_y"] = server.gui.add_slider(
-        "Sphere Center Y", min=-20.0, max=20.0, step=0.1,
+        "Center Y", min=-20.0, max=20.0, step=0.1,
         initial_value=sphere_center[1], visible=False,
     )
     controls["sphere_center_z"] = server.gui.add_slider(
-        "Sphere Center Z", min=-20.0, max=20.0, step=0.1,
+        "Center Z", min=-20.0, max=20.0, step=0.1,
         initial_value=sphere_center[2], visible=False,
     )
     controls["sphere_radius"] = server.gui.add_slider(
-        "Sphere Radius", min=0.01, max=50.0, step=0.1,
+        "Radius", min=0.01, max=50.0, step=0.1,
         initial_value=sphere_radius, visible=False,
-        hint="Radius of sphere filter",
     )
 
-    # === Box Filter ===
+    # === Box Filter (using center + size for intuitive behavior with rotation) ===
+    # Compute center and size from min/max if available
     box_min = fv.box_min if fv and fv.box_min else (-5.0, -5.0, -5.0)
     box_max = fv.box_max if fv and fv.box_max else (5.0, 5.0, 5.0)
+    box_center = ((box_min[0] + box_max[0]) / 2, (box_min[1] + box_max[1]) / 2, (box_min[2] + box_max[2]) / 2)
+    box_size = (box_max[0] - box_min[0], box_max[1] - box_min[1], box_max[2] - box_min[2])
 
-    controls["box_min_x"] = server.gui.add_slider(
-        "Box Min X", min=-20.0, max=20.0, step=0.1,
-        initial_value=box_min[0], visible=False,
+    controls["box_center_x"] = server.gui.add_slider(
+        "Center X", min=-20.0, max=20.0, step=0.1,
+        initial_value=box_center[0], visible=False,
+        hint="Box center X (rotation pivot)",
     )
-    controls["box_min_y"] = server.gui.add_slider(
-        "Box Min Y", min=-20.0, max=20.0, step=0.1,
-        initial_value=box_min[1], visible=False,
+    controls["box_center_y"] = server.gui.add_slider(
+        "Center Y", min=-20.0, max=20.0, step=0.1,
+        initial_value=box_center[1], visible=False,
+        hint="Box center Y (rotation pivot)",
     )
-    controls["box_min_z"] = server.gui.add_slider(
-        "Box Min Z", min=-20.0, max=20.0, step=0.1,
-        initial_value=box_min[2], visible=False,
+    controls["box_center_z"] = server.gui.add_slider(
+        "Center Z", min=-20.0, max=20.0, step=0.1,
+        initial_value=box_center[2], visible=False,
+        hint="Box center Z (rotation pivot)",
     )
-    controls["box_max_x"] = server.gui.add_slider(
-        "Box Max X", min=-20.0, max=20.0, step=0.1,
-        initial_value=box_max[0], visible=False,
+    controls["box_size_x"] = server.gui.add_slider(
+        "Size X", min=0.1, max=50.0, step=0.1,
+        initial_value=box_size[0], visible=False,
+        hint="Box extent along local X axis",
     )
-    controls["box_max_y"] = server.gui.add_slider(
-        "Box Max Y", min=-20.0, max=20.0, step=0.1,
-        initial_value=box_max[1], visible=False,
+    controls["box_size_y"] = server.gui.add_slider(
+        "Size Y", min=0.1, max=50.0, step=0.1,
+        initial_value=box_size[1], visible=False,
+        hint="Box extent along local Y axis",
     )
-    controls["box_max_z"] = server.gui.add_slider(
-        "Box Max Z", min=-20.0, max=20.0, step=0.1,
-        initial_value=box_max[2], visible=False,
+    controls["box_size_z"] = server.gui.add_slider(
+        "Size Z", min=0.1, max=50.0, step=0.1,
+        initial_value=box_size[2], visible=False,
+        hint="Box extent along local Z axis",
     )
+
     # Box rotation (degrees in UI, converted to radians internally)
     box_rot = fv.box_rot if fv and fv.box_rot else (0.0, 0.0, 0.0)
     controls["box_rot_x"] = server.gui.add_slider(
-        "Box Rot X", min=-180.0, max=180.0, step=1.0,
+        "Rot X", min=-180.0, max=180.0, step=1.0,
         initial_value=math.degrees(box_rot[0]) if box_rot else 0.0, visible=False,
-        hint="Box rotation around X axis (degrees)",
     )
     controls["box_rot_y"] = server.gui.add_slider(
-        "Box Rot Y", min=-180.0, max=180.0, step=1.0,
+        "Rot Y", min=-180.0, max=180.0, step=1.0,
         initial_value=math.degrees(box_rot[1]) if box_rot else 0.0, visible=False,
-        hint="Box rotation around Y axis (degrees)",
     )
     controls["box_rot_z"] = server.gui.add_slider(
-        "Box Rot Z", min=-180.0, max=180.0, step=1.0,
+        "Rot Z", min=-180.0, max=180.0, step=1.0,
         initial_value=math.degrees(box_rot[2]) if box_rot else 0.0, visible=False,
-        hint="Box rotation around Z axis (degrees)",
     )
 
     # === Ellipsoid Filter ===
@@ -599,101 +714,92 @@ def create_volume_filter_controls(
     ellipsoid_radii = fv.ellipsoid_radii if fv and fv.ellipsoid_radii else (5.0, 5.0, 5.0)
 
     controls["ellipsoid_center_x"] = server.gui.add_slider(
-        "Ellipsoid Center X", min=-20.0, max=20.0, step=0.1,
+        "Center X", min=-20.0, max=20.0, step=0.1,
         initial_value=ellipsoid_center[0], visible=False,
     )
     controls["ellipsoid_center_y"] = server.gui.add_slider(
-        "Ellipsoid Center Y", min=-20.0, max=20.0, step=0.1,
+        "Center Y", min=-20.0, max=20.0, step=0.1,
         initial_value=ellipsoid_center[1], visible=False,
     )
     controls["ellipsoid_center_z"] = server.gui.add_slider(
-        "Ellipsoid Center Z", min=-20.0, max=20.0, step=0.1,
+        "Center Z", min=-20.0, max=20.0, step=0.1,
         initial_value=ellipsoid_center[2], visible=False,
     )
     controls["ellipsoid_radius_x"] = server.gui.add_slider(
-        "Ellipsoid Radius X", min=0.01, max=50.0, step=0.1,
+        "Radius X", min=0.01, max=50.0, step=0.1,
         initial_value=ellipsoid_radii[0], visible=False,
     )
     controls["ellipsoid_radius_y"] = server.gui.add_slider(
-        "Ellipsoid Radius Y", min=0.01, max=50.0, step=0.1,
+        "Radius Y", min=0.01, max=50.0, step=0.1,
         initial_value=ellipsoid_radii[1], visible=False,
     )
     controls["ellipsoid_radius_z"] = server.gui.add_slider(
-        "Ellipsoid Radius Z", min=0.01, max=50.0, step=0.1,
+        "Radius Z", min=0.01, max=50.0, step=0.1,
         initial_value=ellipsoid_radii[2], visible=False,
     )
     # Ellipsoid rotation (degrees in UI, converted to radians internally)
     ellipsoid_rot = fv.ellipsoid_rot if fv and fv.ellipsoid_rot else (0.0, 0.0, 0.0)
     controls["ellipsoid_rot_x"] = server.gui.add_slider(
-        "Ellipsoid Rot X", min=-180.0, max=180.0, step=1.0,
+        "Rot X", min=-180.0, max=180.0, step=1.0,
         initial_value=math.degrees(ellipsoid_rot[0]) if ellipsoid_rot else 0.0, visible=False,
-        hint="Ellipsoid rotation around X axis (degrees)",
     )
     controls["ellipsoid_rot_y"] = server.gui.add_slider(
-        "Ellipsoid Rot Y", min=-180.0, max=180.0, step=1.0,
+        "Rot Y", min=-180.0, max=180.0, step=1.0,
         initial_value=math.degrees(ellipsoid_rot[1]) if ellipsoid_rot else 0.0, visible=False,
-        hint="Ellipsoid rotation around Y axis (degrees)",
     )
     controls["ellipsoid_rot_z"] = server.gui.add_slider(
-        "Ellipsoid Rot Z", min=-180.0, max=180.0, step=1.0,
+        "Rot Z", min=-180.0, max=180.0, step=1.0,
         initial_value=math.degrees(ellipsoid_rot[2]) if ellipsoid_rot else 0.0, visible=False,
-        hint="Ellipsoid rotation around Z axis (degrees)",
     )
 
     # === Frustum Filter ===
     frustum_fov_deg = (fv.frustum_fov if fv else 1.047) * 180.0 / 3.14159
 
     controls["frustum_fov"] = server.gui.add_slider(
-        "Frustum FOV", min=10.0, max=120.0, step=1.0,
+        "FOV", min=10.0, max=120.0, step=1.0,
         initial_value=frustum_fov_deg, visible=False,
         hint="Field of view in degrees",
     )
     controls["frustum_aspect"] = server.gui.add_slider(
-        "Frustum Aspect", min=0.5, max=3.0, step=0.1,
+        "Aspect", min=0.5, max=3.0, step=0.1,
         initial_value=fv.frustum_aspect if fv else 1.0, visible=False,
         hint="Width/height ratio",
     )
     controls["frustum_near"] = server.gui.add_slider(
-        "Frustum Near", min=0.01, max=10.0, step=0.01,
+        "Near", min=0.01, max=10.0, step=0.01,
         initial_value=fv.frustum_near if fv else 0.1, visible=False,
     )
     controls["frustum_far"] = server.gui.add_slider(
-        "Frustum Far", min=1.0, max=500.0, step=1.0,
+        "Far", min=1.0, max=500.0, step=1.0,
         initial_value=fv.frustum_far if fv else 100.0, visible=False,
     )
     # Frustum position (camera position)
     frustum_pos = fv.frustum_pos if fv and fv.frustum_pos else (0.0, 0.0, 0.0)
     controls["frustum_pos_x"] = server.gui.add_slider(
-        "Frustum Pos X", min=-50.0, max=50.0, step=0.1,
+        "Pos X", min=-50.0, max=50.0, step=0.1,
         initial_value=frustum_pos[0] if frustum_pos else 0.0, visible=False,
-        hint="Camera X position",
     )
     controls["frustum_pos_y"] = server.gui.add_slider(
-        "Frustum Pos Y", min=-50.0, max=50.0, step=0.1,
+        "Pos Y", min=-50.0, max=50.0, step=0.1,
         initial_value=frustum_pos[1] if frustum_pos else 0.0, visible=False,
-        hint="Camera Y position",
     )
     controls["frustum_pos_z"] = server.gui.add_slider(
-        "Frustum Pos Z", min=-50.0, max=50.0, step=0.1,
+        "Pos Z", min=-50.0, max=50.0, step=0.1,
         initial_value=frustum_pos[2] if frustum_pos else 0.0, visible=False,
-        hint="Camera Z position",
     )
     # Frustum rotation (camera rotation as Euler angles in degrees)
     frustum_rot = fv.frustum_rot if fv and fv.frustum_rot else (0.0, 0.0, 0.0)
     controls["frustum_rot_x"] = server.gui.add_slider(
-        "Frustum Rot X", min=-180.0, max=180.0, step=1.0,
+        "Rot X", min=-180.0, max=180.0, step=1.0,
         initial_value=math.degrees(frustum_rot[0]) if frustum_rot else 0.0, visible=False,
-        hint="Camera pitch (degrees)",
     )
     controls["frustum_rot_y"] = server.gui.add_slider(
-        "Frustum Rot Y", min=-180.0, max=180.0, step=1.0,
+        "Rot Y", min=-180.0, max=180.0, step=1.0,
         initial_value=math.degrees(frustum_rot[1]) if frustum_rot else 0.0, visible=False,
-        hint="Camera yaw (degrees)",
     )
     controls["frustum_rot_z"] = server.gui.add_slider(
-        "Frustum Rot Z", min=-180.0, max=180.0, step=1.0,
+        "Rot Z", min=-180.0, max=180.0, step=1.0,
         initial_value=math.degrees(frustum_rot[2]) if frustum_rot else 0.0, visible=False,
-        hint="Camera roll (degrees)",
     )
     # Button to copy current camera state
     controls["frustum_use_camera"] = server.gui.add_button(
@@ -706,6 +812,18 @@ def create_volume_filter_controls(
         "CPU Filtering",
         initial_value=config.volume_filter.use_cpu_filtering,
         visible=False,
+    )
+
+    # Button to compute scene center from Gaussian mean
+    controls["use_scene_center"] = server.gui.add_button(
+        "Use Scene Center", visible=False,
+        hint="Set filter center to mean of Gaussian positions",
+    )
+
+    # Button to align filter rotation to camera up direction
+    controls["align_to_camera_up"] = server.gui.add_button(
+        "Align to Camera Up", visible=False,
+        hint="Rotate filter so Z-axis aligns with camera up direction",
     )
 
     controls["reset_button"] = server.gui.add_button("Reset")
@@ -724,12 +842,12 @@ def create_volume_filter_controls(
 
         # Box controls
         box_visible = spatial_type == "Box"
-        controls["box_min_x"].visible = box_visible
-        controls["box_min_y"].visible = box_visible
-        controls["box_min_z"].visible = box_visible
-        controls["box_max_x"].visible = box_visible
-        controls["box_max_y"].visible = box_visible
-        controls["box_max_z"].visible = box_visible
+        controls["box_center_x"].visible = box_visible
+        controls["box_center_y"].visible = box_visible
+        controls["box_center_z"].visible = box_visible
+        controls["box_size_x"].visible = box_visible
+        controls["box_size_y"].visible = box_visible
+        controls["box_size_z"].visible = box_visible
         controls["box_rot_x"].visible = box_visible
         controls["box_rot_y"].visible = box_visible
         controls["box_rot_z"].visible = box_visible
@@ -759,6 +877,14 @@ def create_volume_filter_controls(
         controls["frustum_rot_y"].visible = frustum_visible
         controls["frustum_rot_z"].visible = frustum_visible
         controls["frustum_use_camera"].visible = frustum_visible
+
+        # "Use Scene Center" button visible for Sphere, Box, Ellipsoid (filters with center)
+        center_applicable = spatial_type in ("Sphere", "Box", "Ellipsoid")
+        controls["use_scene_center"].visible = center_applicable
+
+        # "Align to Camera Up" button visible for Box, Ellipsoid (filters with rotation)
+        rotation_applicable = spatial_type in ("Box", "Ellipsoid")
+        controls["align_to_camera_up"].visible = rotation_applicable
 
     logger.debug("Created volume filter controls with full gsmod support")
     return controls
@@ -1114,6 +1240,7 @@ def setup_ui_layout(
     export_ply_button = None
     config_path_input = None
     config_buttons = None
+    reference_sphere_slider = None
 
     if compact_ui:
         # Compact mode: wrap tab groups in collapsible folders
@@ -1146,6 +1273,7 @@ def setup_ui_layout(
                     cfg_buttons,
                     grid_buttons,
                     world_axis_buttons,
+                    reference_sphere_slider,
                 ) = create_config_menu(server, config, camera_controller, viewer_app=viewer_app)
                 # Only expose config save controls if not view-only
                 if not view_only:
@@ -1176,27 +1304,17 @@ def setup_ui_layout(
                         export_ply_button,
                     ) = create_export_menu(server, config)
 
-        # Edit folder containing Transform/Filter/Color/Color+ tabs
+        # Edit folder containing Filter/Transform/Color/Color+ tabs
         with server.gui.add_folder("Edit"):
             edit_tabs = server.gui.add_tab_group()
-
-            # Transform tab
-            with edit_tabs.add_tab("Transform", icon=None):
-                (
-                    translation_x,
-                    translation_y,
-                    translation_z,
-                    global_scale,
-                    rotate_x,
-                    rotate_y,
-                    rotate_z,
-                    reset_pose,
-                    center_button,
-                ) = create_transform_controls(server, config)
 
             # Filter tab
             with edit_tabs.add_tab("Filter", icon=None):
                 filter_controls = create_volume_filter_controls(server, config)
+
+            # Transform tab
+            with edit_tabs.add_tab("Transform", icon=None):
+                transform_controls = create_transform_controls(server, config)
 
             # Color tab (basic)
             with edit_tabs.add_tab("Color", icon=None):
@@ -1236,6 +1354,7 @@ def setup_ui_layout(
                 cfg_buttons,
                 grid_buttons,
                 world_axis_buttons,
+                reference_sphere_slider,
             ) = create_config_menu(server, config, camera_controller, viewer_app=viewer_app)
             # Only expose config save controls if not view-only
             if not view_only:
@@ -1269,26 +1388,16 @@ def setup_ui_layout(
         # Spacer between tab groups
         server.gui.add_markdown(content=" ")
 
-        # Create tab group for Transform, Filter, and Color controls
+        # Create tab group for Filter, Transform, and Color controls
         edit_tabs = server.gui.add_tab_group()
-
-        # Transform tab
-        with edit_tabs.add_tab("Transform", icon=None):
-            (
-                translation_x,
-                translation_y,
-                translation_z,
-                global_scale,
-                rotate_x,
-                rotate_y,
-                rotate_z,
-                reset_pose,
-                center_button,
-            ) = create_transform_controls(server, config)
 
         # Filter tab
         with edit_tabs.add_tab("Filter", icon=None):
             filter_controls = create_volume_filter_controls(server, config)
+
+        # Transform tab
+        with edit_tabs.add_tab("Transform", icon=None):
+            transform_controls = create_transform_controls(server, config)
 
         # Color tab (basic)
         with edit_tabs.add_tab("Color", icon=None):
@@ -1340,16 +1449,25 @@ def setup_ui_layout(
         highlight_tint_hue_slider=color_advanced_controls["highlight_tint_hue"],
         highlight_tint_sat_slider=color_advanced_controls["highlight_tint_sat"],
         reset_colors_advanced_button=color_advanced_controls["reset_button"],
-        # Scene transforms
-        translation_x_slider=translation_x,
-        translation_y_slider=translation_y,
-        translation_z_slider=translation_z,
-        global_scale_slider=global_scale,
-        rotate_x_slider=rotate_x,
-        rotate_y_slider=rotate_y,
-        rotate_z_slider=rotate_z,
-        reset_pose_button=reset_pose,
-        center_button=center_button,
+        # Scene transforms (from transform_controls dict)
+        translation_x_slider=transform_controls["translation_x"],
+        translation_y_slider=transform_controls["translation_y"],
+        translation_z_slider=transform_controls["translation_z"],
+        scale_x_slider=transform_controls["scale_x"],
+        scale_y_slider=transform_controls["scale_y"],
+        scale_z_slider=transform_controls["scale_z"],
+        rotate_x_slider=transform_controls["rotate_x"],
+        rotate_y_slider=transform_controls["rotate_y"],
+        rotate_z_slider=transform_controls["rotate_z"],
+        # Pivot point controls (gsmod 0.1.7 center)
+        use_pivot_checkbox=transform_controls["use_pivot"],
+        pivot_x_slider=transform_controls["pivot_x"],
+        pivot_y_slider=transform_controls["pivot_y"],
+        pivot_z_slider=transform_controls["pivot_z"],
+        copy_center_button=transform_controls["copy_center"],
+        # Action buttons
+        reset_pose_button=transform_controls["reset_button"],
+        center_button=transform_controls["center_button"],
         # Volume filtering (from dict) - basic
         min_opacity_slider=filter_controls["min_opacity"],
         max_opacity_slider=filter_controls["max_opacity"],
@@ -1362,13 +1480,13 @@ def setup_ui_layout(
         sphere_center_y=filter_controls["sphere_center_y"],
         sphere_center_z=filter_controls["sphere_center_z"],
         sphere_radius=filter_controls["sphere_radius"],
-        # Box filter
-        box_min_x=filter_controls["box_min_x"],
-        box_min_y=filter_controls["box_min_y"],
-        box_min_z=filter_controls["box_min_z"],
-        box_max_x=filter_controls["box_max_x"],
-        box_max_y=filter_controls["box_max_y"],
-        box_max_z=filter_controls["box_max_z"],
+        # Box filter (center + size)
+        box_center_x=filter_controls["box_center_x"],
+        box_center_y=filter_controls["box_center_y"],
+        box_center_z=filter_controls["box_center_z"],
+        box_size_x=filter_controls["box_size_x"],
+        box_size_y=filter_controls["box_size_y"],
+        box_size_z=filter_controls["box_size_z"],
         box_rot_x=filter_controls["box_rot_x"],
         box_rot_y=filter_controls["box_rot_y"],
         box_rot_z=filter_controls["box_rot_z"],
@@ -1394,6 +1512,10 @@ def setup_ui_layout(
         frustum_rot_y=filter_controls["frustum_rot_y"],
         frustum_rot_z=filter_controls["frustum_rot_z"],
         frustum_use_camera=filter_controls["frustum_use_camera"],
+        # Button to compute scene center from Gaussian mean
+        use_scene_center=filter_controls["use_scene_center"],
+        # Button to align filter rotation to camera up direction
+        align_to_camera_up=filter_controls["align_to_camera_up"],
         # Other filter controls
         processing_mode_dropdown=processing_mode_dropdown,
         use_cpu_filtering_checkbox=filter_controls["use_cpu_filtering"],
@@ -1408,6 +1530,7 @@ def setup_ui_layout(
         config_path_input=config_path_input,
         config_buttons=config_buttons,
         load_config_button=load_config_button,
+        reference_sphere_slider=reference_sphere_slider,
         # Instance control
         terminate_button=terminate_button,
     )

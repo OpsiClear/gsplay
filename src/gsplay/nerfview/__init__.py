@@ -11,10 +11,10 @@ from .render_panel import (
     apply_float_colormap,
 )
 from .version import __version__
-from .viewer import VIEWER_LOCK, CameraState, GSPlay, with_viewer_lock
+from .viewer import VIEWER_LOCK, RenderCamera, GSPlay, with_viewer_lock
 
 __all__ = [
-    "CameraState",
+    "RenderCamera",
     "RenderTabState",
     "GSPlay",
     "VIEWER_LOCK",

@@ -2,12 +2,25 @@
  * Launch settings component with GPU selector and options.
  */
 
-import { Component, For, Show } from "solid-js";
+import { Component, For, Show, createEffect, on } from "solid-js";
 import { gpuStore, launchSettingsStore, browseStore } from "../stores/app";
 
 export const LaunchSettings: Component = () => {
   const gpus = () => gpuStore.gpus();
   const config = () => browseStore.config();
+  let selectRef: HTMLSelectElement | undefined;
+
+  // Re-apply selection after GPU list updates (prevents browser resetting to first option)
+  createEffect(
+    on(gpus, () => {
+      // Use queueMicrotask to ensure DOM is updated before re-applying value
+      queueMicrotask(() => {
+        if (selectRef) {
+          selectRef.value = String(gpuStore.selectedGpu());
+        }
+      });
+    }, { defer: true })
+  );
 
   return (
     <div class="card">
@@ -17,6 +30,7 @@ export const LaunchSettings: Component = () => {
           <div class="form-group">
             <label>GPU</label>
             <select
+              ref={selectRef}
               class="gpu-select"
               value={gpuStore.selectedGpu()}
               onChange={(e) => gpuStore.setSelectedGpu(parseInt(e.currentTarget.value))}
@@ -48,7 +62,7 @@ export const LaunchSettings: Component = () => {
             <input
               type="text"
               placeholder="Auto"
-              style={{ width: "150px" }}
+              class="input-name"
               value={launchSettingsStore.instanceName()}
               onInput={(e) => launchSettingsStore.setInstanceName(e.currentTarget.value)}
             />
@@ -59,7 +73,7 @@ export const LaunchSettings: Component = () => {
             <input
               type="number"
               placeholder="Auto"
-              style={{ width: "80px" }}
+              class="input-port"
               value={launchSettingsStore.port() ?? ""}
               onInput={(e) => {
                 const val = e.currentTarget.value;
@@ -73,7 +87,7 @@ export const LaunchSettings: Component = () => {
             <input
               type="text"
               placeholder="Auto"
-              style={{ width: "100px" }}
+              class="input-id"
               value={launchSettingsStore.viewerId()}
               onInput={(e) => launchSettingsStore.setViewerId(e.currentTarget.value)}
               title="Custom ID for /v/{id}/ URL path"
@@ -85,7 +99,7 @@ export const LaunchSettings: Component = () => {
             <input
               type="text"
               placeholder="Auto"
-              style={{ width: "100px" }}
+              class="input-id"
               value={launchSettingsStore.streamToken()}
               onInput={(e) => launchSettingsStore.setStreamToken(e.currentTarget.value)}
               title="Custom token for /s/{token}/ URL path"

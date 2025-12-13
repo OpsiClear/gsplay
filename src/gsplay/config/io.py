@@ -214,7 +214,8 @@ def export_viewer_config(
         "rotate",
         getattr(config.transform_values, "rotation", (0.0, 0.0, 0.0, 1.0)),
     )
-    scale_value = getattr(config.transform_values, "scale", 1.0)
+    scale_value = getattr(config.transform_values, "scale", (1.0, 1.0, 1.0))
+    center_value = getattr(config.transform_values, "center", None)
 
     # Normalize quaternion to have w >= 0 for consistent Euler conversion on import
     # (q and -q represent the same rotation)
@@ -223,13 +224,26 @@ def export_viewer_config(
     if len(rotate_list) == 4 and rotate_list[3] < 0:
         rotate_list = [-v for v in rotate_list]
 
+    # Convert scale to list (gsmod 0.1.7 uses per-axis scale)
+    if isinstance(scale_value, (int, float)):
+        scale_list = [float(scale_value), float(scale_value), float(scale_value)]
+    elif hasattr(scale_value, "tolist"):
+        scale_list = scale_value.tolist()
+    else:
+        scale_list = list(scale_value)
+
     export_data["transform_values"] = {
         "translate": translate.tolist() if hasattr(translate, "tolist") else list(translate),
         "rotate": rotate_list,
-        "scale": float(scale_value)
-        if isinstance(scale_value, (int, float))
-        else scale_value.tolist(),
+        "scale": scale_list,
     }
+
+    # Export center/pivot point if set (gsmod 0.1.7)
+    if center_value is not None:
+        if hasattr(center_value, "tolist"):
+            export_data["transform_values"]["center"] = center_value.tolist()
+        else:
+            export_data["transform_values"]["center"] = list(center_value)
 
     # Export color values
     export_data["color_values"] = asdict(config.color_values)
@@ -390,14 +404,25 @@ def import_viewer_config(
                     logger.debug("Converted legacy Euler angles to quaternion")
 
                 # Import distance and look_at (common to both versions)
+                # Note: distance is a computed property, so we use set_from_orbit
+                new_distance = None
                 if "distance" in camera_data:
-                    camera_controller.state.distance = float(camera_data["distance"])
+                    new_distance = float(camera_data["distance"])
                 if "look_at" in camera_data:
                     look_at = camera_data["look_at"]
                     if isinstance(look_at, (list, tuple)):
                         camera_controller.state.look_at = np.array(
                             look_at, dtype=np.float64
                         )
+                # Apply distance via set_from_orbit (distance is read-only property)
+                if new_distance is not None:
+                    camera_controller.state.set_from_orbit(
+                        camera_controller.state.azimuth,
+                        camera_controller.state.elevation,
+                        camera_controller.state.roll,
+                        new_distance,
+                        camera_controller.state.look_at,
+                    )
 
             # Log the state we're about to apply
             logger.debug(
@@ -432,23 +457,39 @@ def import_viewer_config(
         tv_data = import_data["transform_values"]
         translate = np.array(tv_data.get("translate", [0.0, 0.0, 0.0]), dtype=np.float32)
         rotate = np.array(tv_data.get("rotate", [0.0, 0.0, 0.0, 1.0]), dtype=np.float32)
-        scale_value = tv_data.get("scale", 1.0)
+        scale_value = tv_data.get("scale", (1.0, 1.0, 1.0))
+        center_value = tv_data.get("center", None)
+
+        # Handle scalar scale for backward compatibility
+        if isinstance(scale_value, (int, float)):
+            scale_tuple = (float(scale_value), float(scale_value), float(scale_value))
+        else:
+            scale_tuple = tuple(scale_value)
+
+        # Handle center/pivot point (gsmod 0.1.7)
+        center_tuple = tuple(center_value) if center_value is not None else None
+
         try:
             config.transform_values = TransformValues(
                 translate=translate,
                 rotate=rotate,
-                scale=scale_value,
+                scale=scale_tuple,
+                center=center_tuple,
             )
         except TypeError:
             config.transform_values = TransformValues(
                 translation=translate,
                 rotation=rotate,
-                scale=scale_value,
+                scale=scale_tuple,
+                center=center_tuple,
             )
 
         # Update UI sliders to match imported transform values
         if ui_handles is not None:
             ui_handles.set_transform_values(config.transform_values)
+            # Lock filter controls if transform is active
+            if ui_handles.is_transform_active():
+                ui_handles.set_filter_controls_disabled(True)
 
         logger.info("Imported transform values from config")
     elif "scene_transform" in import_data:
@@ -495,6 +536,9 @@ def import_viewer_config(
         # Update UI sliders to match migrated transform values
         if ui_handles is not None:
             ui_handles.set_transform_values(config.transform_values)
+            # Lock filter controls if transform is active
+            if ui_handles.is_transform_active():
+                ui_handles.set_filter_controls_disabled(True)
 
         logger.info("Migrated old scene_transform to transform_values")
 

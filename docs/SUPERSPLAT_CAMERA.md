@@ -1,10 +1,17 @@
-# SuperSplat-Style Camera Controls
+# Camera System Documentation
 
-This document describes the SuperSplat-inspired camera controls added to the Universal 4D Viewer.
+This document describes the camera system in gsplay, including controls, architecture, and implementation details.
 
 ## Overview
 
-The viewer now includes enhanced camera controls inspired by [PlayCanvas SuperSplat](https://github.com/playcanvas/supersplat), making navigation more intuitive for examining 3D Gaussian Splat scenes.
+The viewer uses a mode-based camera ownership system with spherical coordinates as the primary representation. The camera supports orbit controls, preset views, continuous rotation, and a "Bake View" feature for model alignment.
+
+### Attribution
+
+This project builds upon:
+- **[nerfview](https://github.com/hangg7/nerfview)** - The original NeRF viewer that provided the foundation for our rendering architecture
+- **[viser](https://github.com/nerfstudio-project/viser)** - The web-based 3D visualization framework powering the UI and camera controls
+- **[PlayCanvas SuperSplat](https://github.com/playcanvas/supersplat)** - Inspiration for camera control patterns
 
 ## Features
 
@@ -20,127 +27,160 @@ The viewer now includes enhanced camera controls inspired by [PlayCanvas SuperSp
 
 ### 3. **Preset Camera Views**
 - Quickly jump to standard viewpoints:
-  - **Top**: View from directly above
-  - **Front**: View from the front
-  - **Right**: View from the right side
-  - **Iso**: Isometric view (45-degree angle)
-- Use the button group in the "Camera (SuperSplat Style)" panel
+  - **Top**: View from directly above (elevation 89°)
+  - **Bottom**: View from directly below (elevation -89°)
+  - **Front**: View from front (azimuth 0°)
+  - **Back**: View from back (azimuth 180°)
+  - **Left**: View from left (azimuth 270°)
+  - **Right**: View from right (azimuth 90°)
+  - **Iso**: Isometric view (azimuth 45°, elevation 30°)
 
-### 4. **FOV Adjustment**
-- Adjust field of view (10° - 120°)
-- Slider in the camera controls panel
-- Real-time update for all connected clients
+### 4. **Continuous Rotation**
+- Clockwise/counter-clockwise rotation around Y axis
+- Uses quaternion math to avoid gimbal lock
+- Configurable speed (degrees per second)
+- Works in headless mode (no browser connected)
 
-### 5. **Built-in Orbit Controls**
+### 5. **Bake View**
+- Rotates/translates the model to preserve the current view
+- When camera resets to default isometric position, the model appears unchanged
+- Uses view preservation formula: `R_delta = R_default @ R_current.T`
+
+### 6. **Built-in Orbit Controls**
 - **Left Mouse Button**: Orbit around focal point
 - **Right Mouse Button**: Pan camera
 - **Mouse Wheel**: Zoom in/out
 - These are provided by viser's built-in three.js controls
 
-## Usage
+## Architecture
 
-The SuperSplat camera controls are automatically initialized when you start the viewer:
+### Mode-Based Camera Ownership
 
-```bash
-uv run src/viewer/main.py --config ./export_with_edits
+The camera operates in two modes to eliminate race conditions:
+
+```
+1. USER_MODE: Viser owns the camera
+   - User can orbit/pan/zoom with mouse
+   - We sync FROM viser to update our spherical state
+   - Slider changes are processed normally
+
+2. APP_MODE: We own the camera
+   - During rotation, presets, programmatic changes
+   - We push TO viser, ignore callbacks FROM viser
+   - Slider callbacks are blocked
 ```
 
-The controls appear in a new "Camera (SuperSplat Style)" panel in the UI.
+Mode transitions:
+- `start_auto_rotation()` → APP_MODE
+- `stop_auto_rotation()` → USER_MODE (with brief cooldown)
+- `set_preset_view()` → APP_MODE briefly, then USER_MODE
 
-## Implementation Details
+### Coordinate System
 
-### What's Implemented
+**Spherical Coordinates (Primary Representation):**
+- **Azimuth**: Horizontal angle around Y axis (0-360°, 0° = looking from +Z)
+- **Elevation**: Vertical angle (-89° to 89°, positive = camera above target)
+- **Roll**: Camera tilt around view axis (-180° to 180°)
+- **Distance**: Distance from look_at target
 
-The implementation uses viser's existing API (`client.camera` properties):
-- `camera.position` - Camera world position
-- `camera.look_at` - Target point
-- `camera.up_direction` - Up vector
-- `camera.fov` - Field of view in radians
+**Quaternions:**
+- All quaternions use **wxyz format** (w, x, y, z) to match viser's convention
+- w is the scalar component, (x, y, z) is the vector component
 
-### Current Limitations (viser v1.0.15)
+### Viser Look-At Convention (CRITICAL)
 
-**Not Available:**
-- ❌ Keyboard controls (arrow keys for fly mode)
-- ❌ Double-click to set focal point
-- ❌ Real-time keyboard event handling
+Viser uses a **different look-at convention** than standard OpenGL:
 
-These features require client-side (JavaScript) event handling that viser v1.0.15 doesn't support. Future viser versions may add:
-- `ScenePointerEventType = Literal["click", "rect-select", "double-click"]`
-- Keyboard event messages
+**Viser convention:**
+```python
+forward = normalize(look_at - position)  # toward target
+right = normalize(cross(forward, up_hint))
+up = cross(forward, right)  # NOTE: forward × right, NOT right × forward!
+R = [right, up, forward]  # camera looks down +Z toward target
+```
 
-### Workarounds
+**OpenGL convention (DO NOT USE with viser):**
+```python
+up = cross(right, forward)
+R = [right, up, -forward]  # camera looks down -Z
+```
 
-Instead of keyboard shortcuts, we provide:
-- ✅ **GUI Buttons** - Click "[F]rame Scene" instead of pressing F
-- ✅ **GUI Buttons** - Click "[G]rid Toggle" instead of pressing G
-- ✅ **Button Group** - Select preset views instead of hotkeys
+**Key Rule:** Never set `camera.wxyz` explicitly. Let viser compute it from `position`, `look_at`, and `up_direction`.
 
 ## Code Structure
 
 ```
-src/viewer/
-├── supersplat_camera.py    # Camera controller implementation
-└── app.py                  # Integration into UniversalViewer
+src/gsplay/rendering/
+├── camera.py           # CameraController class with mode-based ownership
+├── camera_state.py     # CameraState dataclass (spherical coords primary)
+├── camera_ui.py        # UI factory functions for camera controls
+└── quaternion_utils.py # Quaternion math utilities (wxyz format)
 ```
 
 ### Key Classes
 
-**`SuperSplatCamera`**
-- Manages grid visibility
-- Provides preset view positioning
-- Handles scene bounds updates
-- Focus/frame functionality
+**`CameraController`** (`rendering/camera.py`):
+- Manages camera state with thread-safe access
+- Mode-based ownership (USER vs APP mode)
+- Preset views, continuous rotation, pole crossing
+- Grid and world axis visualization
 
-**`create_supersplat_camera_controls()`**
-- Factory function that creates camera controller
-- Sets up UI controls
-- Returns initialized controller instance
+**`CameraState`** (`rendering/camera_state.py`):
+- Spherical coordinates as primary representation
+- Lazy c2w matrix computation
+- Methods: `set_from_orbit()`, `set_from_viser()`
 
-## Extending the Camera Controls
+**`quaternion_utils.py`**:
+- `quat_multiply()` - Hamilton product
+- `quat_normalize()` - Unit quaternion
+- `quat_from_axis_angle()` - Axis-angle to quaternion
+- `quat_to_rotation_matrix()` - Quaternion to 3x3 matrix
+- `rotation_matrix_to_quat()` - 3x3 matrix to quaternion
+- `quat_from_euler_deg()` - Euler angles to quaternion (OpenGL convention)
+- `quat_to_euler_deg()` - Quaternion to Euler angles
 
-To add new features:
+## Bake View Implementation
 
-1. **Add new preset view:**
+The "Bake View" feature in `core/app.py` preserves the current view when camera resets:
+
 ```python
-views = {
-    "top": (np.array([0, distance, 0]), np.array([0, 0, -1])),
-    "your_view": (offset_vector, up_vector),  # Add here
-}
+def viser_look_at_matrix(position, target):
+    """Compute rotation matrix using VISER's look-at convention."""
+    forward = normalize(target - position)
+    right = normalize(cross(forward, up_hint))
+    up = cross(forward, right)  # NOT cross(right, forward)!
+    return column_stack([right, up, forward])  # NOT -forward!
+
+# R_current from viser's actual wxyz (what rendering uses)
+R_current = SO3(camera.wxyz).as_matrix()
+
+# R_default using viser's convention
+R_default = viser_look_at_matrix(pos_default, target)
+
+# View preservation
+R_delta = R_default @ R_current.T
+R_new_model = R_delta @ R_old_model
 ```
 
-2. **Add new camera action:**
+## Usage Notes
+
+### Starting Rotation
 ```python
-def your_action(self) -> None:
-    for client in self.server.get_clients().values():
-        # Modify camera
-        client.camera.position = ...
+camera.start_auto_rotation(axis="y", speed=20.0)  # 20°/sec clockwise
+camera.start_auto_rotation(axis="y", speed=-20.0)  # counter-clockwise
 ```
 
-3. **Add UI button:**
+### Setting Preset View
 ```python
-your_button = server.gui.add_button("Your Action")
-
-@your_button.on_click
-def _(_) -> None:
-    camera.your_action()
+camera.set_preset_view("iso")  # azimuth=45°, elevation=30°
+camera.set_preset_view("top")  # elevation=89°
 ```
 
-## Future Enhancements
-
-When viser adds keyboard/double-click support, we can add:
-
-1. **Keyboard Fly Mode**
-   - Arrow keys for WASD-style movement
-   - Shift/Ctrl for speed modifiers
-
-2. **Double-Click Focal Point**
-   - Double-click anywhere in scene
-   - Camera orbits around clicked point
-
-3. **Hotkey Bindings**
-   - F: Focus on scene
-   - G: Toggle grid
-   - 1-7: Preset views
+### Accessing State
+```python
+state = camera.get_state()  # Thread-safe copy
+az, el, roll = state.azimuth, state.elevation, state.roll
+```
 
 ## References
 

@@ -37,23 +37,6 @@ def quat_multiply(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
     ])
 
 
-def quat_conjugate(q: np.ndarray) -> np.ndarray:
-    """
-    Compute quaternion conjugate.
-
-    Parameters
-    ----------
-    q : np.ndarray
-        Quaternion (wxyz format)
-
-    Returns
-    -------
-    np.ndarray
-        Conjugate quaternion (wxyz format)
-    """
-    return np.array([q[0], -q[1], -q[2], -q[3]])
-
-
 def quat_normalize(q: np.ndarray) -> np.ndarray:
     """
     Normalize quaternion to unit length.
@@ -69,7 +52,7 @@ def quat_normalize(q: np.ndarray) -> np.ndarray:
         Normalized quaternion (wxyz format)
     """
     norm = np.linalg.norm(q)
-    if norm < 1e-10:
+    if norm < 1e-6:
         return np.array([1.0, 0.0, 0.0, 0.0])
     return q / norm
 
@@ -92,7 +75,7 @@ def quat_from_axis_angle(axis: np.ndarray, angle: float) -> np.ndarray:
     """
     axis = np.asarray(axis, dtype=np.float64)
     axis_norm = np.linalg.norm(axis)
-    if axis_norm < 1e-10:
+    if axis_norm < 1e-6:
         return np.array([1.0, 0.0, 0.0, 0.0])
 
     axis = axis / axis_norm
@@ -272,7 +255,8 @@ def quat_to_euler_deg(q: np.ndarray) -> tuple[float, float, float]:
 
     # Calculate elevation from toward_camera.y
     # Positive elevation = camera above target = positive Y component
-    elevation = np.degrees(np.arcsin(np.clip(toward_camera[1], -1.0, 1.0)))
+    # Note: quat_from_euler_deg negates elevation when encoding, so we negate here to match
+    elevation = -np.degrees(np.arcsin(np.clip(toward_camera[1], -1.0, 1.0)))
 
     # Calculate azimuth from toward_camera.x and toward_camera.z
     # atan2(x, z) gives angle from +Z axis toward +X axis
@@ -304,104 +288,3 @@ def quat_to_euler_deg(q: np.ndarray) -> tuple[float, float, float]:
         roll = np.degrees(np.arctan2(sin_roll, cos_roll))
 
     return (azimuth, elevation, roll)
-
-
-def quat_slerp(q1: np.ndarray, q2: np.ndarray, t: float) -> np.ndarray:
-    """
-    Spherical linear interpolation between two quaternions.
-
-    Parameters
-    ----------
-    q1 : np.ndarray
-        Start quaternion (wxyz format)
-    q2 : np.ndarray
-        End quaternion (wxyz format)
-    t : float
-        Interpolation parameter [0, 1]
-
-    Returns
-    -------
-    np.ndarray
-        Interpolated quaternion (wxyz format)
-    """
-    q1 = quat_normalize(q1)
-    q2 = quat_normalize(q2)
-
-    # Compute cosine of angle between quaternions
-    dot = np.dot(q1, q2)
-
-    # If dot < 0, negate one quaternion to take shorter path
-    if dot < 0:
-        q2 = -q2
-        dot = -dot
-
-    # If very close, use linear interpolation
-    if dot > 0.9995:
-        result = q1 + t * (q2 - q1)
-        return quat_normalize(result)
-
-    # Compute SLERP
-    theta = np.arccos(np.clip(dot, -1.0, 1.0))
-    sin_theta = np.sin(theta)
-
-    s1 = np.sin((1.0 - t) * theta) / sin_theta
-    s2 = np.sin(t * theta) / sin_theta
-
-    return s1 * q1 + s2 * q2
-
-
-def quat_from_look_at(
-    position: np.ndarray,
-    target: np.ndarray,
-    up: np.ndarray = None,
-) -> np.ndarray:
-    """
-    Create orientation quaternion from look-at parameters.
-
-    Parameters
-    ----------
-    position : np.ndarray
-        Camera position (3,)
-    target : np.ndarray
-        Point to look at (3,)
-    up : np.ndarray, optional
-        Up direction hint (3,), defaults to [0, 1, 0]
-
-    Returns
-    -------
-    np.ndarray
-        Quaternion (wxyz format)
-    """
-    if up is None:
-        up = np.array([0.0, 1.0, 0.0])
-
-    # Forward direction (from position to target) = camera's -Z axis direction
-    forward = target - position
-    forward_norm = np.linalg.norm(forward)
-    if forward_norm < 1e-10:
-        return np.array([1.0, 0.0, 0.0, 0.0])
-    forward = forward / forward_norm
-
-    # Right direction = forward x up (right-handed coordinate system)
-    # This gives camera's +X axis direction
-    right = np.cross(forward, up)
-    right_norm = np.linalg.norm(right)
-    if right_norm < 1e-10:
-        # forward is parallel to up - use fallback
-        if abs(forward[1]) < 0.9:
-            right = np.cross(forward, np.array([0.0, 1.0, 0.0]))
-        else:
-            right = np.cross(forward, np.array([0.0, 0.0, 1.0]))
-        right_norm = np.linalg.norm(right)
-        if right_norm < 1e-10:
-            return np.array([1.0, 0.0, 0.0, 0.0])
-    right = right / right_norm
-
-    # Recompute up to ensure orthogonality = camera's +Y axis direction
-    up_ortho = np.cross(right, forward)
-
-    # Build rotation matrix
-    # Camera convention: local -Z is view direction, so column 2 is -forward
-    R = np.column_stack([right, up_ortho, -forward])
-
-    return rotation_matrix_to_quat(R)

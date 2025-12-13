@@ -9,6 +9,10 @@ Performance (gsmod 0.1.3):
 - GPU: ~1ms for 100K Gaussians, ~11ms for 1M Gaussians
 - Supports: opacity, scale, sphere, box (axis-aligned + rotated), ellipsoid, frustum
 - Invert mode: exclude instead of include filtering
+
+NOTE: Filter operates on ORIGINAL (untransformed) Gaussian data. Filter values
+are specified in original space and are NOT affected by scene transformations
+or bake view. See strategies.py for pipeline order: FILTER → TRANSFORM.
 """
 
 from __future__ import annotations
@@ -65,6 +69,9 @@ class VolumeFilterService:
         - Frustum (with rotation)
         - Invert mode (exclude instead of include)
 
+        NOTE: Filter operates on ORIGINAL (untransformed) Gaussian data.
+        Filter values are in original space - not affected by scene transformations.
+
         Returns
         -------
         GSData
@@ -73,6 +80,9 @@ class VolumeFilterService:
         fv = config.filter_values
         if fv.is_neutral():
             return data
+
+        # Filter operates directly on original (untransformed) Gaussian data
+        # Filter values are in original space - not affected by scene transformations
 
         try:
             start_time = time.perf_counter()
@@ -84,7 +94,7 @@ class VolumeFilterService:
             else:
                 data_pro = GSDataPro.from_gsdata(data)
 
-            # Use gsmod's optimized CPU filter (inplace=False for non-destructive)
+            # Use gsmod's optimized CPU filter with original space filter values
             filtered = data_pro.filter(fv, inplace=False)
 
             kept = len(filtered.means)
@@ -122,6 +132,9 @@ class VolumeFilterService:
 
         Performance: ~1ms for 100K Gaussians, ~11ms for 1M Gaussians on GPU.
 
+        NOTE: Filter parameters are inverse-transformed from WORLD to LOCAL
+        space so that filtering on original positions matches the visualization.
+
         Returns
         -------
         GSTensor | None
@@ -132,6 +145,9 @@ class VolumeFilterService:
         # Fast path: skip if no filtering configured
         if fv.is_neutral():
             return None
+
+        # Filter operates directly on original (untransformed) Gaussian data
+        # Filter values are in original space - not affected by scene transformations
 
         try:
             start_time = time.perf_counter()
@@ -145,7 +161,7 @@ class VolumeFilterService:
                 # Wrap GSTensor as GSTensorPro (preserves format state)
                 tensor_pro = GSTensorPro.from_gstensor(gaussians)
 
-            # Use gsmod's optimized GPU filter (inplace=False for non-destructive)
+            # Use gsmod's optimized GPU filter with original space filter values
             filtered = tensor_pro.filter(fv, inplace=False)
 
             # Return None if filtering had no effect (all Gaussians passed)

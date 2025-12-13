@@ -17,8 +17,9 @@ from gsplat.rendering import rasterization as _rasterization
 
 from src.domain.entities import SH_DEGREE_MAP
 from src.infrastructure.processing_mode import ProcessingMode
-from src.gsplay.nerfview import CameraState, RenderTabState
+from src.gsplay.nerfview import RenderCamera, RenderTabState
 from src.gsplay.interaction.events import EventBus, EventType
+from src.gsplay.rendering.jpeg_encoder import encode_and_cache, get_service as get_jpeg_service
 
 if TYPE_CHECKING:
     from src.domain.entities import GSData, GSTensor
@@ -65,7 +66,7 @@ def create_render_function(
 
     @torch.no_grad()
     def render_fn(
-        camera_state: CameraState, render_tab_state: RenderTabState
+        camera_state: RenderCamera, render_tab_state: RenderTabState
     ) -> np.ndarray:
         """
         Main render callback function.
@@ -74,8 +75,8 @@ def create_render_function(
 
         Parameters
         ----------
-        camera_state : CameraState
-            Camera parameters
+        camera_state : RenderCamera
+            Camera parameters (from viser, source of truth)
         render_tab_state : RenderTabState
             Render settings and state
 
@@ -84,9 +85,9 @@ def create_render_function(
         np.ndarray
             Rendered image [H, W, 3] in range [0, 1]
         """
-        # Allow modification of the outer CUDA stream in error recovery
+        # Allow modification of outer closure state
         nonlocal _cuda_stream
-        
+
         # Performance profiling
         _frame_start = time.perf_counter()
         _t_load = _t_render = 0.0
@@ -114,7 +115,7 @@ def create_render_function(
             W_scaled, H_scaled = W, H
 
         # Determine the current time to render (normal interactive mode)
-        frame_index = ui.time_slider.value if ui.time_slider else 0
+        frame_index = int(ui.time_slider.value) if ui.time_slider else 0
         total_frames = ui.time_slider.max + 1 if ui.time_slider else 1
         normalized_time = (
             frame_index / max(1, total_frames - 1) if total_frames > 1 else 0.0
@@ -142,7 +143,6 @@ def create_render_function(
                 model.processing_mode = ProcessingMode.ALL_GPU.value
 
         gaussians = model.get_gaussians_at_normalized_time(normalized_time)
-
         _t_load = (time.perf_counter() - _checkpoint_load) * 1000  # ms
 
         if gaussians is None or gaussians.means.shape[0] == 0:
@@ -338,7 +338,6 @@ def create_render_function(
                 result = cpu_tensor.numpy()
 
                 # Encode to JPEG
-                from src.gsplay.rendering.jpeg_encoder import encode_and_cache
                 encode_and_cache(gpu_frame_uint8, quality=render_tab_state.jpeg_quality)
 
             else:
@@ -398,7 +397,6 @@ def create_render_function(
                 gpu_frame_uint8 = (result_gpu * 255).clamp(0, 255).to(torch.uint8)
                 result = gpu_frame_uint8.detach().cpu().numpy()
 
-                from src.gsplay.rendering.jpeg_encoder import encode_and_cache
                 encode_and_cache(gpu_frame_uint8, quality=render_tab_state.jpeg_quality)
 
             _t_rasterize = (time.perf_counter() - _checkpoint_rasterize) * 1000
@@ -497,8 +495,7 @@ def create_render_function(
                 try:
                     # Clear the GPU frame cache first - it may reference corrupted memory
                     try:
-                        from src.gsplay.rendering.jpeg_encoder import get_service
-                        get_service().clear_gpu_frame()
+                        get_jpeg_service().clear_gpu_frame()
                     except Exception:
                         pass  # Best effort
 

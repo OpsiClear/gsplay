@@ -337,26 +337,44 @@ class GSPlayAPI:
                 self._viewer.ui.rotate_z_slider.value = z
             logger.debug(f"Rotation set to x={x}, y={y}, z={z}")
 
-    def set_scale(self, scale: float) -> None:
+    def set_scale(
+        self,
+        scale: float | tuple[float, float, float],
+    ) -> None:
         """
-        Set global scene scale.
+        Set scene scale (uniform or per-axis).
 
         Parameters
         ----------
-        scale : float
-            Global scale factor (0.1 to 10.0)
+        scale : float or tuple[float, float, float]
+            Uniform scale factor (float) or per-axis scale (sx, sy, sz).
+            Values should be in range [0.1, 10.0].
 
         Raises
         ------
         ValueError
-            If scale is out of range
+            If scale values are out of range
         """
-        if not 0.1 <= scale <= 10.0:
-            raise ValueError("Scale must be in range [0.1, 10.0]")
+        if isinstance(scale, (int, float)):
+            # Uniform scale
+            if not 0.1 <= scale <= 10.0:
+                raise ValueError("Scale must be in range [0.1, 10.0]")
+            sx, sy, sz = float(scale), float(scale), float(scale)
+        else:
+            # Per-axis scale
+            sx, sy, sz = scale
+            for v in (sx, sy, sz):
+                if not 0.1 <= v <= 10.0:
+                    raise ValueError("Scale values must be in range [0.1, 10.0]")
 
-        if self._viewer.ui and self._viewer.ui.global_scale_slider:
-            self._viewer.ui.global_scale_slider.value = scale
-            logger.debug(f"Scale set to {scale}")
+        if self._viewer.ui:
+            if self._viewer.ui.scale_x_slider:
+                self._viewer.ui.scale_x_slider.value = sx
+            if self._viewer.ui.scale_y_slider:
+                self._viewer.ui.scale_y_slider.value = sy
+            if self._viewer.ui.scale_z_slider:
+                self._viewer.ui.scale_z_slider.value = sz
+            logger.debug(f"Scale set to ({sx}, {sy}, {sz})")
 
     def reset_transform(self) -> None:
         """Reset scene transform to defaults."""

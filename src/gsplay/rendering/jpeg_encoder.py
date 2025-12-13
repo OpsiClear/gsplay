@@ -55,9 +55,11 @@ from enum import Enum
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+import torch
+from torchvision.io import encode_jpeg
 
 if TYPE_CHECKING:
-    import torch
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -139,13 +141,10 @@ class TorchvisionJpegBackend:
 
     def encode(
         self,
-        image: np.ndarray | "torch.Tensor",
+        image: np.ndarray | torch.Tensor,
         quality: int,
         chroma_subsampling: ChromaSubsamplingType,
     ) -> bytes:
-        import torch
-        from torchvision.io import encode_jpeg
-
         # Log once
         if not self._logged:
             device_id = image.device.index if isinstance(image, torch.Tensor) and image.is_cuda else self._default_device_id
@@ -169,13 +168,11 @@ class TorchvisionJpegBackend:
         # Convert to bytes (ensure CPU tensor for numpy conversion)
         return jpeg_tensor.cpu().numpy().tobytes()
 
-    def _prepare_tensor(self, tensor: "torch.Tensor") -> "torch.Tensor":
+    def _prepare_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
         """Prepare tensor for encoding.
 
         Converts HWC to CHW format required by torchvision.encode_jpeg.
         """
-        import torch
-
         # Convert to uint8 if needed
         if tensor.dtype != torch.uint8:
             if tensor.dtype in (torch.float32, torch.float16):
@@ -241,7 +238,7 @@ class JpegEncoder:
 
     def encode(
         self,
-        image: np.ndarray | "torch.Tensor",
+        image: np.ndarray | torch.Tensor,
         quality: int = 85,
         chroma_subsampling: ChromaSubsamplingType = "420",
     ) -> bytes:
@@ -269,12 +266,12 @@ def _set_cached_jpeg(jpeg_bytes: bytes | None) -> None:
     _thread_local.jpeg_bytes = jpeg_bytes
 
 
-def _get_tensor_ref() -> "torch.Tensor | None":
+def _get_tensor_ref() -> torch.Tensor | None:
     """Get the cached tensor reference for the current thread."""
     return getattr(_thread_local, "tensor_ref", None)
 
 
-def _set_tensor_ref(tensor: "torch.Tensor | None") -> None:
+def _set_tensor_ref(tensor: torch.Tensor | None) -> None:
     """Set the cached tensor reference for the current thread.
 
     This keeps the tensor alive to prevent PyTorch's memory allocator
@@ -339,7 +336,7 @@ class JpegEncodingService:
 
     def encode(
         self,
-        image: np.ndarray | "torch.Tensor",
+        image: np.ndarray | torch.Tensor,
         quality: int | None = None,
         chroma_subsampling: ChromaSubsamplingType | None = None,
     ) -> bytes:
@@ -360,7 +357,7 @@ class JpegEncodingService:
 
     def encode_and_cache(
         self,
-        image: "torch.Tensor",
+        image: torch.Tensor,
         quality: int | None = None,
         chroma_subsampling: ChromaSubsamplingType | None = None,
     ) -> bytes:
@@ -447,7 +444,7 @@ def get_service(device: str = "cuda:0") -> JpegEncodingService:
 
 
 def encode_and_cache(
-    image: "torch.Tensor",
+    image: torch.Tensor,
     quality: int = 85,
     chroma_subsampling: ChromaSubsamplingType = "420",
 ) -> bytes:
@@ -483,7 +480,7 @@ def get_cached_jpeg() -> bytes | None:
 
 
 def encode(
-    image: np.ndarray | "torch.Tensor",
+    image: np.ndarray | torch.Tensor,
     quality: int = 85,
     chroma_subsampling: ChromaSubsamplingType = "420",
 ) -> bytes:

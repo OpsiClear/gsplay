@@ -33,7 +33,17 @@ logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
-class CameraState(object):
+class RenderCamera:
+    """
+    Immutable camera snapshot for GPU rendering.
+
+    This is built directly from viser's camera and passed to the render function.
+    Viser is the source of truth for rendering - never render from locally
+    computed c2w (causes black renders due to numerical differences).
+
+    For UI/animation state, see OrbitCameraState in camera_state.py.
+    """
+
     fov: float
     aspect: float
     c2w: NDArray[np.float32]
@@ -177,7 +187,7 @@ class GSPlay(object):
     def rerender(self, _):
         """Trigger a re-render (called when UI settings change)."""
         if self._renderer is not None:
-            camera_state = self._renderer.get_camera_state()
+            camera_state = self._renderer._get_render_camera()
             if camera_state is not None:
                 self._renderer.submit(RenderTask("rerender", camera_state))
 
@@ -200,28 +210,24 @@ class GSPlay(object):
         def _(_: viser.CameraHandle):
             self._last_move_time = time.perf_counter()
 
-            # Only update renderer if client has been initialized with our camera state.
+            # Only process if client has been initialized with our camera state.
             # This prevents viser's default camera from being used for initial renders.
             if self.universal_viewer is not None:
                 camera_ctrl = getattr(self.universal_viewer, "camera_controller", None)
                 if camera_ctrl is not None:
                     if client.client_id not in camera_ctrl._initialized_clients:
                         return  # Skip - client not yet initialized with our camera state
-                    # Skip during rotation - rotation callback handles rendering
-                    if getattr(camera_ctrl, "_rotation_active", False):
-                        return
-                    # Skip briefly after rotation stops (backend state is authoritative)
-                    stop_time = getattr(camera_ctrl, "_rotation_stop_time", 0.0)
-                    if time.time() - stop_time < 0.5:
+                    # Skip when app owns camera (rotation, presets, cooldown)
+                    if camera_ctrl.is_app_controlled():
                         return
 
             with self.server.atomic():
                 camera_state = self.get_camera_state(client)
                 if self._renderer is not None:
-                    self._renderer.update_camera(camera_state)
                     self._renderer.submit(RenderTask("move", camera_state))
 
-    def get_camera_state(self, client: viser.ClientHandle) -> CameraState:
+    def get_camera_state(self, client: viser.ClientHandle) -> RenderCamera:
+        """Build RenderCamera from viser client (source of truth for rendering)."""
         camera = client.camera
         c2w = np.concatenate(
             [
@@ -232,7 +238,7 @@ class GSPlay(object):
             ],
             0,
         )
-        return CameraState(
+        return RenderCamera(
             fov=camera.fov,
             aspect=camera.aspect,
             c2w=c2w,
@@ -273,7 +279,7 @@ class GSPlay(object):
             )
             if step > self._last_update_step + update_every:
                 self._last_update_step = step
-                camera_state = self._renderer.get_camera_state()
+                camera_state = self._renderer._get_render_camera()
                 if camera_state is not None:
                     self._renderer.submit(RenderTask("update", camera_state))
 

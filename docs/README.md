@@ -43,11 +43,11 @@ Welcome to the gsplay documentation!
 ## Project Documentation
 
 - **[CLAUDE.md](../CLAUDE.md)** - AI assistant instructions and project conventions
-- **[LICENSE](../LICENSE)** - Project license (MIT)
+- **[LICENSE](../LICENSE)** - Project license (AGPL-3.0)
 
 ## Documentation Status
 
-**Last Updated**: 2025-11-13
+**Last Updated**: 2025-12-11
 
 This documentation is organized into logical categories for easy navigation. All documentation follows Clean Architecture principles and is kept up-to-date with the codebase.
 

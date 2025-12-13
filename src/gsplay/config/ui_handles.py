@@ -87,11 +87,21 @@ class UIHandles:
     translation_x_slider: viser.GuiSliderHandle | None = None
     translation_y_slider: viser.GuiSliderHandle | None = None
     translation_z_slider: viser.GuiSliderHandle | None = None
-    global_scale_slider: viser.GuiSliderHandle | None = None
+    # Per-axis scale (gsmod 0.1.7)
+    scale_x_slider: viser.GuiSliderHandle | None = None
+    scale_y_slider: viser.GuiSliderHandle | None = None
+    scale_z_slider: viser.GuiSliderHandle | None = None
     # World-axis rotation sliders (truly gimbal-lock free via quaternion multiplication)
     rotate_x_slider: viser.GuiSliderHandle | None = None
     rotate_y_slider: viser.GuiSliderHandle | None = None
     rotate_z_slider: viser.GuiSliderHandle | None = None
+    # Pivot point for rotation/scale (gsmod 0.1.7 center parameter)
+    use_pivot_checkbox: viser.GuiCheckboxHandle | None = None
+    pivot_x_slider: viser.GuiSliderHandle | None = None
+    pivot_y_slider: viser.GuiSliderHandle | None = None
+    pivot_z_slider: viser.GuiSliderHandle | None = None
+    copy_center_button: viser.GuiButtonHandle | None = None
+    # Action buttons
     reset_pose_button: viser.GuiButtonHandle | None = None
     center_button: viser.GuiButtonHandle | None = None
     align_up_button: viser.GuiButtonHandle | None = None
@@ -111,13 +121,13 @@ class UIHandles:
     sphere_center_z: viser.GuiSliderHandle | None = None
     sphere_radius: viser.GuiSliderHandle | None = None
 
-    # Box filter
-    box_min_x: viser.GuiSliderHandle | None = None
-    box_min_y: viser.GuiSliderHandle | None = None
-    box_min_z: viser.GuiSliderHandle | None = None
-    box_max_x: viser.GuiSliderHandle | None = None
-    box_max_y: viser.GuiSliderHandle | None = None
-    box_max_z: viser.GuiSliderHandle | None = None
+    # Box filter (center + size for intuitive behavior with rotation)
+    box_center_x: viser.GuiSliderHandle | None = None
+    box_center_y: viser.GuiSliderHandle | None = None
+    box_center_z: viser.GuiSliderHandle | None = None
+    box_size_x: viser.GuiSliderHandle | None = None
+    box_size_y: viser.GuiSliderHandle | None = None
+    box_size_z: viser.GuiSliderHandle | None = None
     box_rot_x: viser.GuiSliderHandle | None = None
     box_rot_y: viser.GuiSliderHandle | None = None
     box_rot_z: viser.GuiSliderHandle | None = None
@@ -146,11 +156,17 @@ class UIHandles:
     frustum_rot_z: viser.GuiSliderHandle | None = None
     frustum_use_camera: viser.GuiButtonHandle | None = None
 
+    # Button to compute scene center from Gaussian mean
+    use_scene_center: viser.GuiButtonHandle | None = None
+
+    # Button to align filter rotation to camera up direction
+    align_to_camera_up: viser.GuiButtonHandle | None = None
+
     # Other filter controls
     processing_mode_dropdown: viser.GuiDropdownHandle | None = None
     use_cpu_filtering_checkbox: viser.GuiCheckboxHandle | None = None
     reset_filter_button: viser.GuiButtonHandle | None = None
-    show_filter_viz: viser.GuiCheckboxHandle | None = None
+    show_filter_viz: viser.GuiCheckboxHandle | None = None  # Also enables interactive gizmo
 
     # Export controls
     export_path: viser.GuiTextHandle | None = None
@@ -162,6 +178,7 @@ class UIHandles:
     config_path_input: viser.GuiTextHandle | None = None
     config_buttons: viser.GuiButtonHandle | None = None  # Export Config button
     load_config_button: viser.GuiButtonHandle | None = None  # Load Config button (under play)
+    reference_sphere_slider: viser.GuiSliderHandle | None = None  # Reference sphere radius
 
     # Instance control
     terminate_button: viser.GuiButtonHandle | None = None
@@ -209,6 +226,10 @@ class UIHandles:
         Uses world-axis rotation (truly gimbal-lock free via quaternion multiplication).
         Each rotation slider value is applied as rotation around that world axis.
         The rotations are composed via quaternion multiplication: Z * Y * X order.
+
+        Supports gsmod 0.1.7 features:
+        - Per-axis scale (scale_x, scale_y, scale_z)
+        - Rotation/scale center (pivot point)
         """
         from src.gsplay.rendering.quaternion_utils import (
             quat_from_axis_angle,
@@ -242,15 +263,34 @@ class UIHandles:
         w, x, y, z = quat_wxyz
         rotation_wxyz = (float(w), float(x), float(y), float(z))
 
+        # Translation
         translation = (
             float(self.translation_x_slider.value) if self.translation_x_slider else 0.0,
             float(self.translation_y_slider.value) if self.translation_y_slider else 0.0,
             float(self.translation_z_slider.value) if self.translation_z_slider else 0.0,
         )
-        scale_value = float(self.global_scale_slider.value) if self.global_scale_slider else 1.0
+
+        # Per-axis scale (gsmod 0.1.7)
+        scale = (
+            float(self.scale_x_slider.value) if self.scale_x_slider else 1.0,
+            float(self.scale_y_slider.value) if self.scale_y_slider else 1.0,
+            float(self.scale_z_slider.value) if self.scale_z_slider else 1.0,
+        )
+
+        # Center/pivot point (gsmod 0.1.7) - None if checkbox unchecked
+        center = None
+        if self.use_pivot_checkbox and self.use_pivot_checkbox.value:
+            center = (
+                float(self.pivot_x_slider.value) if self.pivot_x_slider else 0.0,
+                float(self.pivot_y_slider.value) if self.pivot_y_slider else 0.0,
+                float(self.pivot_z_slider.value) if self.pivot_z_slider else 0.0,
+            )
 
         return TransformValues(
-            translation=translation, scale=scale_value, rotation=rotation_wxyz
+            translation=translation,
+            scale=scale,
+            rotation=rotation_wxyz,
+            center=center,
         )
 
     def get_filter_values(
@@ -289,21 +329,22 @@ class UIHandles:
                 self.sphere_center_z.value if self.sphere_center_z else 0.0,
             )
 
-        # Box filter
+        # Box filter (compute min/max from center + size)
         box_min = None
         box_max = None
         box_rotation = None
         if spatial_type == "Box":
-            box_min = (
-                self.box_min_x.value if self.box_min_x else -5.0,
-                self.box_min_y.value if self.box_min_y else -5.0,
-                self.box_min_z.value if self.box_min_z else -5.0,
-            )
-            box_max = (
-                self.box_max_x.value if self.box_max_x else 5.0,
-                self.box_max_y.value if self.box_max_y else 5.0,
-                self.box_max_z.value if self.box_max_z else 5.0,
-            )
+            # Get center and size from UI
+            cx = self.box_center_x.value if self.box_center_x else 0.0
+            cy = self.box_center_y.value if self.box_center_y else 0.0
+            cz = self.box_center_z.value if self.box_center_z else 0.0
+            sx = self.box_size_x.value if self.box_size_x else 10.0
+            sy = self.box_size_y.value if self.box_size_y else 10.0
+            sz = self.box_size_z.value if self.box_size_z else 10.0
+            # Compute min/max from center and half-extents
+            half_x, half_y, half_z = sx / 2, sy / 2, sz / 2
+            box_min = (cx - half_x, cy - half_y, cz - half_z)
+            box_max = (cx + half_x, cy + half_y, cz + half_z)
             # Box rotation from UI - convert Euler angles to axis-angle
             if hasattr(self, "box_rot_x") and self.box_rot_x:
                 rx = self.box_rot_x.value
@@ -447,6 +488,10 @@ class UIHandles:
         For rotation, decomposes the quaternion into XYZ Euler angles for display.
         This is only for UI display - the actual rotation computation in
         get_transform_values() uses gimbal-lock-free world-axis composition.
+
+        Supports gsmod 0.1.7 features:
+        - Per-axis scale (scale_x, scale_y, scale_z)
+        - Rotation/scale center (pivot point)
         """
         # gsmod uses 'translation' attribute
         translation = getattr(values, "translation", (0.0, 0.0, 0.0))
@@ -457,13 +502,24 @@ class UIHandles:
         if self.translation_z_slider:
             self.translation_z_slider.value = float(translation[2])
 
-        if self.global_scale_slider:
-            scale_value = getattr(values, "scale", 1.0)
-            # Handle both scalar and vector scale
-            if isinstance(scale_value, (float, int)):
-                self.global_scale_slider.value = float(scale_value)
-            else:
-                self.global_scale_slider.value = float(scale_value[0])
+        # Per-axis scale (gsmod 0.1.7)
+        scale_value = getattr(values, "scale", (1.0, 1.0, 1.0))
+        if isinstance(scale_value, (float, int)):
+            # Uniform scale - set all axes the same
+            if self.scale_x_slider:
+                self.scale_x_slider.value = float(scale_value)
+            if self.scale_y_slider:
+                self.scale_y_slider.value = float(scale_value)
+            if self.scale_z_slider:
+                self.scale_z_slider.value = float(scale_value)
+        else:
+            # Per-axis scale
+            if self.scale_x_slider:
+                self.scale_x_slider.value = float(scale_value[0])
+            if self.scale_y_slider:
+                self.scale_y_slider.value = float(scale_value[1])
+            if self.scale_z_slider:
+                self.scale_z_slider.value = float(scale_value[2])
 
         # Convert quaternion to Euler XYZ for rotation slider display
         # gsmod uses 'rotation' attribute in wxyz format (w, x, y, z)
@@ -496,6 +552,32 @@ class UIHandles:
                 self.rotate_y_slider.value = float(ry)
             if self.rotate_z_slider:
                 self.rotate_z_slider.value = float(rz)
+
+        # Center/pivot point (gsmod 0.1.7)
+        center = getattr(values, "center", None)
+        if center is not None:
+            if self.use_pivot_checkbox:
+                self.use_pivot_checkbox.value = True
+            if self.pivot_x_slider:
+                self.pivot_x_slider.value = float(center[0])
+                self.pivot_x_slider.visible = True
+            if self.pivot_y_slider:
+                self.pivot_y_slider.value = float(center[1])
+                self.pivot_y_slider.visible = True
+            if self.pivot_z_slider:
+                self.pivot_z_slider.value = float(center[2])
+                self.pivot_z_slider.visible = True
+        else:
+            if self.use_pivot_checkbox:
+                self.use_pivot_checkbox.value = False
+            # Hide pivot sliders
+            if self.pivot_x_slider:
+                self.pivot_x_slider.visible = False
+            if self.pivot_y_slider:
+                self.pivot_y_slider.visible = False
+            if self.pivot_z_slider:
+                self.pivot_z_slider.visible = False
+        # Note: copy_center_button (Bake View) visibility is not tied to pivot
 
     def get_alpha_scaler(self) -> float:
         """Read the opacity multiplier from the UI."""
@@ -596,6 +678,109 @@ class UIHandles:
         if self.use_cpu_filtering_checkbox and hasattr(vf, "use_cpu_filtering"):
             self.use_cpu_filtering_checkbox.value = bool(vf.use_cpu_filtering)
 
+    def is_transform_active(self) -> bool:
+        """Check if any scene transformation is applied (non-neutral state).
+
+        Uses gsmod's TransformValues.is_neutral() for threshold consistency.
+        Filter controls should be locked when transform is active to avoid
+        confusion (filter operates on original data, not transformed).
+        """
+        # Use gsmod's is_neutral() for consistent thresholds
+        # This ensures UI and gsmod always agree on what's "active"
+        transform_values = self.get_transform_values()
+        return not transform_values.is_neutral()
+
+    def set_filter_controls_disabled(self, disabled: bool) -> None:
+        """Enable or disable all filter controls.
+
+        Used to lock filter adjustment when scene transformation is active,
+        since filtering operates on original (untransformed) data.
+
+        Parameters
+        ----------
+        disabled : bool
+            True to disable (lock) controls, False to enable
+        """
+        # Spatial filter type dropdown
+        if self.spatial_filter_type:
+            self.spatial_filter_type.disabled = disabled
+
+        # Opacity/scale sliders
+        for control in [
+            self.min_opacity_slider,
+            self.max_opacity_slider,
+            self.min_scale_slider,
+            self.max_scale_slider,
+        ]:
+            if control:
+                control.disabled = disabled
+
+        # Sphere filter controls
+        for control in [
+            self.sphere_center_x,
+            self.sphere_center_y,
+            self.sphere_center_z,
+            self.sphere_radius,
+        ]:
+            if control:
+                control.disabled = disabled
+
+        # Box filter controls
+        for control in [
+            self.box_center_x,
+            self.box_center_y,
+            self.box_center_z,
+            self.box_size_x,
+            self.box_size_y,
+            self.box_size_z,
+            self.box_rot_x,
+            self.box_rot_y,
+            self.box_rot_z,
+        ]:
+            if control:
+                control.disabled = disabled
+
+        # Ellipsoid filter controls
+        for control in [
+            self.ellipsoid_center_x,
+            self.ellipsoid_center_y,
+            self.ellipsoid_center_z,
+            self.ellipsoid_radius_x,
+            self.ellipsoid_radius_y,
+            self.ellipsoid_radius_z,
+            self.ellipsoid_rot_x,
+            self.ellipsoid_rot_y,
+            self.ellipsoid_rot_z,
+        ]:
+            if control:
+                control.disabled = disabled
+
+        # Frustum filter controls
+        for control in [
+            self.frustum_fov,
+            self.frustum_aspect,
+            self.frustum_near,
+            self.frustum_far,
+            self.frustum_pos_x,
+            self.frustum_pos_y,
+            self.frustum_pos_z,
+            self.frustum_rot_x,
+            self.frustum_rot_y,
+            self.frustum_rot_z,
+            self.frustum_use_camera,
+        ]:
+            if control:
+                control.disabled = disabled
+
+        # Helper buttons
+        for control in [
+            self.use_scene_center,
+            self.align_to_camera_up,
+            self.reset_filter_button,
+        ]:
+            if control:
+                control.disabled = disabled
+
     def set_filter_values(self, fv: FilterValues) -> None:
         """Update spatial filter controls from FilterValues."""
         if self.min_opacity_slider and hasattr(fv, "min_opacity"):
@@ -631,20 +816,29 @@ class UIHandles:
         if self.sphere_radius and math.isfinite(sphere_radius):
             self.sphere_radius.value = float(sphere_radius)
 
-        if hasattr(fv, "box_min") and fv.box_min is not None:
-            if self.box_min_x:
-                self.box_min_x.value = float(fv.box_min[0])
-            if self.box_min_y:
-                self.box_min_y.value = float(fv.box_min[1])
-            if self.box_min_z:
-                self.box_min_z.value = float(fv.box_min[2])
-        if hasattr(fv, "box_max") and fv.box_max is not None:
-            if self.box_max_x:
-                self.box_max_x.value = float(fv.box_max[0])
-            if self.box_max_y:
-                self.box_max_y.value = float(fv.box_max[1])
-            if self.box_max_z:
-                self.box_max_z.value = float(fv.box_max[2])
+        # Convert box_min/box_max to center/size for UI
+        if hasattr(fv, "box_min") and fv.box_min is not None and hasattr(fv, "box_max") and fv.box_max is not None:
+            bmin = fv.box_min
+            bmax = fv.box_max
+            # Compute center and size
+            cx = (bmin[0] + bmax[0]) / 2
+            cy = (bmin[1] + bmax[1]) / 2
+            cz = (bmin[2] + bmax[2]) / 2
+            sx = bmax[0] - bmin[0]
+            sy = bmax[1] - bmin[1]
+            sz = bmax[2] - bmin[2]
+            if self.box_center_x:
+                self.box_center_x.value = float(cx)
+            if self.box_center_y:
+                self.box_center_y.value = float(cy)
+            if self.box_center_z:
+                self.box_center_z.value = float(cz)
+            if self.box_size_x:
+                self.box_size_x.value = float(sx)
+            if self.box_size_y:
+                self.box_size_y.value = float(sy)
+            if self.box_size_z:
+                self.box_size_z.value = float(sz)
         if hasattr(fv, "box_rot") and fv.box_rot is not None:
             rx, ry, rz = _axis_angle_to_euler_deg(tuple(fv.box_rot))
             if self.box_rot_x:

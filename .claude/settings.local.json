@@ -115,7 +115,10 @@
       "Bash(PYTHONPATH=. .venv/bin/python:*)",
       "WebFetch(domain:stackoverflow.com)",
       "WebFetch(domain:forums.developer.nvidia.com)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "WebFetch(domain:raw.org)",
+      "Bash(.venv/bin/pip show:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []

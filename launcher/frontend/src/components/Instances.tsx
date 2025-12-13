@@ -123,7 +123,9 @@ function drawFrameToRecording(instanceId: string, imageUrl: string): void {
 
 const InstanceCard: Component<{ instance: Instance }> = (props) => {
   const config = () => browseStore.config();
-  const isActive = () => ["running", "starting", "orphaned"].includes(props.instance.status);
+  const isStarting = () => ["pending", "starting"].includes(props.instance.status);
+  const isReady = () => ["running", "orphaned"].includes(props.instance.status);
+  const isActive = () => isStarting() || isReady();
   const isFailed = () => props.instance.status === "failed";
   const isSelected = () => instancesStore.selectedInstanceId() === props.instance.id;
 
@@ -132,7 +134,7 @@ const InstanceCard: Component<{ instance: Instance }> = (props) => {
       ? `${config()!.external_url}/v/${props.instance.id}/`
       : props.instance.url;
 
-  const hasStream = () => isActive() && props.instance.encoded_stream_path;
+  const hasStream = () => isReady() && props.instance.encoded_stream_path;
   const streamPath = () => props.instance.encoded_stream_path;
 
   // Full stream viewer URL for opening in new window
@@ -235,7 +237,22 @@ const InstanceCard: Component<{ instance: Instance }> = (props) => {
 
       {/* Actions */}
       <div class="instance-row actions">
-        <Show when={isActive()}>
+        {/* Starting state - show spinner and cancel button */}
+        <Show when={isStarting()}>
+          <span class="starting-indicator">
+            <span class="spinner-small"></span>
+            <span>Starting...</span>
+          </span>
+          <button class="btn-danger btn-sm" onClick={async (e) => {
+            e.stopPropagation();
+            await instancesStore.stopInstance(props.instance.id);
+            instancesStore.deleteInstance(props.instance.id);
+          }}>
+            Cancel
+          </button>
+        </Show>
+        {/* Ready state - show full controls */}
+        <Show when={isReady()}>
           <span class="btn-group">
             <button class="btn-success btn-sm" onClick={(e) => { e.stopPropagation(); window.open(openUrl(), "_blank"); }}>Viewer</button>
             <button class="btn-success btn-sm btn-icon" onClick={(e) => { e.stopPropagation(); copyLink(openUrl(), e); }} title="Copy viewer URL"><CopyIcon /></button>

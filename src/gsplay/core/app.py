@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import datetime
 from pathlib import Path
 
 import torch
@@ -452,153 +451,15 @@ class UniversalGSPlay:
             self.server, self.scene_bounds_manager.get_bounds()
         )
 
-        # Set render callback for rotation
-        def rotation_render_callback(delta_angle: float, axis: str):
-            """Apply rotation directly to c2w matrix and submit render.
+        # Set rerender callback so camera presets trigger immediate re-render
+        self.camera_controller.set_rerender_callback(
+            lambda: self.render_component.rerender() if self.viewer else None
+        )
 
-            SINGLE SOURCE OF TRUTH: SharedRenderer._shared_camera.c2w
-            - No quaternion conversion
-            - No syncing with viser during rotation
-            - Works directly with the c2w matrix
-
-            Parameters
-            ----------
-            delta_angle : float
-                Rotation angle in radians for this frame
-            axis : str
-                Rotation axis ("y" for horizontal, "x" for vertical)
-            """
-            import numpy as np
-            from src.gsplay.nerfview.viewer import CameraState
-            from src.gsplay.nerfview._renderer import RenderTask
-
-            try:
-                viewer = self.render_component.get_viewer()
-                if viewer is None or viewer._renderer is None:
-                    return
-
-                # Get current camera state (SINGLE SOURCE OF TRUTH)
-                current = viewer._renderer.get_camera_state()
-                if current is None:
-                    return
-
-                c2w = current.c2w.copy()
-
-                # Extract camera position and rotation from c2w
-                R = c2w[:3, :3]  # 3x3 rotation matrix
-                camera_pos = c2w[:3, 3]  # camera position
-
-                # Get look_at point (center of rotation)
-                cam_ctrl = self.camera_controller
-                if cam_ctrl is not None and cam_ctrl.state is not None:
-                    with cam_ctrl.state_lock:
-                        look_at = cam_ctrl.state.look_at.copy()
-                else:
-                    # Fallback: assume looking at origin
-                    look_at = np.array([0.0, 0.0, 0.0])
-
-                # Create rotation matrix for this frame
-                if axis == "y":
-                    # Rotation around camera's up direction (follows view orientation)
-                    from src.gsplay.rendering.quaternion_utils import quat_from_axis_angle, quat_to_rotation_matrix
-                    up_dir = R @ np.array([0.0, 1.0, 0.0])  # Camera's local up in world coords
-                    q_delta = quat_from_axis_angle(up_dir, delta_angle)
-                    R_delta = quat_to_rotation_matrix(q_delta)
-                else:
-                    # Rotation around X axis (vertical orbit)
-                    cos_a = np.cos(delta_angle)
-                    sin_a = np.sin(delta_angle)
-                    R_delta = np.array([
-                        [1, 0, 0],
-                        [0, cos_a, -sin_a],
-                        [0, sin_a, cos_a]
-                    ], dtype=np.float32)
-
-                # Rotate camera position around look_at point
-                offset = camera_pos - look_at
-                new_offset = R_delta @ offset
-                new_camera_pos = look_at + new_offset
-
-                # Rotate camera orientation (R_delta @ R preserves orthogonality)
-                new_R = R_delta @ R
-
-                # Build new c2w matrix
-                new_c2w = np.eye(4, dtype=np.float32)
-                new_c2w[:3, :3] = new_R
-                new_c2w[:3, 3] = new_camera_pos
-
-                # Create camera state and submit
-                camera_state = CameraState(
-                    fov=current.fov,
-                    aspect=current.aspect,
-                    c2w=new_c2w
-                )
-
-                # Update shared camera and submit render (atomic operation)
-                viewer._renderer.update_camera(camera_state)
-                viewer._renderer.submit(RenderTask("move", camera_state))
-
-                # Sync camera.state so viser UI sliders stay updated
-                # Convert rotation matrix back to quaternion
-                from src.gsplay.rendering.quaternion_utils import rotation_matrix_to_quat
-                orientation = rotation_matrix_to_quat(new_R)
-                distance = float(np.linalg.norm(new_camera_pos - look_at))
-
-                if cam_ctrl is not None and cam_ctrl.state is not None:
-                    with cam_ctrl.state_lock:
-                        cam_ctrl.state.orientation = orientation
-                        cam_ctrl.state.distance = distance
-                        # look_at stays the same (center of rotation)
-
-                    # Trigger slider sync to update UI
-                    cam_ctrl.trigger_slider_sync()
-
-            except Exception as e:
-                logger.error(f"Rotation render failed: {e}", exc_info=True)
-
-        self.camera_controller.set_render_callback(rotation_render_callback)
-
-        # Set callback to sync viser cameras at end of rotation
-        def sync_viser_from_c2w():
-            """Sync viser cameras from final c2w state after rotation stops."""
-            import numpy as np
-
-            try:
-                viewer = self.render_component.get_viewer()
-                if viewer is None or viewer._renderer is None:
-                    return
-
-                current = viewer._renderer.get_camera_state()
-                if current is None:
-                    return
-
-                c2w = current.c2w
-
-                # Extract directly from c2w matrix
-                camera_pos = c2w[:3, 3]           # Position: 4th column
-                up_dir = -c2w[:3, 1]              # Up: -Y in OpenCV convention
-
-                # Use stored look_at (center of rotation)
-                cam_ctrl = self.camera_controller
-                if cam_ctrl is not None and cam_ctrl.state is not None:
-                    with cam_ctrl.state_lock:
-                        look_at = cam_ctrl.state.look_at.copy()
-                else:
-                    look_at = np.array([0.0, 0.0, 0.0])
-
-                # Apply to all viser clients
-                for client in self.server.get_clients().values():
-                    with client.atomic():
-                        client.camera.position = tuple(camera_pos)
-                        client.camera.look_at = tuple(look_at)
-                        client.camera.up_direction = tuple(up_dir)
-
-                logger.debug("Synced viser cameras from final c2w")
-
-            except Exception as e:
-                logger.debug(f"Sync viser from c2w failed: {e}")
-
-        self.camera_controller.set_sync_viser_callback(sync_viser_from_c2w)
+        # NOTE: Rotation rendering is now decoupled from CameraController.
+        # SharedRenderer polls CameraController._state directly during rotation,
+        # so no render callback is needed. This keeps rotation logic clean -
+        # it only updates camera state, not rendering.
 
         # Create UI (includes camera UI right after Info panel)
         self.ui = setup_ui_layout(
@@ -629,6 +490,9 @@ class UniversalGSPlay:
         )
         self.event_bus.subscribe(
             EventType.CENTER_REQUESTED, self._on_center_requested
+        )
+        self.event_bus.subscribe(
+            EventType.BAKE_VIEW_REQUESTED, self._on_bake_view_requested
         )
         self.event_bus.subscribe(
             EventType.RERENDER_REQUESTED, self._on_rerender_requested
@@ -682,6 +546,14 @@ class UniversalGSPlay:
             jpeg_quality_move=self.config.render_settings.jpeg_quality_move,
             config=self.config,
         )
+
+        # Set universal_viewer on GSPlay for rotation coordination.
+        # SharedRenderer polls CameraController._state directly during rotation,
+        # and viewer.py blocks on_update to prevent conflicts.
+        # MUST be done AFTER setup_viewer() which creates the GSPlay instance.
+        viewer = self.render_component.get_viewer()
+        if viewer is not None:
+            viewer.universal_viewer = self
 
         # Configure render quality
         self.render_component.configure_quality(self.ui)
@@ -819,6 +691,10 @@ class UniversalGSPlay:
     def _on_center_requested(self, event: Event) -> None:
         """Handle center request - center scene at origin."""
         self._handle_center_scene()
+
+    def _on_bake_view_requested(self, event: Event) -> None:
+        """Handle bake view request - bake camera view into model transform."""
+        self._bake_camera_view()
 
     def _on_rerender_requested(self, event: Event) -> None:
         """Handle rerender request."""
@@ -1071,6 +947,161 @@ class UniversalGSPlay:
         self._update_filter_visualization()
         logger.debug("Copied camera state to frustum filter (with inverse transform)")
 
+    def _use_scene_center_for_filter(self) -> None:
+        """Set filter center to mean of current frame's Gaussian positions.
+
+        Computes the centroid of all Gaussian positions in the current frame
+        and uses that as the center for the active spatial filter.
+        """
+        if not self.ui:
+            return
+
+        # Get current filter type
+        filter_type = (
+            self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
+        )
+        if filter_type not in ("Sphere", "Box", "Ellipsoid"):
+            logger.debug(f"Filter type {filter_type} doesn't support scene center")
+            return
+
+        # Get current frame's Gaussians
+        gaussians = self._get_current_frame_gaussians()
+        if gaussians is None or gaussians.means is None:
+            logger.warning("No Gaussian data available to compute scene center")
+            return
+
+        # Compute mean position (centroid)
+        means = gaussians.means
+        if hasattr(means, 'cpu'):
+            # PyTorch tensor
+            center = means.mean(dim=0).cpu().numpy()
+        else:
+            # NumPy array
+            center = means.mean(axis=0)
+
+        center_x, center_y, center_z = float(center[0]), float(center[1]), float(center[2])
+
+        # Set center for the appropriate filter type
+        if filter_type == "Sphere":
+            if self.ui.sphere_center_x:
+                self.ui.sphere_center_x.value = center_x
+            if self.ui.sphere_center_y:
+                self.ui.sphere_center_y.value = center_y
+            if self.ui.sphere_center_z:
+                self.ui.sphere_center_z.value = center_z
+            logger.debug(f"Set sphere center to scene centroid: ({center_x:.3f}, {center_y:.3f}, {center_z:.3f})")
+
+        elif filter_type == "Box":
+            # Box now uses center/size controls - just set center directly
+            if self.ui.box_center_x:
+                self.ui.box_center_x.value = center_x
+            if self.ui.box_center_y:
+                self.ui.box_center_y.value = center_y
+            if self.ui.box_center_z:
+                self.ui.box_center_z.value = center_z
+            logger.debug(f"Set box center to scene centroid: ({center_x:.3f}, {center_y:.3f}, {center_z:.3f})")
+
+        elif filter_type == "Ellipsoid":
+            if self.ui.ellipsoid_center_x:
+                self.ui.ellipsoid_center_x.value = center_x
+            if self.ui.ellipsoid_center_y:
+                self.ui.ellipsoid_center_y.value = center_y
+            if self.ui.ellipsoid_center_z:
+                self.ui.ellipsoid_center_z.value = center_z
+            logger.debug(f"Set ellipsoid center to scene centroid: ({center_x:.3f}, {center_y:.3f}, {center_z:.3f})")
+
+        # Trigger visualization update
+        self._update_filter_visualization()
+
+    def _align_filter_to_camera_up(self) -> None:
+        """Align filter rotation so Z-axis points in camera up direction.
+
+        Computes the rotation needed to align the filter's Z-axis with the
+        camera's current up direction, similar to bake view logic.
+        """
+        import numpy as np
+        import viser.transforms as vt
+        from src.gsplay.config.rotation_conversions import matrix_to_euler_deg
+
+        if not self.ui:
+            return
+
+        # Get current filter type
+        filter_type = (
+            self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
+        )
+        if filter_type not in ("Box", "Ellipsoid"):
+            logger.debug(f"Filter type {filter_type} doesn't support rotation")
+            return
+
+        try:
+            # Get camera up direction from viser
+            clients = list(self.server.get_clients().values())
+            if not clients:
+                logger.warning("No clients connected")
+                return
+            client = clients[0]
+
+            # Get camera rotation matrix from wxyz quaternion
+            viser_wxyz = np.array(client.camera.wxyz, dtype=np.float64)
+            R_camera = vt.SO3(viser_wxyz).as_matrix()
+
+            # In viser convention, rotation matrix columns are [right, up, forward]
+            # R = [right, up, forward]
+            camera_right = R_camera[:, 0]
+            camera_up = R_camera[:, 1]
+
+            # Normalize (should already be unit vectors, but be safe)
+            camera_right = camera_right / np.linalg.norm(camera_right)
+            camera_up = camera_up / np.linalg.norm(camera_up)
+
+            logger.debug(f"Camera right: {camera_right}, up: {camera_up}")
+
+            # Build rotation matrix where:
+            # - Z = camera_up (filter Z aligns with camera up)
+            # - X = camera_right (filter X aligns with camera right)
+            # - XZ plane = view plane (the plane you're looking at)
+            # - Y = cross(Z, X) = points backward from camera
+            x_axis = camera_right
+            z_axis = camera_up
+            y_axis = np.cross(z_axis, x_axis)
+            y_axis = y_axis / np.linalg.norm(y_axis)
+
+            # Rotation matrix: columns are new basis vectors
+            R = np.column_stack([x_axis, y_axis, z_axis])
+
+            # Convert to Euler angles (degrees)
+            rx, ry, rz = matrix_to_euler_deg(R)
+
+            # Set rotation for the appropriate filter type
+            if filter_type == "Box":
+                if self.ui.box_rot_x:
+                    self.ui.box_rot_x.value = rx
+                if self.ui.box_rot_y:
+                    self.ui.box_rot_y.value = ry
+                if self.ui.box_rot_z:
+                    self.ui.box_rot_z.value = rz
+                logger.debug(
+                    f"Aligned box rotation to camera up: ({rx:.1f}, {ry:.1f}, {rz:.1f})"
+                )
+
+            elif filter_type == "Ellipsoid":
+                if self.ui.ellipsoid_rot_x:
+                    self.ui.ellipsoid_rot_x.value = rx
+                if self.ui.ellipsoid_rot_y:
+                    self.ui.ellipsoid_rot_y.value = ry
+                if self.ui.ellipsoid_rot_z:
+                    self.ui.ellipsoid_rot_z.value = rz
+                logger.debug(
+                    f"Aligned ellipsoid rotation to camera up: ({rx:.1f}, {ry:.1f}, {rz:.1f})"
+                )
+
+            # Trigger visualization update
+            self._update_filter_visualization()
+
+        except Exception as e:
+            logger.error(f"Failed to align filter to camera up: {e}", exc_info=True)
+
     def _inverse_transform_camera(
         self,
         camera_pos: tuple[float, float, float],
@@ -1098,7 +1129,12 @@ class UniversalGSPlay:
         translation = np.array(
             getattr(transform_values, "translation", (0.0, 0.0, 0.0)), dtype=np.float64
         )
-        scale = float(getattr(transform_values, "scale", 1.0))
+        # Handle both scalar and per-axis scale (gsmod 0.1.7)
+        scale_raw = getattr(transform_values, "scale", 1.0)
+        if isinstance(scale_raw, (tuple, list)):
+            scale = np.array(scale_raw, dtype=np.float64)
+        else:
+            scale = np.array([float(scale_raw)] * 3, dtype=np.float64)
         scene_rot_quat = getattr(transform_values, "rotation", (1.0, 0.0, 0.0, 0.0))
 
         # Build scene rotation matrix from quaternion
@@ -1352,8 +1388,19 @@ class UniversalGSPlay:
 
         self.config.transform_values = TransformValues()
 
+        # Get client for batched GUI update
+        clients = list(self.server.get_clients().values()) if self.server else []
+        client = clients[0] if clients else None
+
         if self.ui:
-            self.ui.set_transform_values(self.config.transform_values)
+            if client:
+                # Batch all slider updates for proper GUI refresh
+                with client.atomic():
+                    self.ui.set_transform_values(self.config.transform_values)
+            else:
+                self.ui.set_transform_values(self.config.transform_values)
+            # Unlock filter controls since transform is now neutral
+            self.ui.set_filter_controls_disabled(False)
 
         if self.viewer:
             self.viewer.rerender(None)
@@ -1386,6 +1433,7 @@ class UniversalGSPlay:
         total_count = len(means)
 
         # Apply filter mask if filtering is active
+        # Filter operates on original data - not affected by scene transform
         fv = self.config.filter_values
         if not fv.is_neutral():
             try:
@@ -1414,7 +1462,7 @@ class UniversalGSPlay:
                     opacities = np.array(opacities)
                 data.opacities = opacities
 
-                # Compute filter mask
+                # Compute filter mask using original space filter values
                 mask = compute_filter_mask(data, fv)
                 means = means[mask]
 
@@ -1441,11 +1489,453 @@ class UniversalGSPlay:
         tx, ty, tz = -float(centroid[0]), -float(centroid[1]), -float(centroid[2])
         self.api.set_translation(tx, ty, tz)
 
+        # Lock filter controls since center scene applies transformation
+        if self.ui and self.ui.is_transform_active():
+            self.ui.set_filter_controls_disabled(True)
+
         # Trigger rerender
         if self.viewer:
             self.render_component.rerender()
 
         logger.info(f"Scene centered: translation=[{tx:.3f}, {ty:.3f}, {tz:.3f}]")
+
+    def _bake_camera_view(self) -> None:
+        """Bake current camera view into model transform.
+
+        Computes new model transform such that when camera resets to default
+        isometric view (azimuth=45°, elevation=30°), the scene appears identical
+        to the current view.
+
+        IMPORTANT: When the camera is far from the default view (>90° away), the
+        model will receive a large rotation (possibly near 180°) to preserve the
+        view. This is mathematically correct - the model must rotate to compensate
+        for the camera movement. For example:
+        - Camera at azimuth=225° (behind the scene) requires ~180° model rotation
+        - Camera at azimuth=45° (near default) requires minimal model rotation
+
+        Math (view preservation with pivot/center correction):
+        - Camera delta: R_delta = R_default @ R_current.T
+        - Translation delta: t_delta = pos_default - R_delta @ pos_current
+        - New rotation: R_new = R_delta @ R_model
+        - New translation: t_new = R_delta @ t_model + t_delta
+                                 + (R_delta - I) @ c_old           # old center correction
+                                 + (I - R_new) @ (c_old - c_new)   # pivot change correction
+
+        The center corrections are needed because gsmod applies:
+            P_world = R @ (P - center) + center + translation
+
+        When "Use Pivot" is checked, c_new is set to -t_model (negative of current
+        translation), which makes future rotations pivot around the world origin.
+        """
+        import numpy as np
+        import viser.transforms as vt
+        from src.gsplay.rendering.quaternion_utils import (
+            quat_multiply,
+            rotation_matrix_to_quat,
+        )
+
+        if self.camera_controller is None or self.camera_controller.state is None:
+            logger.warning("No camera available for bake view")
+            return
+
+        if self.ui is None:
+            logger.warning("No UI available for bake view")
+            return
+
+        try:
+            # 1. Get current camera state from viser (position/look_at are reliable)
+            clients = list(self.server.get_clients().values())
+            if not clients:
+                logger.warning("No viser clients connected for bake view")
+                return
+
+            client = clients[0]
+
+            # Read position/look_at from viser (these are reliable, unlike wxyz)
+            pos_original = np.array(client.camera.position, dtype=np.float64)
+            look_at_original = np.array(client.camera.look_at, dtype=np.float64)
+            viser_wxyz = np.array(client.camera.wxyz, dtype=np.float64)
+
+            # Also read internal state for comparison
+            internal_az = self.camera_controller.state.azimuth if self.camera_controller.state else 0.0
+            internal_el = self.camera_controller.state.elevation if self.camera_controller.state else 0.0
+            internal_roll = self.camera_controller.state.roll if self.camera_controller.state else 0.0
+
+            logger.debug(
+                f"[BakeView] Viser state: pos={pos_original}, look_at={look_at_original}, "
+                f"wxyz={viser_wxyz}"
+            )
+            logger.debug(
+                f"[BakeView] Internal state: az={internal_az:.2f}, el={internal_el:.2f}, "
+                f"roll={internal_roll:.2f}"
+            )
+
+            # 2. Extract azimuth/elevation from position/look_at geometry
+            # This is UNAMBIGUOUS - no quaternion convention issues!
+            offset = pos_original - look_at_original
+            distance = float(np.linalg.norm(offset))
+            if distance < 1e-6:
+                logger.warning("Camera too close to look_at point")
+                return
+
+            offset_norm = offset / distance
+
+            # Extract elevation from Y component
+            az_current = float(np.degrees(np.arctan2(offset[0], offset[2])))
+            el_current = float(np.degrees(np.arcsin(np.clip(offset_norm[1], -1.0, 1.0))))
+
+            # Roll: use internal state (viser orbit controls don't change roll)
+            roll_current = 0.0
+            if self.camera_controller and self.camera_controller.state:
+                roll_current = self.camera_controller.state.roll
+
+            # Log extracted vs internal angles for debugging
+            az_diff = abs(az_current - internal_az)
+            el_diff = abs(el_current - internal_el)
+            # Handle azimuth wraparound (e.g., -135 vs 225)
+            if az_diff > 180:
+                az_diff = 360 - az_diff
+            logger.debug(
+                f"[BakeView] Extracted: az={az_current:.2f}, el={el_current:.2f}, roll={roll_current:.2f}"
+            )
+            if az_diff > 5.0 or el_diff > 5.0:
+                logger.warning(
+                    f"[BakeView] State mismatch! Extracted az/el differ from internal: "
+                    f"az_diff={az_diff:.2f}, el_diff={el_diff:.2f}"
+                )
+
+            # Warn about gimbal lock risk near poles
+            if abs(el_current) > 85.0:
+                logger.warning(
+                    f"[BakeView] Near pole (el={el_current:.2f}°) - azimuth may be unstable!"
+                )
+
+            # Check if look_at is not at origin (could affect results)
+            look_at_dist = float(np.linalg.norm(look_at_original))
+            if look_at_dist > 0.01:
+                logger.debug(
+                    f"[BakeView] Note: look_at not at origin: {look_at_original} (dist={look_at_dist:.3f})"
+                )
+
+            # 3. Compute R_current and R_default using VISER's look-at convention
+            # CRITICAL: Must match what viser ACTUALLY produces for camera.wxyz!
+            #
+            # Viser's look-at formula (different from OpenGL):
+            # - forward = normalize(look_at - position) [toward target]
+            # - right = normalize(cross(forward, up_hint))
+            # - up = cross(forward, right)  [NOTE: forward x right, not right x forward!]
+            # - R = [right, up, forward]  [camera looks down +Z toward target]
+            #
+            # This differs from OpenGL which has:
+            # - up = cross(right, forward)
+            # - R = [right, up, -forward]  [camera looks down -Z]
+
+            def viser_look_at_matrix(position: np.ndarray, target: np.ndarray) -> np.ndarray:
+                """Compute rotation matrix using VISER's look-at convention."""
+                forward = target - position
+                dist = np.linalg.norm(forward)
+                if dist < 1e-6:
+                    return np.eye(3)
+                forward = forward / dist
+
+                up_hint = np.array([0.0, 1.0, 0.0])
+                right = np.cross(forward, up_hint)
+                right_norm = np.linalg.norm(right)
+                if right_norm < 1e-6:
+                    # Looking straight up/down
+                    up_hint = np.array([0.0, 0.0, 1.0])
+                    right = np.cross(forward, up_hint)
+                    right_norm = np.linalg.norm(right)
+                right = right / right_norm
+
+                # VISER convention: up = forward x right (not right x forward!)
+                up = np.cross(forward, right)
+
+                # VISER convention: camera looks down +Z, so column 2 = forward (not -forward!)
+                return np.column_stack([right, up, forward])
+
+            # R_current from viser's actual wxyz (this is what rendering uses!)
+            R_current = vt.SO3(viser_wxyz).as_matrix()
+
+            # For comparison, compute what our viser_look_at_matrix would give
+            R_current_formula = viser_look_at_matrix(pos_original, look_at_original)
+            formula_vs_viser = float(np.linalg.norm(R_current - R_current_formula, 'fro'))
+            logger.debug(f"[BakeView] R_current (viser wxyz) vs R_current (viser_look_at formula): diff={formula_vs_viser:.6f}")
+
+            # Default iso view: az=45°, el=30°
+            az_default, el_default = 45.0, 30.0
+            az_rad = np.radians(az_default)
+            el_rad = np.radians(el_default)
+
+            # Default camera position at iso view around ORIGIN
+            pos_default = distance * np.array([
+                np.sin(az_rad) * np.cos(el_rad),  # X
+                np.sin(el_rad),                    # Y (up)
+                np.cos(az_rad) * np.cos(el_rad),  # Z
+            ])
+
+            # R_default using viser's look-at convention (matches what viser will produce)
+            R_default = viser_look_at_matrix(pos_default, np.zeros(3))
+
+            # 4. Compute camera delta (rotation that transforms current view to default view)
+            # R_delta such that: R_default = R_delta @ R_current
+            # => R_delta = R_default @ R_current.T
+            R_delta = R_default @ R_current.T
+            q_delta = rotation_matrix_to_quat(R_delta)
+
+            # Diagnostic: check if camera is at/near default position
+            az_diff_from_default = abs(az_current - 45.0)
+            if az_diff_from_default > 180:
+                az_diff_from_default = 360 - az_diff_from_default
+            el_diff_from_default = abs(el_current - 30.0)
+            roll_diff_from_default = abs(roll_current)  # default roll is 0
+            look_at_at_origin = float(np.linalg.norm(look_at_original)) < 0.01
+            near_default = (az_diff_from_default < 5.0 and el_diff_from_default < 5.0 and
+                           roll_diff_from_default < 5.0 and look_at_at_origin)
+
+            if near_default:
+                R_diff = float(np.linalg.norm(R_current - R_default, 'fro'))
+                logger.debug(
+                    f"[BakeView] Camera near default (az={az_current:.1f}, el={el_current:.1f}, roll={roll_current:.1f})! "
+                    f"R_current vs R_default diff: {R_diff:.6f}"
+                )
+                if R_diff > 0.01:
+                    logger.warning(
+                        f"[BakeView] R_current != R_default even at default position!\n"
+                        f"R_current (from viser wxyz):\n{R_current}\n"
+                        f"R_default (from viser_look_at_matrix):\n{R_default}"
+                    )
+
+            # Log R_delta info - if close to identity, camera is already near default
+            R_delta_trace = float(np.trace(R_delta))  # Identity has trace=3
+            logger.debug(f"[BakeView] R_delta trace: {R_delta_trace:.4f} (3.0 = identity)")
+
+            # Translation delta (use original position, not current which is now at iso)
+            t_delta = pos_default - R_delta @ pos_original
+            logger.debug(f"[BakeView] t_delta: {t_delta}")
+
+            # 5. Get current model transform
+            tv_current = self.ui.get_transform_values()
+            q_model = np.array(tv_current.rotation)  # wxyz
+            t_model = np.array(tv_current.translation)
+            s_model = tv_current.scale
+
+            # IMPORTANT: c_old is the center ACTUALLY used in the current transform
+            # This is needed for correct view preservation math
+            c_old = np.array(tv_current.center) if tv_current.center is not None else np.zeros(3)
+
+            # Determine the NEW center we want after baking
+            # If "Use Pivot" is checked, use negative of current translation as the new pivot
+            use_pivot = self.ui.use_pivot_checkbox.value if self.ui.use_pivot_checkbox else False
+            if use_pivot:
+                # Use negative of current translation as pivot point
+                c_new = -t_model.copy()
+                logger.debug(f"[BakeView] Use Pivot enabled: setting pivot to -{t_model} = {c_new}")
+            else:
+                # Keep the same center as before
+                c_new = c_old.copy()
+
+            logger.debug(f"[BakeView] c_old={c_old}, c_new={c_new}")
+
+            # Read raw slider values for debugging
+            slider_rx = self.ui.rotate_x_slider.value if self.ui.rotate_x_slider else 0.0
+            slider_ry = self.ui.rotate_y_slider.value if self.ui.rotate_y_slider else 0.0
+            slider_rz = self.ui.rotate_z_slider.value if self.ui.rotate_z_slider else 0.0
+
+            logger.debug(
+                f"[BakeView] Slider values: rx={slider_rx:.2f}, ry={slider_ry:.2f}, rz={slider_rz:.2f}"
+            )
+            logger.debug(
+                f"[BakeView] Current model: q={q_model}, t={t_model}, c_old={c_old}, c_new={c_new}"
+            )
+
+            # 6. Apply delta to model rotation: q_new = q_delta * q_model
+            q_new = quat_multiply(q_delta, q_model)
+
+            # 7. Apply delta to model translation WITH center correction
+            #
+            # The gsmod transform applies: P_world = R @ (P - c) + c + t
+            # For view preservation, the correct formula is:
+            #   t_new = R_delta @ t_model + t_delta + (R_delta - I) @ c_old + (I - R_new) @ (c_old - c_new)
+            #
+            # This accounts for:
+            # - (R_delta - I) @ c_old: correction for rotation around the OLD center
+            # - (I - R_new) @ (c_old - c_new): correction for changing the pivot point
+            #
+            R_new = R_delta @ vt.SO3(q_model).as_matrix()
+            old_center_correction = R_delta @ c_old - c_old  # = (R_delta - I) @ c_old
+            pivot_change_correction = (c_old - c_new) - R_new @ (c_old - c_new)  # = (I - R_new) @ (c_old - c_new)
+            t_new = R_delta @ t_model + t_delta + old_center_correction + pivot_change_correction
+
+            logger.debug(
+                f"[BakeView] old_center_correction={old_center_correction}, "
+                f"pivot_change_correction={pivot_change_correction}"
+            )
+
+            # 8. Decompose new rotation to Euler angles (extrinsic XYZ: R = Rz @ Ry @ Rx)
+            # This matches the composition order in get_transform_values()
+            R_new = vt.SO3(q_new).as_matrix()
+            rx, ry, rz = self._decompose_rotation_xyz(R_new)
+
+            # Verify round-trip: compose back and check matrix difference
+            from src.gsplay.rendering.quaternion_utils import quat_from_axis_angle
+            qx_verify = quat_from_axis_angle(np.array([1, 0, 0]), rx)
+            qy_verify = quat_from_axis_angle(np.array([0, 1, 0]), ry)
+            qz_verify = quat_from_axis_angle(np.array([0, 0, 1]), rz)
+            q_verify = quat_multiply(qz_verify, quat_multiply(qy_verify, qx_verify))
+            q_verify = q_verify / np.linalg.norm(q_verify)
+            R_verify = vt.SO3(q_verify).as_matrix()
+            matrix_diff = float(np.linalg.norm(R_new - R_verify))
+
+            logger.debug(
+                f"[BakeView] New model: q_new={q_new}, t_new={t_new}, "
+                f"euler=({np.degrees(rx):.2f}, {np.degrees(ry):.2f}, {np.degrees(rz):.2f})"
+            )
+            logger.debug(
+                f"[BakeView] Round-trip verify: q_verify={q_verify}, matrix_diff={matrix_diff:.6f}"
+            )
+            if matrix_diff > 1e-4:
+                logger.warning(
+                    f"[BakeView] ROUND-TRIP ERROR! Matrix difference {matrix_diff:.6f} > threshold"
+                )
+
+            # 9. Enter APP mode and sync internal state to match what we set
+            self.camera_controller._enter_app_mode()
+
+            try:
+                # Sync internal state to match the camera position we already set
+                self.camera_controller.state.set_from_orbit(
+                    azimuth=45.0,
+                    elevation=30.0,
+                    roll=0.0,
+                    distance=distance,
+                    look_at=np.zeros(3),
+                )
+
+                # 10. Set model sliders and camera together (batched for GUI refresh)
+                with client.atomic():
+                    if self.ui.rotate_x_slider:
+                        self.ui.rotate_x_slider.value = float(np.degrees(rx))
+                    if self.ui.rotate_y_slider:
+                        self.ui.rotate_y_slider.value = float(np.degrees(ry))
+                    if self.ui.rotate_z_slider:
+                        self.ui.rotate_z_slider.value = float(np.degrees(rz))
+
+                    if self.ui.translation_x_slider:
+                        self.ui.translation_x_slider.value = float(t_new[0])
+                    if self.ui.translation_y_slider:
+                        self.ui.translation_y_slider.value = float(t_new[1])
+                    if self.ui.translation_z_slider:
+                        self.ui.translation_z_slider.value = float(t_new[2])
+
+                    # Scale unchanged
+
+                    # Update pivot sliders to the new center value
+                    # (when use_pivot=True, c_new = -t_model)
+                    if use_pivot:
+                        if self.ui.pivot_x_slider:
+                            self.ui.pivot_x_slider.value = float(c_new[0])
+                        if self.ui.pivot_y_slider:
+                            self.ui.pivot_y_slider.value = float(c_new[1])
+                        if self.ui.pivot_z_slider:
+                            self.ui.pivot_z_slider.value = float(c_new[2])
+
+                    # 11. Set camera to iso position
+                    # Let viser compute wxyz from position/look_at/up (its internal formula)
+                    # Our R_default was computed using viser_look_at_matrix which matches viser's formula
+                    client.camera.position = tuple(pos_default)
+                    client.camera.look_at = (0.0, 0.0, 0.0)
+                    client.camera.up_direction = (0.0, 1.0, 0.0)
+
+                # Diagnostic: verify R_default matches viser's wxyz after setting
+                wxyz_after = np.array(client.camera.wxyz, dtype=np.float64)
+                R_after = vt.SO3(wxyz_after).as_matrix()
+                formula_vs_viser = float(np.linalg.norm(R_default - R_after, 'fro'))
+                logger.debug(f"[BakeView] Viser wxyz after set: {wxyz_after}")
+                logger.debug(f"[BakeView] R_default (formula) vs R_after (viser): diff={formula_vs_viser:.6f}")
+                if formula_vs_viser > 0.01:
+                    logger.warning(
+                        f"[BakeView] FORMULA MISMATCH! R_default vs viser wxyz: {formula_vs_viser:.6f}\n"
+                        f"R_default:\n{R_default}\n"
+                        f"R_after (viser):\n{R_after}"
+                    )
+
+                # Lock filter controls since bake view applies transformation
+                # (atomic() may suppress callbacks, so lock explicitly)
+                if self.ui.is_transform_active():
+                    self.ui.set_filter_controls_disabled(True)
+
+                # 12. Trigger final rerender
+                if self.viewer:
+                    self.render_component.rerender()
+
+            finally:
+                # 13. Exit APP mode (with longer cooldown to prevent race conditions)
+                # Use 0.3s to ensure viser has fully updated before accepting new input
+                self.camera_controller._enter_user_mode(cooldown=0.3)
+
+            # Compute angle difference from default for user info
+            az_from_default = abs(az_current - 45.0)
+            if az_from_default > 180:
+                az_from_default = 360 - az_from_default
+            el_from_default = abs(el_current - 30.0)
+            cam_angle_diff = np.sqrt(az_from_default**2 + el_from_default**2)
+
+            # Compute rotation magnitude from R_delta trace
+            # trace = 1 + 2*cos(angle), so angle = arccos((trace-1)/2)
+            rotation_angle = np.degrees(np.arccos(np.clip((R_delta_trace - 1) / 2, -1, 1)))
+
+            if cam_angle_diff < 5.0:
+                logger.info(
+                    f"Baked view (near default - minimal change): rotation=({np.degrees(rx):.1f}, {np.degrees(ry):.1f}, {np.degrees(rz):.1f})"
+                )
+            else:
+                logger.info(
+                    f"Baked view: rotation=({np.degrees(rx):.1f}, {np.degrees(ry):.1f}, {np.degrees(rz):.1f}), "
+                    f"translation=({t_new[0]:.3f}, {t_new[1]:.3f}, {t_new[2]:.3f}), "
+                    f"cam_delta={cam_angle_diff:.0f}°, rot_delta={rotation_angle:.0f}°"
+                )
+                if cam_angle_diff > 90:
+                    logger.info(
+                        f"Note: Camera was {cam_angle_diff:.0f}° from default iso view - "
+                        f"model rotated {rotation_angle:.0f}° to preserve scene appearance"
+                    )
+
+        except Exception as e:
+            logger.error(f"Failed to bake camera view: {e}", exc_info=True)
+
+    def _decompose_rotation_xyz(self, R: "np.ndarray") -> tuple[float, float, float]:
+        """Decompose rotation matrix to extrinsic XYZ Euler angles.
+
+        This matches the composition order in get_transform_values():
+        R = Rz @ Ry @ Rx (extrinsic XYZ)
+
+        Returns (rx, ry, rz) in radians.
+        """
+        import numpy as np
+
+        # For R = Rz @ Ry @ Rx:
+        # R[2,0] = -sin(ry)
+        # R[2,1] = sin(rx)*cos(ry)
+        # R[2,2] = cos(rx)*cos(ry)
+        # R[0,0] = cos(ry)*cos(rz)
+        # R[1,0] = cos(ry)*sin(rz)
+
+        sy = -R[2, 0]
+        cy = np.sqrt(1 - sy * sy)
+
+        if cy > 1e-6:
+            # Normal case
+            rx = np.arctan2(R[2, 1], R[2, 2])
+            ry = np.arctan2(sy, cy)
+            rz = np.arctan2(R[1, 0], R[0, 0])
+        else:
+            # Gimbal lock (ry = +/-90 degrees)
+            rx = np.arctan2(-R[1, 2], R[1, 1])
+            ry = np.pi / 2 if sy > 0 else -np.pi / 2
+            rz = 0.0
+
+        return (rx, ry, rz)
 
     def _handle_filter_reset(self) -> None:
         """Reset all filtering to defaults."""

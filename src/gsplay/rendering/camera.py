@@ -1,34 +1,42 @@
 """
-SuperSplat-style camera controls for the universal viewer.
+Camera controller for the GSPlay viewer.
 
-Provides practical enhancements to viser's built-in orbit controls:
-- Grid toggle
-- Focus on content (auto-frame scene)
-- Preset camera views (top, front, side, isometric)
-- FOV adjustment
-- Continuous rotation using quaternions (no gimbal lock)
+DESIGN: Explicit Mode-Based Camera Ownership
+============================================
 
-Uses quaternion-based state management for smooth rotation through all orientations.
+The camera can be in one of two modes:
+
+1. USER_MODE: Viser owns the camera
+   - User can orbit/pan/zoom with mouse
+   - We sync FROM viser to update our spherical state
+   - Slider changes are processed normally
+
+2. APP_MODE: We own the camera
+   - During rotation, presets, programmatic changes
+   - We push TO viser, ignore callbacks FROM viser
+   - Slider callbacks are blocked
+
+This explicit ownership model eliminates race conditions and makes
+the control flow easy to understand.
+
+Mode transitions:
+- start_auto_rotation() → APP_MODE
+- stop_auto_rotation()  → USER_MODE (with brief cooldown)
+- set_preset_view()     → APP_MODE briefly, then USER_MODE
+- slider interaction    → Only in USER_MODE
 """
 
 import logging
 import threading
 import time
+from enum import Enum
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 import viser
 
-# Import CameraState from its new home
-from src.gsplay.rendering.camera_state import CameraState
-
-# Import quaternion utilities (only those needed for camera state management)
-from src.gsplay.rendering.quaternion_utils import (
-    quat_from_look_at,
-    quat_to_rotation_matrix,
-)
-
-# Re-export factory functions from camera_ui for backward compatibility
-from src.gsplay.rendering.camera_ui import (
+from .camera_state import CameraState
+from .camera_ui import (
     PlaybackButton,
     create_fps_control,
     create_playback_controls,
@@ -36,13 +44,23 @@ from src.gsplay.rendering.camera_ui import (
     create_supersplat_camera_controls,
     create_view_controls,
 )
+from .quaternion_utils import quat_from_axis_angle, quat_from_euler_deg, quat_multiply, quat_to_rotation_matrix
+
+if TYPE_CHECKING:
+    pass
 
 logger = logging.getLogger(__name__)
 
-# Re-export CameraState for backward compatibility
+
+class CameraMode(Enum):
+    """Camera ownership mode."""
+    USER = "user"  # Viser owns camera, we sync from it
+    APP = "app"    # We own camera, we push to viser
+
 __all__ = [
     "CameraState",
-    "SuperSplatCamera",
+    "CameraController",
+    "SuperSplatCamera",  # Alias for backwards compatibility
     "create_view_controls",
     "create_fps_control",
     "create_quality_controls",
@@ -51,12 +69,17 @@ __all__ = [
     "PlaybackButton",
 ]
 
+# Default distance multiplier for camera positioning
+# distance = scene_diagonal * DEFAULT_DISTANCE_MULTIPLIER
+DEFAULT_DISTANCE_MULTIPLIER = 2.5
 
-class SuperSplatCamera:
+
+class CameraController:
     """
-    Camera enhancements for viser, inspired by SuperSplat.
+    Camera controller with proper thread safety and state management.
 
-    Uses quaternion-based state for smooth rotation without gimbal lock.
+    Uses spherical coordinates as primary representation.
+    Rotation is driven by render loop calling rotation_step().
     """
 
     def __init__(
@@ -72,396 +95,449 @@ class SuperSplatCamera:
         server : viser.ViserServer
             Viser server instance
         scene_bounds : dict | None
-            Scene bounds dictionary with keys: 'min_coords', 'max_coords', 'center', 'size'
+            Scene bounds with keys: 'min_coords', 'max_coords', 'center', 'size'
         """
         self.server = server
         self.scene_bounds = scene_bounds
 
-        # Grid
-        self.grid_handle: viser.SceneNodeHandle | None = None
-        self.grid_visible = False
+        # Camera state - single source of truth
+        self._state: CameraState | None = None
+        self._lock = threading.Lock()  # ONE lock for all state access
 
-        # World axis
-        self.world_axis_handle: viser.SceneNodeHandle | None = None
-        self.world_axis_visible = False
+        # Mode-based ownership (replaces scattered flags)
+        self._mode = CameraMode.USER
+        self._mode_until: float = 0.0  # APP mode extends until this time (for cooldown)
 
-        # Auto-rotation state (single source of truth)
-        self._rotation_thread: threading.Thread | None = None
-        self._rotation_active = False
+        # Rotation parameters (only used when mode == APP during rotation)
+        self._rotation_active = False  # Specific flag for render loop to check
         self._rotation_speed = 20.0  # degrees per second (positive=CW, negative=CCW)
-        self._rotation_axis = "y"  # "y" for azimuth, "x" for elevation
+        self._rotation_axis = "y"
+        self._last_rotation_time: float = 0.0
 
-        # Rotation state observers (callbacks notified on state change)
-        self._rotation_observers: list[callable] = []
+        # Quaternion-based rotation state (avoids gimbal lock)
+        # These capture viser's exact state at rotation start
+        self._rotation_base_wxyz: np.ndarray | None = None
+        self._rotation_base_position: np.ndarray | None = None
+        self._rotation_look_at: np.ndarray | None = None
+        self._rotation_accumulated_angle: float = 0.0
 
-        # Render callback (set by viewer to trigger renders during rotation)
-        self._render_callback: callable | None = None
+        # Headless rotation state (for rendering without viser clients)
+        # Updated by rotation_step() so streaming continues when browser closes
+        self._headless_wxyz: np.ndarray | None = None
+        self._headless_position: np.ndarray | None = None
+        self._headless_fov: float = 0.82  # Default ~47 degrees
+        self._headless_aspect: float = 16.0 / 9.0
 
-        # Sync viser callback (called at end of rotation to sync viser cameras)
-        self._sync_viser_callback: callable | None = None
-
-        # Slider sync callback (called during rotation to update UI sliders)
-        self._slider_sync_callback: callable | None = None
-
-        # Explicit camera state (single source of truth)
-        self.state: CameraState | None = None
-        self.state_lock = threading.Lock()
-
-        # Track which clients have been initialized with our camera state
-        # Clients not in this set will have their on_update events ignored
-        # (to prevent viser's default camera from overwriting our state)
+        # Client tracking
         self._initialized_clients: set[int] = set()
 
-        # Timestamp when rotation stopped - used to ignore on_update briefly after stop
-        self._rotation_stop_time: float = 0.0
+        # UI slider sync callback (set by camera_ui.py)
+        self._slider_sync_callback: Callable[[], None] | None = None
+        # Rerender callback (set by app.py to trigger re-render after camera changes)
+        self._rerender_callback: Callable[[], None] | None = None
 
-        # Store viser's up direction before rotation starts (to restore on stop)
-        self._pre_rotation_up: np.ndarray | None = None
+        # Grid and axis handles
+        self.grid_handle: viser.SceneNodeHandle | None = None
+        self.grid_visible = False
+        self.world_axis_handle: viser.SceneNodeHandle | None = None
+        self.world_axis_visible = False
 
         # Initialize
         self._setup_grid()
         self._setup_world_axis()
-        self._initialize_state_from_camera()
+        self._initialize_state()
 
-        logger.info("SuperSplatCamera initialized (event-driven sync)")
+        logger.info("CameraController initialized")
 
-    def _setup_grid(self) -> None:
-        """Create the ground plane grid."""
-        if self.scene_bounds is not None and "size" in self.scene_bounds:
-            size = self.scene_bounds["size"]
-            extent = float(np.max(size))
-            grid_size = extent * 2
-        else:
-            grid_size = 20.0
+    # =========================================================================
+    # State Access (Thread-Safe)
+    # =========================================================================
 
-        self.grid_handle = self.server.scene.add_grid(
-            name="/supersplat_grid",
-            width=grid_size,
-            height=grid_size,
-            plane="xz",
-            cell_size=grid_size / 20,
-            cell_color=(200, 200, 200),
-            cell_thickness=1.0,
-            section_size=grid_size / 4,
-            section_color=(100, 100, 100),
-            section_thickness=2.0,
-            visible=False,
-        )
+    @property
+    def state(self) -> CameraState | None:
+        """Get current camera state (for compatibility)."""
+        return self._state
 
-        logger.debug(f"Created grid with size {grid_size}")
+    @property
+    def state_lock(self) -> threading.Lock:
+        """Get state lock (for compatibility)."""
+        return self._lock
 
-    def _setup_world_axis(self) -> None:
-        """Create the world axis frame."""
-        if self.scene_bounds is not None and "size" in self.scene_bounds:
-            size = self.scene_bounds["size"]
-            extent = float(np.max(size))
-            axis_size = extent * 0.1
-        else:
-            axis_size = 2.0
+    def get_state(self) -> CameraState | None:
+        """Get thread-safe copy of current state."""
+        with self._lock:
+            return self._state.copy() if self._state else None
 
-        self.world_axis_handle = self.server.scene.add_frame(
-            name="/supersplat_world_axis",
-            wxyz=(1.0, 0.0, 0.0, 0.0),
-            position=(0.0, 0.0, 0.0),
-            axes_length=axis_size,
-            axes_radius=axis_size * 0.05,
-            visible=False,
-        )
+    # =========================================================================
+    # Mode Management (Camera Ownership)
+    # =========================================================================
 
-        logger.debug(f"Created world axis with size {axis_size}")
+    def is_app_controlled(self) -> bool:
+        """Check if app currently owns the camera (blocks viser sync)."""
+        if self._mode == CameraMode.APP:
+            return True
+        # Also check timed extension (cooldown after APP mode ends)
+        if time.perf_counter() < self._mode_until:
+            return True
+        return False
 
-    def _initialize_state_from_camera(self) -> None:
+    def _enter_app_mode(self) -> None:
+        """Take ownership of camera (during rotation, presets, etc.)."""
+        self._mode = CameraMode.APP
+
+    def _enter_user_mode(self, cooldown: float = 0.3) -> None:
+        """Release camera to user with brief cooldown to prevent race conditions."""
+        self._mode = CameraMode.USER
+        self._mode_until = time.perf_counter() + cooldown
+
+    # =========================================================================
+    # Viser Synchronization
+    # =========================================================================
+
+    def update_from_viser(self, client) -> None:
         """
-        Initialize camera state from current viser camera or scene bounds.
-        """
-        # Get first connected client
-        first_client = None
-        for client in self.server.get_clients().values():
-            first_client = client
-            break
+        Sync state from viser camera (called on client.camera.on_update).
 
-        if first_client is None:
-            # No clients - use origin as default look_at
-            center = np.array([0.0, 0.0, 0.0])
-            if self.scene_bounds is not None and "size" in self.scene_bounds:
-                size = np.array(self.scene_bounds["size"])
-                extent = float(np.linalg.norm(size))
-                distance = extent * 2.5
-            else:
-                distance = 10.0
+        Only runs in USER mode - when app owns camera, viser callbacks are ignored.
 
-            # Default isometric view (45 deg azimuth, 30 deg elevation)
-            state = CameraState(distance=distance, look_at=center)
-            state.set_from_euler(45.0, 30.0, 0.0)
-
-            with self.state_lock:
-                self.state = state
-
-            logger.debug("Initialized camera state with defaults (no clients)")
-            return
-
-        # Read from viser camera
-        camera_pos = np.array(first_client.camera.position)
-        look_at = np.array(first_client.camera.look_at)
-        up_dir = np.array(first_client.camera.up_direction)
-
-        # Calculate distance
-        distance = float(np.linalg.norm(camera_pos - look_at))
-
-        # Compute orientation from position/look_at/up_direction
-        # NOTE: Do NOT use camera.wxyz directly! Viser uses OpenCV convention
-        # (look=+Z, up=-Y) which differs from our convention (look=-Z, up=+Y).
-        orientation = quat_from_look_at(camera_pos, look_at, up_dir)
-
-        with self.state_lock:
-            self.state = CameraState(
-                orientation=orientation,
-                distance=distance,
-                look_at=look_at.copy(),
-            )
-
-        logger.debug(
-            f"Initialized camera state from viser: distance={distance:.2f}"
-        )
-
-    def apply_state_to_camera(self, clients: list | None = None) -> None:
-        """
-        Apply the current camera state to viser camera(s).
-
-        Uses quaternion orientation directly - no Euler conversion needed.
-
-        Parameters
-        ----------
-        clients : list[viser.ClientHandle] | None
-            Specific clients to update. If None, updates all connected clients.
-        """
-        if self.state is None:
-            logger.warning("Cannot apply state - state not initialized")
-            return
-
-        with self.state_lock:
-            orientation = self.state.orientation.copy()
-            distance = self.state.distance
-            look_at = self.state.look_at.copy()
-
-        # Calculate camera position from orientation and distance
-        # Camera looks down -Z in local space, so forward = R @ [0, 0, -1]
-        R = quat_to_rotation_matrix(orientation)
-        forward = R @ np.array([0.0, 0.0, -1.0])
-        camera_pos = look_at - forward * distance
-
-        # Calculate up direction from orientation
-        up_dir = R @ np.array([0.0, 1.0, 0.0])
-
-        # Apply to viser cameras
-        # NOTE: Do NOT set camera.wxyz directly! Viser uses OpenCV convention (look=+Z, up=-Y)
-        # which differs from our convention (look=-Z, up=+Y). Setting wxyz would cause viser
-        # to recompute position/look_at/up_direction with wrong convention, causing 180° flip.
-        # Instead, only set position/look_at/up_direction which are unambiguous.
-        target_clients = clients or list(self.server.get_clients().values())
-
-        # Update stop time to prevent on_update from overriding
-        self._rotation_stop_time = time.time()
-
-        for client in target_clients:
-            with client.atomic():
-                client.camera.position = tuple(camera_pos)
-                client.camera.look_at = tuple(look_at)
-                client.camera.up_direction = tuple(up_dir)
-
-        logger.debug(f"Applied state to camera: distance={distance:.2f}")
-
-    def set_render_callback(self, callback: callable) -> None:
-        """Set callback to trigger renders during rotation.
-
-        Parameters
-        ----------
-        callback : callable
-            Function that takes (delta_angle, axis) and applies rotation to c2w.
-        """
-        self._render_callback = callback
-
-    def set_sync_viser_callback(self, callback: callable) -> None:
-        """Set callback to sync viser cameras from c2w at end of rotation.
-
-        Parameters
-        ----------
-        callback : callable
-            Function with no arguments that syncs viser cameras from _shared_camera.c2w.
-        """
-        self._sync_viser_callback = callback
-
-    def set_slider_sync_callback(self, callback: callable) -> None:
-        """Set callback to sync UI sliders with camera state during rotation.
-
-        Parameters
-        ----------
-        callback : callable
-            Function with no arguments that updates UI sliders from camera.state.
-        """
-        self._slider_sync_callback = callback
-
-    def trigger_slider_sync(self) -> None:
-        """Trigger slider sync callback if set."""
-        if self._slider_sync_callback is not None:
-            try:
-                self._slider_sync_callback()
-            except Exception as e:
-                logger.debug(f"Slider sync callback error: {e}")
-
-    def sync_state_from_client(self, client) -> None:
-        """
-        Sync camera state from a specific client's camera.
-
-        This should be called from client.camera.on_update to update
-        camera.state when the user interacts with the camera.
+        Includes pole-crossing detection: if user orbits past a pole (elevation
+        hits ±89° while moving toward it), the camera flips through to the other
+        side (azimuth +180°, elevation inverts) for trackball-like behavior.
 
         Parameters
         ----------
         client : viser.ClientHandle
-            The client whose camera to read from
+            The client whose camera changed
         """
-        if self.state is None:
+        if self._state is None:
             return
 
-        # Only sync from initialized clients (ignore viser's default camera)
+        # Only sync from viser in USER mode
+        if self.is_app_controlled():
+            return
+
+        # Skip uninitialized clients (prevents viser default from overwriting)
         if client.client_id not in self._initialized_clients:
             return
 
-        # Skip sync during auto-rotation - rotation loop owns the state
-        if self._rotation_active:
-            return
-
-        # Skip sync briefly after rotation stops (allows viser sync to complete)
-        if time.time() - self._rotation_stop_time < 0.5:
-            return
-
         try:
-            camera_pos = np.array(client.camera.position)
-            look_at = np.array(client.camera.look_at)
-            up_dir = np.array(client.camera.up_direction)
+            with self._lock:
+                self._state.set_from_viser(
+                    client.camera.position,
+                    client.camera.look_at,
+                    client.camera.up_direction,
+                )
+                self._state.fov = client.camera.fov
+                self._state.aspect = client.camera.aspect
 
-            distance = float(np.linalg.norm(camera_pos - look_at))
-
-            # Compute orientation using our convention (look=-Z, up=+Y)
-            # This ensures consistent quaternion convention throughout the system
-            orientation = quat_from_look_at(camera_pos, look_at, up_dir)
-
-            with self.state_lock:
-                self.state.orientation = orientation
-                self.state.distance = distance
-                self.state.look_at = look_at.copy()
+            # Check for pole crossing (trackball-like behavior)
+            should_cross, _ = self._should_cross_pole()
+            if should_cross:
+                self._execute_pole_cross()
+                self.apply_to_viser([client])
 
         except Exception as e:
-            logger.debug(f"Error syncing state from client: {e}")
+            logger.debug(f"Error syncing from viser: {e}")
+
+    def apply_to_viser(self, clients=None) -> None:
+        """
+        Push current state to viser cameras.
+
+        Parameters
+        ----------
+        clients : list | None
+            Specific clients to update. If None, updates all.
+        """
+        if self._state is None:
+            return
+
+        with self._lock:
+            # Get position, look_at, and up from state
+            position = tuple(float(x) for x in self._state.position)
+            look_at = tuple(float(x) for x in self._state.look_at)
+            # Use computed up direction to apply roll (not hardcoded Y-up)
+            up_direction = tuple(float(x) for x in self._state.up)
+
+        target_clients = clients or list(self.server.get_clients().values())
+
+        for client in target_clients:
+            try:
+                with client.atomic():
+                    # DO NOT set wxyz explicitly - let viser compute it from position/look_at/up
+                    # This ensures consistency with viser_look_at_matrix in _bake_camera_view
+                    # Setting wxyz via quat_from_euler_deg uses a different convention than viser's
+                    # internal look-at computation, which causes bake view issues.
+                    client.camera.position = position
+                    client.camera.look_at = look_at
+                    client.camera.up_direction = up_direction
+            except Exception as e:
+                logger.debug(f"Error applying to viser client: {e}")
 
     def mark_client_initialized(self, client) -> None:
-        """
-        Mark a client as initialized (camera state has been applied).
-
-        After this, on_update events from this client will update camera.state.
-
-        Parameters
-        ----------
-        client : viser.ClientHandle
-            The client to mark as initialized
-        """
+        """Mark a client as initialized (safe to sync from)."""
         self._initialized_clients.add(client.client_id)
-        logger.debug(f"Client {client.client_id} marked as initialized")
+        logger.debug(f"Client {client.client_id} initialized")
 
-    def toggle_grid(self) -> None:
-        """Toggle grid visibility."""
-        if self.grid_handle is not None:
-            self.grid_visible = not self.grid_visible
-            self.grid_handle.visible = self.grid_visible
-            logger.info(f"Grid {'visible' if self.grid_visible else 'hidden'}")
+    def remove_client(self, client) -> None:
+        """Remove client from tracking (call on disconnect)."""
+        self._initialized_clients.discard(client.client_id)
+        logger.debug(f"Client {client.client_id} removed")
 
-    def set_preset_view(self, view: str) -> None:
+    # =========================================================================
+    # Pole Crossing (Trackball-like behavior)
+    # =========================================================================
+
+    def _should_cross_pole(self) -> tuple[bool, int]:
         """
-        Set camera to a preset view.
+        Check if camera should cross a pole.
+
+        Returns (should_cross, direction) where direction is +1 for north pole,
+        -1 for south pole, 0 for no crossing.
+        """
+        if self._state is None:
+            return False, 0
+
+        elev = self._state._elevation
+        prev_elev = self._state._prev_elevation
+        delta = elev - prev_elev
+
+        # Threshold for "at the pole" - use 88° to catch before hard clamp at 89°
+        POLE_THRESHOLD = 88.0
+
+        # If stuck at pole (both current and prev at pole), reset prev_elevation
+        # to allow crossing on next movement. This handles the case where user
+        # slowly drags to pole and releases mouse - without this, delta=0 forever.
+        if abs(elev) >= POLE_THRESHOLD and abs(prev_elev) >= POLE_THRESHOLD:
+            # Reset prev_elevation to just below threshold so next drag can trigger crossing
+            if elev >= POLE_THRESHOLD:
+                self._state._prev_elevation = POLE_THRESHOLD - 1.0  # 87°
+            else:
+                self._state._prev_elevation = -POLE_THRESHOLD + 1.0  # -87°
+            # Don't cross yet - let next update handle it with proper delta
+            return False, 0
+
+        if elev >= POLE_THRESHOLD and delta > 0.5:  # Moving up, hit north pole
+            return True, 1
+        elif elev <= -POLE_THRESHOLD and delta < -0.5:  # Moving down, hit south pole
+            return True, -1
+
+        return False, 0
+
+    def _execute_pole_cross(self) -> None:
+        """Flip camera through the pole (azimuth +180°, elevation inverts)."""
+        if self._state is None:
+            return
+
+        with self._lock:
+            new_azimuth = (self._state._azimuth + 180.0) % 360.0
+            new_elevation = -self._state._elevation
+            self._state.set_from_orbit(
+                new_azimuth,
+                new_elevation,
+                self._state._roll,
+                self._state._distance,
+                self._state.look_at,
+            )
+        logger.debug(f"Pole crossed: az={new_azimuth:.1f}, el={new_elevation:.1f}")
+
+    # =========================================================================
+    # UI Callbacks
+    # =========================================================================
+
+    def set_slider_sync_callback(self, callback: Callable[[bool], None]) -> None:
+        """Set callback to sync UI sliders with state.
+
+        Callback signature: (force: bool) -> None
+        When force=True, bypass is_app_controlled() check.
+        """
+        self._slider_sync_callback = callback
+
+    def trigger_slider_sync(self, force: bool = False) -> None:
+        """Trigger slider sync callback if set.
 
         Parameters
         ----------
-        view : str
-            One of: "top", "bottom", "front", "back", "left", "right", "iso"
+        force : bool
+            If True, bypass is_app_controlled() check (used by preset views)
         """
-        self.stop_auto_rotation()
-        if self.scene_bounds is None or "center" not in self.scene_bounds:
-            logger.warning("No scene bounds available for preset views")
-            return
-
-        center = np.array(self.scene_bounds["center"])
-        size = np.array(self.scene_bounds["size"])
-        extent = float(np.linalg.norm(size))
-        distance = extent * 1.5
-
-        # Define preset angles (azimuth, elevation)
-        presets = {
-            "top": (0.0, 90.0, 0.0),
-            "bottom": (0.0, -90.0, 0.0),
-            "front": (0.0, 0.0, 0.0),
-            "back": (180.0, 0.0, 0.0),
-            "left": (270.0, 0.0, 0.0),
-            "right": (90.0, 0.0, 0.0),
-            "iso": (45.0, 30.0, 0.0),
-        }
-
-        if view not in presets:
-            logger.error(f"Unknown view: {view}")
-            return
-
-        azimuth, elevation, roll = presets[view]
-
-        # Update state
-        if self.state is not None:
-            with self.state_lock:
-                self.state.set_from_euler(azimuth, elevation, roll)
-                self.state.distance = distance
-                self.state.look_at = center.copy()
-
-            self.apply_state_to_camera()
-
-        logger.info(f"Set camera to {view} view")
-
-    # === Rotation State Management ===
-
-    def add_rotation_observer(self, callback: callable) -> None:
-        """Register a callback to be notified when rotation state changes.
-
-        Parameters
-        ----------
-        callback : callable
-            Function that takes (is_active: bool, speed: float, axis: str)
-        """
-        if callback not in self._rotation_observers:
-            self._rotation_observers.append(callback)
-
-    def remove_rotation_observer(self, callback: callable) -> None:
-        """Unregister a rotation state observer."""
-        if callback in self._rotation_observers:
-            self._rotation_observers.remove(callback)
-
-    def _notify_rotation_observers(self) -> None:
-        """Notify all observers of rotation state change."""
-        for callback in self._rotation_observers:
+        if self._slider_sync_callback is not None:
             try:
-                callback(
-                    self._rotation_active,
-                    self._rotation_speed,
-                    self._rotation_axis,
-                )
+                self._slider_sync_callback(force)
             except Exception as e:
-                logger.debug(f"Rotation observer callback error: {e}")
+                logger.debug(f"Slider sync error: {e}")
+
+    def set_rerender_callback(self, callback: Callable[[], None]) -> None:
+        """Set callback to trigger re-render after camera changes."""
+        self._rerender_callback = callback
+
+    def trigger_rerender(self) -> None:
+        """Trigger rerender callback if set."""
+        if self._rerender_callback is not None:
+            try:
+                self._rerender_callback()
+            except Exception as e:
+                logger.debug(f"Rerender callback error: {e}")
+
+    # =========================================================================
+    # Rotation Control (Flag-based, no thread)
+    # =========================================================================
+
+    def start_auto_rotation(self, axis: str = "y", speed: float = 20.0) -> None:
+        """
+        Start continuous camera rotation using quaternions (no euler conversion).
+
+        This captures viser's exact camera state (wxyz, position, look_at) and rotates
+        directly using quaternion multiplication. This avoids:
+        - Gimbal lock issues with euler angles
+        - Convention mismatches between our euler and viser's quaternion
+        - Roll/azimuth jumps when starting rotation
+
+        Parameters
+        ----------
+        axis : str
+            "y" for horizontal orbit, "x" for vertical orbit
+        speed : float
+            Degrees per second (positive=CW, negative=CCW)
+        """
+        clients = list(self.server.get_clients().values())
+
+        if clients:
+            # Capture viser's EXACT state at rotation start
+            client = clients[0]
+            self._rotation_base_wxyz = np.array(client.camera.wxyz, dtype=np.float64)
+            self._rotation_base_position = np.array(client.camera.position, dtype=np.float64)
+            self._rotation_look_at = np.array(client.camera.look_at, dtype=np.float64)
+            # Also initialize headless state
+            self._headless_wxyz = self._rotation_base_wxyz.copy()
+            self._headless_position = self._rotation_base_position.copy()
+            self._headless_fov = client.camera.fov
+            self._headless_aspect = client.camera.aspect
+        elif self._headless_wxyz is not None:
+            # No clients but have headless state - use it
+            logger.info("Starting rotation from headless state (no clients)")
+            self._rotation_base_wxyz = self._headless_wxyz.copy()
+            self._rotation_base_position = self._headless_position.copy()
+            if self._state is not None:
+                with self._lock:
+                    self._rotation_look_at = self._state.look_at.copy()
+            else:
+                # Estimate look_at from position and forward direction
+                R = quat_to_rotation_matrix(self._rotation_base_wxyz)
+                forward = -R[:, 2]
+                self._rotation_look_at = self._rotation_base_position + forward * 5.0
+        elif self._state is not None:
+            # No clients, no headless state - build from CameraState
+            logger.info("Starting rotation from CameraState (no clients)")
+            with self._lock:
+                self._rotation_base_wxyz = quat_from_euler_deg(
+                    self._state._azimuth,
+                    self._state._elevation,
+                    self._state._roll
+                )
+                R = quat_to_rotation_matrix(self._rotation_base_wxyz)
+                forward = -R[:, 2]
+                position = self._state.look_at.astype(np.float64) - forward * self._state._distance
+                self._rotation_base_position = position
+                self._rotation_look_at = self._state.look_at.copy()
+                # Initialize headless state
+                self._headless_wxyz = self._rotation_base_wxyz.copy()
+                self._headless_position = self._rotation_base_position.copy()
+                self._headless_fov = self._state.fov if self._state.fov > 0.1 else 0.82
+                self._headless_aspect = self._state.aspect if self._state.aspect > 0.1 else 16.0 / 9.0
+        else:
+            logger.warning("Cannot rotate - no camera state available")
+            return
+
+        self._rotation_accumulated_angle = 0.0
+        self._enter_app_mode()  # Take ownership
+        self._rotation_active = True
+        self._rotation_axis = axis
+        self._rotation_speed = speed
+        self._last_rotation_time = time.perf_counter()
+        logger.info(f"Started rotation: axis={axis}, speed={speed}")
+
+    def stop_auto_rotation(self) -> None:
+        """Stop continuous rotation."""
+        if not self._rotation_active:
+            return
+
+        self._rotation_active = False
+        # No need to apply_to_viser - rotation_step already pushed to viser
+        # Just sync sliders from viser's current state
+        self.trigger_slider_sync()
+        self._enter_user_mode()  # Release with cooldown
+        logger.info("Stopped rotation")
+
+    def rotation_step(self) -> bool:
+        """
+        Advance rotation by one step using quaternion math. Called by render loop.
+
+        This rotates directly from the captured base state using quaternion
+        multiplication, completely avoiding euler angle conversion.
+
+        Returns True if rotation occurred.
+        """
+        if not self._rotation_active:
+            return False
+        if self._rotation_base_wxyz is None or self._rotation_base_position is None:
+            return False
+
+        current_time = time.perf_counter()
+        dt = current_time - self._last_rotation_time
+        self._last_rotation_time = current_time
+
+        # Clamp dt to avoid jumps (e.g., after tab switch)
+        dt = min(dt, 0.1)
+
+        # Accumulate rotation angle
+        delta = self._rotation_speed * dt
+        self._rotation_accumulated_angle += delta
+        angle_rad = np.radians(self._rotation_accumulated_angle)
+
+        # Extract rotation axis from viewer's orientation (captured at rotation start)
+        # This makes rotation follow the camera's local frame
+        R_base = quat_to_rotation_matrix(self._rotation_base_wxyz)
+
+        if self._rotation_axis == "y":
+            # Orbit around viewer's UP direction (local +Y axis)
+            rotation_axis = R_base[:, 1]
+        else:
+            # Orbit around viewer's RIGHT direction (local +X axis)
+            rotation_axis = R_base[:, 0]
+
+        rot_quat = quat_from_axis_angle(rotation_axis, angle_rad)
+
+        # Rotate position around look_at target
+        offset = self._rotation_base_position - self._rotation_look_at
+        R = quat_to_rotation_matrix(rot_quat)
+        new_offset = R @ offset
+        new_position = self._rotation_look_at + new_offset
+
+        # Rotate orientation (quaternion multiplication)
+        new_wxyz = quat_multiply(rot_quat, self._rotation_base_wxyz)
+
+        # Store headless state (for rendering when no clients connected)
+        self._headless_wxyz = new_wxyz.copy()
+        self._headless_position = new_position.copy()
+
+        # Push to viser clients if they exist
+        # Use atomic() to prevent race conditions - wxyz and position must
+        # be written together to avoid jittering from callbacks firing between them
+        clients = list(self.server.get_clients().values())
+        if clients:
+            for client in clients:
+                with client.atomic():
+                    client.camera.wxyz = tuple(new_wxyz)
+                    client.camera.position = tuple(new_position)
+            # Capture fov/aspect for headless rendering
+            self._headless_fov = clients[0].camera.fov
+            self._headless_aspect = clients[0].camera.aspect
+        # Note: rotation continues even without clients (headless mode)
+
+        return True
 
     def get_rotation_state(self) -> dict:
-        """Get current rotation state.
-
-        Returns
-        -------
-        dict
-            {"active": bool, "speed": float, "axis": str, "direction": str}
-            direction is "cw", "ccw", or "stopped"
-        """
+        """Get current rotation state."""
         if not self._rotation_active:
             direction = "stopped"
         elif self._rotation_speed > 0:
@@ -477,190 +553,202 @@ class SuperSplatCamera:
         }
 
     def set_rotation_speed(self, speed: float) -> None:
-        """Set rotation speed without changing active state.
-
-        Parameters
-        ----------
-        speed : float
-            Speed in degrees per second (sign determines direction)
-        """
-        old_speed = self._rotation_speed
+        """Set rotation speed without changing active state."""
         self._rotation_speed = speed
-        if old_speed != speed:
-            self._notify_rotation_observers()
 
-    def focus_on_bounds(
-        self, bounds: dict | None = None, duration: float = 0.5
-    ) -> None:
+    # =========================================================================
+    # Preset Views
+    # =========================================================================
+
+    def set_preset_view(self, view: str) -> None:
         """
-        Focus camera on scene bounds.
+        Set camera to a preset view.
 
         Parameters
         ----------
-        bounds : dict | None
-            Bounds dictionary to focus on. If None, uses scene_bounds.
-        duration : float
-            Animation duration in seconds (not currently implemented)
+        view : str
+            One of: "top", "bottom", "front", "back", "left", "right", "iso"
         """
-        self.stop_auto_rotation()
+        # Stop rotation if active (will release to user mode)
+        if self._rotation_active:
+            self._rotation_active = False
+
+        # Take brief ownership for the transition
+        self._enter_app_mode()
+
+        if self.scene_bounds is None or "size" not in self.scene_bounds:
+            logger.warning("No scene bounds for preset views")
+            self._enter_user_mode()
+            return
+
+        # look_at defaults to origin (0, 0, 0), distance from scene size
+        look_at = np.zeros(3, dtype=np.float32)
+        size = np.array(self.scene_bounds["size"])
+        extent = float(np.linalg.norm(size))
+        distance = extent * DEFAULT_DISTANCE_MULTIPLIER
+
+        # Note: top/bottom use 89/-89 to avoid exact poles
+        presets = {
+            "top": (0.0, 89.0, 0.0),
+            "bottom": (0.0, -89.0, 0.0),
+            "front": (0.0, 0.0, 0.0),
+            "back": (180.0, 0.0, 0.0),
+            "left": (270.0, 0.0, 0.0),
+            "right": (90.0, 0.0, 0.0),
+            "iso": (45.0, 30.0, 0.0),
+        }
+
+        if view not in presets:
+            logger.error(f"Unknown view: {view}")
+            self._enter_user_mode()
+            return
+
+        azimuth, elevation, roll = presets[view]
+
+        with self._lock:
+            self._state.set_from_orbit(azimuth, elevation, roll, distance, look_at)
+
+        self.apply_to_viser()
+        self.trigger_slider_sync(force=True)  # Force sync even in APP mode
+        self.trigger_rerender()  # Force re-render after camera change
+        self._enter_user_mode()  # Release with cooldown
+        logger.info(f"Set {view} view")
+
+    def focus_on_bounds(self, bounds: dict | None = None) -> None:
+        """Focus camera on scene bounds."""
+        # Stop rotation if active
+        if self._rotation_active:
+            self._rotation_active = False
+
+        # Take brief ownership
+        self._enter_app_mode()
+
         if bounds is None:
             bounds = self.scene_bounds
 
         if bounds is None or "center" not in bounds:
-            logger.warning("No bounds available to focus on")
+            logger.warning("No bounds to focus on")
+            self._enter_user_mode()
             return
 
         center = np.array(bounds["center"])
         size = np.array(bounds["size"])
         extent = float(np.linalg.norm(size))
-        distance = extent * 1.5
+        distance = extent * DEFAULT_DISTANCE_MULTIPLIER
 
-        # Update state - keep current orientation
-        if self.state is not None:
-            with self.state_lock:
-                self.state.distance = distance
-                self.state.look_at = center.copy()
+        with self._lock:
+            # Update look_at and distance, keep current orientation
+            self._state.look_at = center.astype(np.float32)
+            self._state._distance = distance
+            self._state._invalidate_c2w()
 
-            self.apply_state_to_camera()
+        self.apply_to_viser()
+        self.trigger_slider_sync(force=True)  # Force sync even in APP mode
+        self.trigger_rerender()  # Force re-render after camera change
+        self._enter_user_mode()  # Release with cooldown
+        logger.info(f"Focused on bounds: center={center}")
 
-        logger.info(f"Focused camera on bounds: center={center}, distance={distance}")
+    # =========================================================================
+    # Grid and Axis
+    # =========================================================================
 
-    def start_auto_rotation(self, axis: str = "y", speed: float = 20.0) -> None:
-        """
-        Start continuous camera rotation around the scene.
+    def _setup_grid(self) -> None:
+        """Create ground plane grid."""
+        if self.scene_bounds is not None and "size" in self.scene_bounds:
+            size = self.scene_bounds["size"]
+            grid_size = float(np.max(size)) * 2
+        else:
+            grid_size = 20.0
 
-        Rotation works directly on SharedRenderer._shared_camera.c2w.
-        No quaternion conversion needed - uses rotation matrices directly.
+        self.grid_handle = self.server.scene.add_grid(
+            name="/camera_grid",
+            width=grid_size,
+            height=grid_size,
+            plane="xz",
+            cell_size=grid_size / 20,
+            cell_color=(200, 200, 200),
+            cell_thickness=1.0,
+            section_size=grid_size / 4,
+            section_color=(100, 100, 100),
+            section_thickness=2.0,
+            visible=False,
+        )
 
-        Parameters
-        ----------
-        axis : str
-            Rotation axis: "y" (horizontal/azimuth) or "x" (vertical/elevation)
-        speed : float
-            Rotation speed in degrees per second
-        """
-        if self._rotation_active:
-            logger.debug("Stopping existing rotation to start new one")
-            self.stop_auto_rotation()
+    def _setup_world_axis(self) -> None:
+        """Create world axis frame."""
+        if self.scene_bounds is not None and "size" in self.scene_bounds:
+            axis_size = float(np.max(self.scene_bounds["size"])) * 0.1
+        else:
+            axis_size = 2.0
 
-        if self.state is None:
-            logger.warning("Cannot start rotation - state not initialized")
-            return
+        self.world_axis_handle = self.server.scene.add_frame(
+            name="/camera_world_axis",
+            wxyz=(1.0, 0.0, 0.0, 0.0),
+            position=(0.0, 0.0, 0.0),
+            axes_length=axis_size,
+            axes_radius=axis_size * 0.05,
+            visible=False,
+        )
 
-        # Save viser's current up direction before rotation
-        for client in self.server.get_clients().values():
-            self._pre_rotation_up = np.array(client.camera.up_direction)
-            break
-        if self._pre_rotation_up is None:
-            self._pre_rotation_up = np.array([0.0, 1.0, 0.0])
-
-        self._rotation_active = True
-        self._rotation_axis = axis
-        self._rotation_speed = speed
-
-        # Notify observers of state change
-        self._notify_rotation_observers()
-
-        def rotation_loop():
-            """Continuous rotation working directly on c2w matrix.
-
-            Single source of truth: SharedRenderer._shared_camera.c2w
-            No quaternion conversion - works directly with rotation matrices.
-            """
-            last_time = time.time()
-
-            while self._rotation_active:
-                try:
-                    current_time = time.time()
-                    dt = current_time - last_time
-                    last_time = current_time
-
-                    # Calculate rotation angle for this frame
-                    angle_rad = np.radians(self._rotation_speed * dt)
-
-                    # Trigger render callback with delta angle
-                    # The callback will apply rotation directly to c2w
-                    if self._render_callback is not None:
-                        try:
-                            self._render_callback(angle_rad, axis)
-                        except Exception as e:
-                            logger.error(f"Render callback error: {e}", exc_info=True)
-
-                    time.sleep(0.05)  # 20 FPS
-
-                except Exception as e:
-                    logger.error(f"Error in rotation loop: {e}")
-                    self._rotation_active = False
-                    break
-
-        self._rotation_thread = threading.Thread(target=rotation_loop, daemon=True)
-        self._rotation_thread.start()
-        logger.info(f"Started auto-rotation around {axis} axis at {speed} deg/s")
-
-    def stop_auto_rotation(self) -> None:
-        """Stop continuous camera rotation."""
-        if not self._rotation_active:
-            return
-
-        # Record stop time FIRST - on_update checks this before _rotation_active
-        self._rotation_stop_time = time.time()
-
-        # Now stop rotation
-        self._rotation_active = False
-        if self._rotation_thread:
-            self._rotation_thread.join(timeout=1.0)
-            self._rotation_thread = None
-
-        # Notify observers (UI button state)
-        self._notify_rotation_observers()
-
-        # Sync viser cameras from current renderer state
-        if self._sync_viser_callback is not None:
-            try:
-                self._sync_viser_callback()
-            except Exception as e:
-                logger.debug(f"Sync viser callback error: {e}")
-
-        logger.info("Stopped auto-rotation")
+    def toggle_grid(self) -> None:
+        """Toggle grid visibility."""
+        if self.grid_handle is not None:
+            self.grid_visible = not self.grid_visible
+            self.grid_handle.visible = self.grid_visible
 
     def update_scene_bounds(self, bounds: dict | None) -> None:
-        """
-        Update scene bounds and recreate grid if needed.
-
-        Parameters
-        ----------
-        bounds : dict | None
-            New scene bounds dictionary
-        """
+        """Update scene bounds and recreate grid."""
         self.scene_bounds = bounds
-
         if self.grid_handle is not None:
             self.grid_handle.remove()
-
         self._setup_grid()
-        logger.info("Updated scene bounds and grid")
 
-    # === Backwards Compatibility Methods ===
-    # These methods are kept for compatibility with existing code but use
-    # quaternions internally.
+    # =========================================================================
+    # Initialization
+    # =========================================================================
+
+    def _initialize_state(self) -> None:
+        """Initialize camera state from scene bounds or defaults."""
+        # Determine distance from scene bounds, but look_at defaults to origin
+        if self.scene_bounds is not None and "size" in self.scene_bounds:
+            size = np.array(self.scene_bounds["size"])
+            distance = float(np.linalg.norm(size)) * DEFAULT_DISTANCE_MULTIPLIER
+        else:
+            distance = 10.0
+
+        # Default look_at is always origin (0, 0, 0)
+        # Users can adjust via View panel sliders or Center button
+        look_at = np.zeros(3, dtype=np.float32)
+
+        # Create state with default isometric view using new spherical-primary constructor
+        self._state = CameraState(
+            _azimuth=45.0,
+            _elevation=30.0,
+            _roll=0.0,
+            _distance=distance,
+            look_at=look_at,
+        )
+
+        logger.debug(f"Initialized state: distance={distance:.2f}, look_at=(0,0,0)")
+
+    # =========================================================================
+    # Legacy Compatibility
+    # =========================================================================
+
+    def apply_state_to_camera(self, clients=None) -> None:
+        """Legacy alias for apply_to_viser."""
+        self.apply_to_viser(clients)
+
+    def sync_state_from_client(self, client) -> None:
+        """Legacy alias for update_from_viser."""
+        self.update_from_viser(client)
 
     def sync_state_from_camera(self) -> None:
-        """
-        Sync the camera state from the first initialized client.
-
-        Backwards compatibility method. Prefers sync_state_from_client().
-        """
-        if self.state is None:
-            logger.warning("Cannot sync state - state not initialized")
-            return
-
-        # Find first initialized client
+        """Legacy: sync from first initialized client."""
         for client in self.server.get_clients().values():
             if client.client_id in self._initialized_clients:
-                self.sync_state_from_client(client)
+                self.update_from_viser(client)
                 return
-
-        logger.debug("No initialized clients to sync from")
 
     def orbit_to_angle(
         self,
@@ -672,129 +760,52 @@ class SuperSplatCamera:
         explicit_distance: float | None = None,
         explicit_lookat: np.ndarray | None = None,
     ) -> None:
-        """
-        Set camera to a specific angle (backwards compatibility).
-
-        Now uses quaternion state internally.
-
-        Parameters
-        ----------
-        azimuth : float
-            Azimuth angle in degrees (0-360)
-        elevation : float
-            Elevation angle in degrees (-90 to 90)
-        roll : float
-            Roll angle in degrees
-        preserve_distance : bool
-            If True, maintains current camera distance
-        preserve_lookat : bool
-            If True, maintains current look-at point
-        explicit_distance : float | None
-            If provided, uses this exact distance
-        explicit_lookat : np.ndarray | None
-            If provided, uses this exact look-at point
-        """
-        if self.state is None:
-            logger.warning("Cannot orbit - state not initialized")
+        """Legacy: set camera to specific angle."""
+        if self._state is None:
             return
 
-        with self.state_lock:
-            # Set orientation from Euler angles
-            self.state.set_from_euler(azimuth, elevation, roll)
+        with self._lock:
+            distance = explicit_distance or (self._state.distance if preserve_distance else None)
+            look_at = explicit_lookat if explicit_lookat is not None else (
+                self._state.look_at if preserve_lookat else None
+            )
 
-            # Handle distance
-            if explicit_distance is not None:
-                self.state.distance = explicit_distance
-            elif not preserve_distance and self.scene_bounds is not None:
+            if distance is None and self.scene_bounds is not None:
                 size = np.array(self.scene_bounds["size"])
-                extent = float(np.linalg.norm(size))
-                self.state.distance = extent * 1.5
+                distance = float(np.linalg.norm(size)) * DEFAULT_DISTANCE_MULTIPLIER
 
-            # Handle look-at
-            if explicit_lookat is not None:
-                self.state.look_at = explicit_lookat.copy()
-            elif not preserve_lookat and self.scene_bounds is not None:
-                self.state.look_at = np.array(self.scene_bounds["center"])
+            if look_at is None:
+                # Default look_at is origin (0, 0, 0)
+                look_at = np.zeros(3, dtype=np.float32)
 
-        self.apply_state_to_camera()
+            self._state.set_from_orbit(azimuth, elevation, roll, distance, look_at)
 
-        logger.debug(f"Orbited to azimuth={azimuth}, elevation={elevation}")
+        self.apply_to_viser()
 
     def calculate_azimuth_elevation(
         self,
-        camera_pos: np.ndarray,
-        look_at: np.ndarray,
-        up_direction: np.ndarray | None = None,
+        camera_pos: np.ndarray = None,
+        look_at: np.ndarray = None,
+        up_direction: np.ndarray = None,
         detect_flip: bool = True,
     ) -> tuple[float, float]:
-        """
-        Calculate azimuth and elevation from camera position (backwards compatibility).
-
-        With quaternions, this is derived from state properties.
-
-        Parameters
-        ----------
-        camera_pos : np.ndarray
-            Camera position (not used - reads from state)
-        look_at : np.ndarray
-            Look-at point (not used - reads from state)
-        up_direction : np.ndarray | None
-            Camera up direction (not used)
-        detect_flip : bool
-            Whether to detect flip (not used with quaternions)
-
-        Returns
-        -------
-        tuple[float, float]
-            (azimuth, elevation) in degrees
-        """
-        if self.state is None:
+        """Legacy: get azimuth/elevation from state."""
+        if self._state is None:
             return (0.0, 0.0)
+        with self._lock:
+            return (self._state.azimuth, self._state.elevation)
 
-        with self.state_lock:
-            azimuth = self.state.azimuth
-            elevation = self.state.elevation
-
-        return (azimuth, elevation)
-
-    def _calculate_roll_from_camera(
-        self,
-        camera_pos: np.ndarray,
-        look_at: np.ndarray,
-        up_direction: np.ndarray,
-        elevation: float,
-    ) -> float:
-        """
-        Calculate roll angle (backwards compatibility).
-
-        With quaternions, roll is derived from state.
-
-        Returns
-        -------
-        float
-            Roll angle in degrees
-        """
-        if self.state is None:
+    def _calculate_roll_from_camera(self, *args, **kwargs) -> float:
+        """Legacy: get roll from state."""
+        if self._state is None:
             return 0.0
-
-        with self.state_lock:
-            return self.state.roll
+        with self._lock:
+            return self._state.roll
 
     def validate_state(self, state: CameraState) -> CameraState:
-        """
-        Validate camera state (backwards compatibility).
-
-        With quaternion state, validation is minimal since quaternions
-        auto-normalize and don't have Euler angle range issues.
-
-        Parameters
-        ----------
-        state : CameraState
-            State to validate
-
-        Returns
-        -------
-        CameraState
-            Validated state (copy)
-        """
+        """Legacy: validation (no-op)."""
         return state.copy()
+
+
+# Alias for backwards compatibility
+SuperSplatCamera = CameraController

@@ -200,13 +200,33 @@ class HandlerManager:
             ui.translation_x_slider,
             ui.translation_y_slider,
             ui.translation_z_slider,
-            ui.global_scale_slider,
+            # Per-axis scale (gsmod 0.1.7)
+            ui.scale_x_slider,
+            ui.scale_y_slider,
+            ui.scale_z_slider,
+            # Rotation
             ui.rotate_x_slider,
             ui.rotate_y_slider,
             ui.rotate_z_slider,
+            # Pivot point (gsmod 0.1.7 center)
+            ui.pivot_x_slider,
+            ui.pivot_y_slider,
+            ui.pivot_z_slider,
         ]
 
         self._setup_slider_group(transform_sliders, "transform")
+
+        # Use Pivot checkbox triggers rerender
+        if ui.use_pivot_checkbox is not None:
+            @ui.use_pivot_checkbox.on_update
+            def _on_use_pivot_change(_):
+                self.event_bus.emit(EventType.RERENDER_REQUESTED)
+
+        # Bake View button - bakes camera view into model transform
+        if ui.copy_center_button is not None:
+            @ui.copy_center_button.on_click
+            def _on_bake_view(_):
+                self.event_bus.emit(EventType.BAKE_VIEW_REQUESTED)
 
     def setup_animation_callbacks(self, ui: UIHandles) -> None:
         """
@@ -309,13 +329,13 @@ class HandlerManager:
             ui.sphere_center_y,
             ui.sphere_center_z,
             ui.sphere_radius,
-            # Box filter
-            ui.box_min_x,
-            ui.box_min_y,
-            ui.box_min_z,
-            ui.box_max_x,
-            ui.box_max_y,
-            ui.box_max_z,
+            # Box filter (center + size)
+            ui.box_center_x,
+            ui.box_center_y,
+            ui.box_center_z,
+            ui.box_size_x,
+            ui.box_size_y,
+            ui.box_size_z,
             # Ellipsoid filter
             ui.ellipsoid_center_x,
             ui.ellipsoid_center_y,
@@ -366,14 +386,11 @@ class HandlerManager:
                 if ui.sphere_radius.value < 0.1:
                     ui.sphere_radius.value = 10.0
             elif spatial_type == "Box":
-                # Set reasonable default box bounds if not set
-                if ui.box_min_x is not None and ui.box_min_x.value == ui.box_max_x.value:
-                    ui.box_min_x.value = -5.0
-                    ui.box_min_y.value = -5.0
-                    ui.box_min_z.value = -5.0
-                    ui.box_max_x.value = 5.0
-                    ui.box_max_y.value = 5.0
-                    ui.box_max_z.value = 5.0
+                # Set reasonable default box size if not set
+                if ui.box_size_x is not None and ui.box_size_x.value < 0.2:
+                    ui.box_size_x.value = 10.0
+                    ui.box_size_y.value = 10.0
+                    ui.box_size_z.value = 10.0
             elif spatial_type == "Ellipsoid":
                 # Set reasonable default radii if not set
                 if ui.ellipsoid_radius_x is not None and ui.ellipsoid_radius_x.value < 0.1:
