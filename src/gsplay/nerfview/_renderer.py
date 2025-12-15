@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-import os
 import sys
 import threading
 import time
@@ -617,7 +616,7 @@ class SharedRenderer(threading.Thread):
         # Debug: Log when rotation is active but we might miss it
         if ctrl is not None and getattr(ctrl, "_rotation_active", False):
             if not hasattr(self, "_last_rotation_log") or time.time() - self._last_rotation_log > 3:
-                logger.info(f"[ROTATION] Detected rotation_active=True on camera_controller")
+                logger.info("[ROTATION] Detected rotation_active=True on camera_controller")
                 self._last_rotation_log = time.time()
         return ctrl
 

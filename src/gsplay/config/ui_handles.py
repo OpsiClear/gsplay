@@ -21,7 +21,6 @@ from src.gsplay.config.rotation_conversions import (
     quaternion_to_matrix as _quaternion_to_matrix,
     matrix_to_euler_deg as _matrix_to_euler_deg,
     camera_to_frustum_axis_angle as _camera_to_frustum_axis_angle,
-    camera_to_frustum_euler_deg,
 )
 
 if TYPE_CHECKING:
@@ -87,7 +86,9 @@ class UIHandles:
     translation_x_slider: viser.GuiSliderHandle | None = None
     translation_y_slider: viser.GuiSliderHandle | None = None
     translation_z_slider: viser.GuiSliderHandle | None = None
-    # Per-axis scale (gsmod 0.1.7)
+    # Main uniform scale
+    scale_slider: viser.GuiSliderHandle | None = None
+    # Per-axis relative scale (multiplied by main scale)
     scale_x_slider: viser.GuiSliderHandle | None = None
     scale_y_slider: viser.GuiSliderHandle | None = None
     scale_z_slider: viser.GuiSliderHandle | None = None
@@ -183,13 +184,30 @@ class UIHandles:
     # Instance control
     terminate_button: viser.GuiButtonHandle | None = None
 
+    def _get_value(self, control, default: float) -> float:
+        """Safely get control value with fallback.
+
+        Parameters
+        ----------
+        control : GuiSliderHandle | GuiCheckboxHandle | None
+            The UI control to read from
+        default : float
+            Default value if control is None
+
+        Returns
+        -------
+        float
+            The control's value or the default
+        """
+        return control.value if control else default
+
     def get_color_values(self) -> ColorValues:
         """Extract current color values from UI with proper mapping."""
         # Get raw UI values
-        temp_ui = self.temperature_slider.value if self.temperature_slider else 0.5
-        tint_ui = self.tint_slider.value if self.tint_slider else 0.5
-        shadows_ui = self.shadows_slider.value if self.shadows_slider else 1.0
-        highlights_ui = self.highlights_slider.value if self.highlights_slider else 1.0
+        temp_ui = self._get_value(self.temperature_slider, 0.5)
+        tint_ui = self._get_value(self.tint_slider, 0.5)
+        shadows_ui = self._get_value(self.shadows_slider, 1.0)
+        highlights_ui = self._get_value(self.highlights_slider, 1.0)
 
         # Map UI ranges to gsmod ranges
         # Temperature: UI [0, 1] -> gsmod [-1, 1]
@@ -203,21 +221,21 @@ class UIHandles:
         highlights = float(np.clip(highlights_ui - 1.0, -1.0, 1.0))
 
         return ColorValues(
-            brightness=self.brightness_slider.value if self.brightness_slider else 1.0,
-            contrast=self.contrast_slider.value if self.contrast_slider else 1.0,
-            saturation=self.saturation_slider.value if self.saturation_slider else 1.0,
-            vibrance=self.vibrance_slider.value if self.vibrance_slider else 1.0,
-            hue_shift=self.hue_shift_slider.value if self.hue_shift_slider else 0.0,
-            gamma=self.gamma_slider.value if self.gamma_slider else 1.0,
+            brightness=self._get_value(self.brightness_slider, 1.0),
+            contrast=self._get_value(self.contrast_slider, 1.0),
+            saturation=self._get_value(self.saturation_slider, 1.0),
+            vibrance=self._get_value(self.vibrance_slider, 1.0),
+            hue_shift=self._get_value(self.hue_shift_slider, 0.0),
+            gamma=self._get_value(self.gamma_slider, 1.0),
             temperature=temperature,
             tint=tint,
             shadows=shadows,
             highlights=highlights,
-            fade=self.fade_slider.value if self.fade_slider else 0.0,
-            shadow_tint_hue=self.shadow_tint_hue_slider.value if self.shadow_tint_hue_slider else 0.0,
-            shadow_tint_sat=self.shadow_tint_sat_slider.value if self.shadow_tint_sat_slider else 0.0,
-            highlight_tint_hue=self.highlight_tint_hue_slider.value if self.highlight_tint_hue_slider else 0.0,
-            highlight_tint_sat=self.highlight_tint_sat_slider.value if self.highlight_tint_sat_slider else 0.0,
+            fade=self._get_value(self.fade_slider, 0.0),
+            shadow_tint_hue=self._get_value(self.shadow_tint_hue_slider, 0.0),
+            shadow_tint_sat=self._get_value(self.shadow_tint_sat_slider, 0.0),
+            highlight_tint_hue=self._get_value(self.highlight_tint_hue_slider, 0.0),
+            highlight_tint_sat=self._get_value(self.highlight_tint_sat_slider, 0.0),
         )
 
     def get_transform_values(self) -> TransformValues:
@@ -238,9 +256,9 @@ class UIHandles:
         )
 
         # Get world-axis rotation values (degrees)
-        rot_x_deg = self.rotate_x_slider.value if self.rotate_x_slider else 0.0
-        rot_y_deg = self.rotate_y_slider.value if self.rotate_y_slider else 0.0
-        rot_z_deg = self.rotate_z_slider.value if self.rotate_z_slider else 0.0
+        rot_x_deg = self._get_value(self.rotate_x_slider, 0.0)
+        rot_y_deg = self._get_value(self.rotate_y_slider, 0.0)
+        rot_z_deg = self._get_value(self.rotate_z_slider, 0.0)
 
         # Convert to radians
         rot_x_rad = np.radians(rot_x_deg)
@@ -265,25 +283,25 @@ class UIHandles:
 
         # Translation
         translation = (
-            float(self.translation_x_slider.value) if self.translation_x_slider else 0.0,
-            float(self.translation_y_slider.value) if self.translation_y_slider else 0.0,
-            float(self.translation_z_slider.value) if self.translation_z_slider else 0.0,
+            self._get_value(self.translation_x_slider, 0.0),
+            self._get_value(self.translation_y_slider, 0.0),
+            self._get_value(self.translation_z_slider, 0.0),
         )
 
-        # Per-axis scale (gsmod 0.1.7)
-        scale = (
-            float(self.scale_x_slider.value) if self.scale_x_slider else 1.0,
-            float(self.scale_y_slider.value) if self.scale_y_slider else 1.0,
-            float(self.scale_z_slider.value) if self.scale_z_slider else 1.0,
-        )
+        # Scale: main_scale * (rel_x, rel_y, rel_z)
+        main_scale = self._get_value(self.scale_slider, 1.0)
+        rel_x = self._get_value(self.scale_x_slider, 1.0)
+        rel_y = self._get_value(self.scale_y_slider, 1.0)
+        rel_z = self._get_value(self.scale_z_slider, 1.0)
+        scale = (main_scale * rel_x, main_scale * rel_y, main_scale * rel_z)
 
         # Center/pivot point (gsmod 0.1.7) - None if checkbox unchecked
         center = None
         if self.use_pivot_checkbox and self.use_pivot_checkbox.value:
             center = (
-                float(self.pivot_x_slider.value) if self.pivot_x_slider else 0.0,
-                float(self.pivot_y_slider.value) if self.pivot_y_slider else 0.0,
-                float(self.pivot_z_slider.value) if self.pivot_z_slider else 0.0,
+                self._get_value(self.pivot_x_slider, 0.0),
+                self._get_value(self.pivot_y_slider, 0.0),
+                self._get_value(self.pivot_z_slider, 0.0),
             )
 
         return TransformValues(
@@ -310,10 +328,10 @@ class UIHandles:
             Will be converted to axis-angle for FilterValues.
         """
         # Basic opacity/scale filtering
-        min_opacity = self.min_opacity_slider.value if self.min_opacity_slider else 0.0
-        max_opacity = self.max_opacity_slider.value if self.max_opacity_slider else 1.0
-        min_scale = self.min_scale_slider.value if self.min_scale_slider else 0.0
-        max_scale = self.max_scale_slider.value if self.max_scale_slider else 100.0
+        min_opacity = self._get_value(self.min_opacity_slider, 0.0)
+        max_opacity = self._get_value(self.max_opacity_slider, 1.0)
+        min_scale = self._get_value(self.min_scale_slider, 0.0)
+        max_scale = self._get_value(self.max_scale_slider, 100.0)
 
         # Get spatial filter type
         spatial_type = self.spatial_filter_type.value if self.spatial_filter_type else "None"
@@ -322,11 +340,11 @@ class UIHandles:
         sphere_radius = float("inf")
         sphere_center = (0.0, 0.0, 0.0)
         if spatial_type == "Sphere":
-            sphere_radius = self.sphere_radius.value if self.sphere_radius else 10.0
+            sphere_radius = self._get_value(self.sphere_radius, 10.0)
             sphere_center = (
-                self.sphere_center_x.value if self.sphere_center_x else 0.0,
-                self.sphere_center_y.value if self.sphere_center_y else 0.0,
-                self.sphere_center_z.value if self.sphere_center_z else 0.0,
+                self._get_value(self.sphere_center_x, 0.0),
+                self._get_value(self.sphere_center_y, 0.0),
+                self._get_value(self.sphere_center_z, 0.0),
             )
 
         # Box filter (compute min/max from center + size)
@@ -335,21 +353,21 @@ class UIHandles:
         box_rotation = None
         if spatial_type == "Box":
             # Get center and size from UI
-            cx = self.box_center_x.value if self.box_center_x else 0.0
-            cy = self.box_center_y.value if self.box_center_y else 0.0
-            cz = self.box_center_z.value if self.box_center_z else 0.0
-            sx = self.box_size_x.value if self.box_size_x else 10.0
-            sy = self.box_size_y.value if self.box_size_y else 10.0
-            sz = self.box_size_z.value if self.box_size_z else 10.0
+            cx = self._get_value(self.box_center_x, 0.0)
+            cy = self._get_value(self.box_center_y, 0.0)
+            cz = self._get_value(self.box_center_z, 0.0)
+            sx = self._get_value(self.box_size_x, 10.0)
+            sy = self._get_value(self.box_size_y, 10.0)
+            sz = self._get_value(self.box_size_z, 10.0)
             # Compute min/max from center and half-extents
             half_x, half_y, half_z = sx / 2, sy / 2, sz / 2
             box_min = (cx - half_x, cy - half_y, cz - half_z)
             box_max = (cx + half_x, cy + half_y, cz + half_z)
             # Box rotation from UI - convert Euler angles to axis-angle
             if hasattr(self, "box_rot_x") and self.box_rot_x:
-                rx = self.box_rot_x.value
-                ry = self.box_rot_y.value if self.box_rot_y else 0.0
-                rz = self.box_rot_z.value if self.box_rot_z else 0.0
+                rx = self._get_value(self.box_rot_x, 0.0)
+                ry = self._get_value(self.box_rot_y, 0.0)
+                rz = self._get_value(self.box_rot_z, 0.0)
                 box_rotation = _euler_deg_to_axis_angle(rx, ry, rz)
 
         # Ellipsoid filter
@@ -358,20 +376,20 @@ class UIHandles:
         ellipsoid_rotation = None
         if spatial_type == "Ellipsoid":
             ellipsoid_center = (
-                self.ellipsoid_center_x.value if self.ellipsoid_center_x else 0.0,
-                self.ellipsoid_center_y.value if self.ellipsoid_center_y else 0.0,
-                self.ellipsoid_center_z.value if self.ellipsoid_center_z else 0.0,
+                self._get_value(self.ellipsoid_center_x, 0.0),
+                self._get_value(self.ellipsoid_center_y, 0.0),
+                self._get_value(self.ellipsoid_center_z, 0.0),
             )
             ellipsoid_radii = (
-                self.ellipsoid_radius_x.value if self.ellipsoid_radius_x else 5.0,
-                self.ellipsoid_radius_y.value if self.ellipsoid_radius_y else 5.0,
-                self.ellipsoid_radius_z.value if self.ellipsoid_radius_z else 5.0,
+                self._get_value(self.ellipsoid_radius_x, 5.0),
+                self._get_value(self.ellipsoid_radius_y, 5.0),
+                self._get_value(self.ellipsoid_radius_z, 5.0),
             )
             # Ellipsoid rotation from UI - convert Euler angles to axis-angle
             if hasattr(self, "ellipsoid_rot_x") and self.ellipsoid_rot_x:
-                rx = self.ellipsoid_rot_x.value
-                ry = self.ellipsoid_rot_y.value if self.ellipsoid_rot_y else 0.0
-                rz = self.ellipsoid_rot_z.value if self.ellipsoid_rot_z else 0.0
+                rx = self._get_value(self.ellipsoid_rot_x, 0.0)
+                ry = self._get_value(self.ellipsoid_rot_y, 0.0)
+                rz = self._get_value(self.ellipsoid_rot_z, 0.0)
                 ellipsoid_rotation = _euler_deg_to_axis_angle(rx, ry, rz)
 
         # Frustum filter - read from UI controls (camera extrinsics as fallback)
@@ -385,9 +403,9 @@ class UIHandles:
             # Read position from UI sliders (fallback to camera_position if not set)
             if hasattr(self, "frustum_pos_x") and self.frustum_pos_x:
                 frustum_pos = (
-                    self.frustum_pos_x.value,
-                    self.frustum_pos_y.value if self.frustum_pos_y else 0.0,
-                    self.frustum_pos_z.value if self.frustum_pos_z else 0.0,
+                    self._get_value(self.frustum_pos_x, 0.0),
+                    self._get_value(self.frustum_pos_y, 0.0),
+                    self._get_value(self.frustum_pos_z, 0.0),
                 )
             elif camera_position is not None:
                 frustum_pos = camera_position
@@ -397,9 +415,9 @@ class UIHandles:
             # Read rotation from UI sliders (Euler degrees -> axis-angle)
             if hasattr(self, "frustum_rot_x") and self.frustum_rot_x:
                 # UI gives Euler angles in degrees, convert to axis-angle
-                rx = self.frustum_rot_x.value if self.frustum_rot_x else 0.0
-                ry = self.frustum_rot_y.value if self.frustum_rot_y else 0.0
-                rz = self.frustum_rot_z.value if self.frustum_rot_z else 0.0
+                rx = self._get_value(self.frustum_rot_x, 0.0)
+                ry = self._get_value(self.frustum_rot_y, 0.0)
+                rz = self._get_value(self.frustum_rot_z, 0.0)
                 frustum_rot = _euler_deg_to_axis_angle(rx, ry, rz)
             elif camera_rotation is not None:
                 frustum_rot = _camera_to_frustum_axis_angle(camera_rotation)
@@ -407,11 +425,11 @@ class UIHandles:
                 frustum_rot = (0.0, 0.0, 0.0)
 
             # Get FOV/aspect from UI
-            fov_deg = self.frustum_fov.value if self.frustum_fov else 60.0
+            fov_deg = self._get_value(self.frustum_fov, 60.0)
             frustum_fov = fov_deg * math.pi / 180.0
-            frustum_aspect = self.frustum_aspect.value if self.frustum_aspect else 1.0
-            frustum_near = self.frustum_near.value if self.frustum_near else 0.1
-            frustum_far = self.frustum_far.value if self.frustum_far else 100.0
+            frustum_aspect = self._get_value(self.frustum_aspect, 1.0)
+            frustum_near = self._get_value(self.frustum_near, 0.1)
+            frustum_far = self._get_value(self.frustum_far, 100.0)
 
         return FilterValues(
             min_opacity=min_opacity,
@@ -502,24 +520,61 @@ class UIHandles:
         if self.translation_z_slider:
             self.translation_z_slider.value = float(translation[2])
 
-        # Per-axis scale (gsmod 0.1.7)
+        # Scale: main_scale * (rel_x, rel_y, rel_z)
+        # Slider bounds: main [0.1, 5.0], rel [0.5, 2.0]
+        REL_MIN, REL_MAX = 0.5, 2.0
+        MAIN_MIN, MAIN_MAX = 0.1, 5.0
+
         scale_value = getattr(values, "scale", (1.0, 1.0, 1.0))
         if isinstance(scale_value, (float, int)):
-            # Uniform scale - set all axes the same
-            if self.scale_x_slider:
-                self.scale_x_slider.value = float(scale_value)
-            if self.scale_y_slider:
-                self.scale_y_slider.value = float(scale_value)
-            if self.scale_z_slider:
-                self.scale_z_slider.value = float(scale_value)
+            # Uniform scale
+            scale_f = float(scale_value)
+            if MAIN_MIN <= scale_f <= MAIN_MAX:
+                main_scale = scale_f
+                rel_x, rel_y, rel_z = 1.0, 1.0, 1.0
+            else:
+                # Outside main range - use relative compensation
+                if scale_f < MAIN_MIN:
+                    main_scale = MAIN_MIN
+                    rel_val = scale_f / MAIN_MIN
+                else:
+                    main_scale = MAIN_MAX
+                    rel_val = scale_f / MAIN_MAX
+                rel_val = max(REL_MIN, min(REL_MAX, rel_val))
+                rel_x, rel_y, rel_z = rel_val, rel_val, rel_val
         else:
-            # Per-axis scale
-            if self.scale_x_slider:
-                self.scale_x_slider.value = float(scale_value[0])
-            if self.scale_y_slider:
-                self.scale_y_slider.value = float(scale_value[1])
-            if self.scale_z_slider:
-                self.scale_z_slider.value = float(scale_value[2])
+            sx, sy, sz = float(scale_value[0]), float(scale_value[1]), float(scale_value[2])
+            scales = np.array([sx, sy, sz])
+
+            # Use np.allclose for uniformity check (matches TransformValues.is_neutral)
+            if np.allclose(scales, scales[0], rtol=1e-5, atol=1e-8):
+                # Uniform - use as main scale
+                main_scale = max(MAIN_MIN, min(MAIN_MAX, sx))
+                rel_x, rel_y, rel_z = 1.0, 1.0, 1.0
+            else:
+                # Non-uniform - find optimal main_scale
+                # For each axis: REL_MIN <= s/main <= REL_MAX
+                main_lower = max(s / REL_MAX for s in scales)
+                main_upper = min(s / REL_MIN for s in scales)
+
+                if main_lower <= main_upper:
+                    main_scale = float(np.sqrt(main_lower * main_upper))
+                else:
+                    main_scale = float(np.exp(np.mean(np.log(scales))))
+
+                main_scale = max(MAIN_MIN, min(MAIN_MAX, main_scale))
+                rel_x = max(REL_MIN, min(REL_MAX, sx / main_scale))
+                rel_y = max(REL_MIN, min(REL_MAX, sy / main_scale))
+                rel_z = max(REL_MIN, min(REL_MAX, sz / main_scale))
+
+        if self.scale_slider:
+            self.scale_slider.value = main_scale
+        if self.scale_x_slider:
+            self.scale_x_slider.value = rel_x
+        if self.scale_y_slider:
+            self.scale_y_slider.value = rel_y
+        if self.scale_z_slider:
+            self.scale_z_slider.value = rel_z
 
         # Convert quaternion to Euler XYZ for rotation slider display
         # gsmod uses 'rotation' attribute in wxyz format (w, x, y, z)

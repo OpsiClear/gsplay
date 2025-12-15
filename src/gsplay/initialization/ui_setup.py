@@ -56,6 +56,23 @@ class UISetup:
         """Get current model."""
         return self._viewer.model
 
+    def _register_callbacks(self, control_names: list[str], callback) -> None:
+        """Register callback on multiple UI controls by attribute name.
+
+        Parameters
+        ----------
+        control_names : list[str]
+            List of attribute names on self.ui to register
+        callback : callable
+            The callback function to register on each control
+        """
+        if not self.ui:
+            return
+        for name in control_names:
+            control = getattr(self.ui, name, None)
+            if control:
+                control.on_update(callback)
+
     def setup_all(self) -> FilterVisualizer | None:
         """Run all UI setup tasks.
 
@@ -158,73 +175,67 @@ class UISetup:
                 return
 
             from src.gsplay.config.rotation_conversions import axis_angle_to_euler_deg
+            from src.gsplay.config.slider_constants import SliderBounds as SB
 
             # Helper to clamp values to slider bounds
             def clamp(value: float, min_val: float, max_val: float) -> float:
                 return max(min_val, min(max_val, value))
 
             if filter_type == "Sphere":
-                # Sphere position sliders: min=-20.0, max=20.0
                 if self.ui.sphere_center_x:
-                    self.ui.sphere_center_x.value = clamp(center[0], -20.0, 20.0)
+                    self.ui.sphere_center_x.value = clamp(center[0], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
                 if self.ui.sphere_center_y:
-                    self.ui.sphere_center_y.value = clamp(center[1], -20.0, 20.0)
+                    self.ui.sphere_center_y.value = clamp(center[1], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
                 if self.ui.sphere_center_z:
-                    self.ui.sphere_center_z.value = clamp(center[2], -20.0, 20.0)
+                    self.ui.sphere_center_z.value = clamp(center[2], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
 
             elif filter_type == "Box":
-                # Box position sliders: min=-20.0, max=20.0
                 if self.ui.box_center_x:
-                    self.ui.box_center_x.value = clamp(center[0], -20.0, 20.0)
+                    self.ui.box_center_x.value = clamp(center[0], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
                 if self.ui.box_center_y:
-                    self.ui.box_center_y.value = clamp(center[1], -20.0, 20.0)
+                    self.ui.box_center_y.value = clamp(center[1], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
                 if self.ui.box_center_z:
-                    self.ui.box_center_z.value = clamp(center[2], -20.0, 20.0)
-                # Box rotation sliders: min=-180.0, max=180.0
+                    self.ui.box_center_z.value = clamp(center[2], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
                 if rotation_aa is not None:
                     rx, ry, rz = axis_angle_to_euler_deg(rotation_aa)
                     if self.ui.box_rot_x:
-                        self.ui.box_rot_x.value = clamp(rx, -180.0, 180.0)
+                        self.ui.box_rot_x.value = clamp(rx, SB.ROTATION_MIN, SB.ROTATION_MAX)
                     if self.ui.box_rot_y:
-                        self.ui.box_rot_y.value = clamp(ry, -180.0, 180.0)
+                        self.ui.box_rot_y.value = clamp(ry, SB.ROTATION_MIN, SB.ROTATION_MAX)
                     if self.ui.box_rot_z:
-                        self.ui.box_rot_z.value = clamp(rz, -180.0, 180.0)
+                        self.ui.box_rot_z.value = clamp(rz, SB.ROTATION_MIN, SB.ROTATION_MAX)
 
             elif filter_type == "Ellipsoid":
-                # Ellipsoid position sliders: min=-20.0, max=20.0
                 if self.ui.ellipsoid_center_x:
-                    self.ui.ellipsoid_center_x.value = clamp(center[0], -20.0, 20.0)
+                    self.ui.ellipsoid_center_x.value = clamp(center[0], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
                 if self.ui.ellipsoid_center_y:
-                    self.ui.ellipsoid_center_y.value = clamp(center[1], -20.0, 20.0)
+                    self.ui.ellipsoid_center_y.value = clamp(center[1], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
                 if self.ui.ellipsoid_center_z:
-                    self.ui.ellipsoid_center_z.value = clamp(center[2], -20.0, 20.0)
-                # Ellipsoid rotation sliders: min=-180.0, max=180.0
+                    self.ui.ellipsoid_center_z.value = clamp(center[2], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
                 if rotation_aa is not None:
                     rx, ry, rz = axis_angle_to_euler_deg(rotation_aa)
                     if self.ui.ellipsoid_rot_x:
-                        self.ui.ellipsoid_rot_x.value = clamp(rx, -180.0, 180.0)
+                        self.ui.ellipsoid_rot_x.value = clamp(rx, SB.ROTATION_MIN, SB.ROTATION_MAX)
                     if self.ui.ellipsoid_rot_y:
-                        self.ui.ellipsoid_rot_y.value = clamp(ry, -180.0, 180.0)
+                        self.ui.ellipsoid_rot_y.value = clamp(ry, SB.ROTATION_MIN, SB.ROTATION_MAX)
                     if self.ui.ellipsoid_rot_z:
-                        self.ui.ellipsoid_rot_z.value = clamp(rz, -180.0, 180.0)
+                        self.ui.ellipsoid_rot_z.value = clamp(rz, SB.ROTATION_MIN, SB.ROTATION_MAX)
 
             elif filter_type == "Frustum":
-                # Frustum position sliders: min=-50.0, max=50.0 (wider range)
                 if self.ui.frustum_pos_x:
-                    self.ui.frustum_pos_x.value = clamp(center[0], -50.0, 50.0)
+                    self.ui.frustum_pos_x.value = clamp(center[0], SB.FRUSTUM_POSITION_MIN, SB.FRUSTUM_POSITION_MAX)
                 if self.ui.frustum_pos_y:
-                    self.ui.frustum_pos_y.value = clamp(center[1], -50.0, 50.0)
+                    self.ui.frustum_pos_y.value = clamp(center[1], SB.FRUSTUM_POSITION_MIN, SB.FRUSTUM_POSITION_MAX)
                 if self.ui.frustum_pos_z:
-                    self.ui.frustum_pos_z.value = clamp(center[2], -50.0, 50.0)
-                # Frustum rotation sliders: min=-180.0, max=180.0
+                    self.ui.frustum_pos_z.value = clamp(center[2], SB.FRUSTUM_POSITION_MIN, SB.FRUSTUM_POSITION_MAX)
                 if rotation_aa is not None:
                     rx, ry, rz = axis_angle_to_euler_deg(rotation_aa)
                     if self.ui.frustum_rot_x:
-                        self.ui.frustum_rot_x.value = clamp(rx, -180.0, 180.0)
+                        self.ui.frustum_rot_x.value = clamp(rx, SB.ROTATION_MIN, SB.ROTATION_MAX)
                     if self.ui.frustum_rot_y:
-                        self.ui.frustum_rot_y.value = clamp(ry, -180.0, 180.0)
+                        self.ui.frustum_rot_y.value = clamp(ry, SB.ROTATION_MIN, SB.ROTATION_MAX)
                     if self.ui.frustum_rot_z:
-                        self.ui.frustum_rot_z.value = clamp(rz, -180.0, 180.0)
+                        self.ui.frustum_rot_z.value = clamp(rz, SB.ROTATION_MIN, SB.ROTATION_MAX)
 
             # Update config and trigger visualization update
             camera_pos, camera_rot = viewer._get_camera_state()
@@ -240,61 +251,23 @@ class UISetup:
         if self.ui.spatial_filter_type:
             self.ui.spatial_filter_type.on_update(on_filter_change)
 
-        # Register callbacks for sphere filter
-        for control in [
-            self.ui.sphere_center_x,
-            self.ui.sphere_center_y,
-            self.ui.sphere_center_z,
-            self.ui.sphere_radius,
-        ]:
-            if control:
-                control.on_update(on_filter_change)
-
-        # Register callbacks for box filter (center + size)
-        for control in [
-            self.ui.box_center_x,
-            self.ui.box_center_y,
-            self.ui.box_center_z,
-            self.ui.box_size_x,
-            self.ui.box_size_y,
-            self.ui.box_size_z,
-            self.ui.box_rot_x,
-            self.ui.box_rot_y,
-            self.ui.box_rot_z,
-        ]:
-            if control:
-                control.on_update(on_filter_change)
-
-        # Register callbacks for ellipsoid filter
-        for control in [
-            self.ui.ellipsoid_center_x,
-            self.ui.ellipsoid_center_y,
-            self.ui.ellipsoid_center_z,
-            self.ui.ellipsoid_radius_x,
-            self.ui.ellipsoid_radius_y,
-            self.ui.ellipsoid_radius_z,
-            self.ui.ellipsoid_rot_x,
-            self.ui.ellipsoid_rot_y,
-            self.ui.ellipsoid_rot_z,
-        ]:
-            if control:
-                control.on_update(on_filter_change)
-
-        # Register callbacks for frustum filter
-        for control in [
-            self.ui.frustum_fov,
-            self.ui.frustum_aspect,
-            self.ui.frustum_near,
-            self.ui.frustum_far,
-            self.ui.frustum_pos_x,
-            self.ui.frustum_pos_y,
-            self.ui.frustum_pos_z,
-            self.ui.frustum_rot_x,
-            self.ui.frustum_rot_y,
-            self.ui.frustum_rot_z,
-        ]:
-            if control:
-                control.on_update(on_filter_change)
+        # Register callbacks for all spatial filter controls
+        self._register_callbacks([
+            # Sphere filter
+            'sphere_center_x', 'sphere_center_y', 'sphere_center_z', 'sphere_radius',
+            # Box filter
+            'box_center_x', 'box_center_y', 'box_center_z',
+            'box_size_x', 'box_size_y', 'box_size_z',
+            'box_rot_x', 'box_rot_y', 'box_rot_z',
+            # Ellipsoid filter
+            'ellipsoid_center_x', 'ellipsoid_center_y', 'ellipsoid_center_z',
+            'ellipsoid_radius_x', 'ellipsoid_radius_y', 'ellipsoid_radius_z',
+            'ellipsoid_rot_x', 'ellipsoid_rot_y', 'ellipsoid_rot_z',
+            # Frustum filter
+            'frustum_fov', 'frustum_aspect', 'frustum_near', 'frustum_far',
+            'frustum_pos_x', 'frustum_pos_y', 'frustum_pos_z',
+            'frustum_rot_x', 'frustum_rot_y', 'frustum_rot_z',
+        ], on_filter_change)
 
         # Register "Use Current Camera" button callback
         if self.ui.frustum_use_camera:
@@ -320,38 +293,35 @@ class UISetup:
         # Callback to update visualization and lock filter controls when scene transform changes
         def on_transform_change(_) -> None:
             viewer._update_filter_visualization()
-            # Lock filter controls when transformation is active
+            # Lock filter controls and gizmo when transformation is active
             # (filter operates on original data, adjusting while transformed is confusing)
             if self.ui:
                 transform_active = self.ui.is_transform_active()
                 self.ui.set_filter_controls_disabled(transform_active)
+                # Disable gizmo when transform is active, restore based on checkbox when not
+                if filter_visualizer:
+                    if transform_active:
+                        filter_visualizer.set_gizmo_enabled(False)
+                    elif self.ui.show_filter_viz and self.ui.show_filter_viz.value:
+                        filter_visualizer.set_gizmo_enabled(True)
 
         # Register callbacks for scene transformation controls
-        for control in [
-            getattr(self.ui, 'scale_x_slider', None),
-            getattr(self.ui, 'scale_y_slider', None),
-            getattr(self.ui, 'scale_z_slider', None),
-            getattr(self.ui, 'translation_x_slider', None),
-            getattr(self.ui, 'translation_y_slider', None),
-            getattr(self.ui, 'translation_z_slider', None),
-            getattr(self.ui, 'rotate_x_slider', None),
-            getattr(self.ui, 'rotate_y_slider', None),
-            getattr(self.ui, 'rotate_z_slider', None),
-            getattr(self.ui, 'pivot_x_slider', None),
-            getattr(self.ui, 'pivot_y_slider', None),
-            getattr(self.ui, 'pivot_z_slider', None),
-            getattr(self.ui, 'use_pivot_checkbox', None),
-        ]:
-            if control:
-                control.on_update(on_transform_change)
+        self._register_callbacks([
+            'scale_slider', 'scale_x_slider', 'scale_y_slider', 'scale_z_slider',
+            'translation_x_slider', 'translation_y_slider', 'translation_z_slider',
+            'rotate_x_slider', 'rotate_y_slider', 'rotate_z_slider',
+            'pivot_x_slider', 'pivot_y_slider', 'pivot_z_slider',
+            'use_pivot_checkbox',
+        ], on_transform_change)
 
         logger.debug("Filter visualizer callbacks registered")
 
-        # Check initial transform state and lock filter controls if needed
+        # Check initial transform state and lock filter controls/gizmo if needed
         # (e.g., when loading a config with active transforms)
         if self.ui.is_transform_active():
             self.ui.set_filter_controls_disabled(True)
-            logger.debug("Filter controls locked: transform is active")
+            filter_visualizer.set_gizmo_enabled(False)
+            logger.debug("Filter controls and gizmo locked: transform is active")
 
         return filter_visualizer
 

@@ -44,7 +44,6 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from functools import partial
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import TYPE_CHECKING
 

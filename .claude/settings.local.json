@@ -118,7 +118,9 @@
       "Bash(grep:*)",
       "WebFetch(domain:raw.org)",
       "Bash(.venv/bin/pip show:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(source:*)",
+      "Bash(sort:*)"
     ],
     "deny": [],
     "ask": []

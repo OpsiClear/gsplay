@@ -200,7 +200,8 @@ class HandlerManager:
             ui.translation_x_slider,
             ui.translation_y_slider,
             ui.translation_z_slider,
-            # Per-axis scale (gsmod 0.1.7)
+            # Scale (main + per-axis relative)
+            ui.scale_slider,
             ui.scale_x_slider,
             ui.scale_y_slider,
             ui.scale_z_slider,

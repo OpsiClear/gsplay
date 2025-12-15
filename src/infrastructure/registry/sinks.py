@@ -94,11 +94,11 @@ class DataSinkRegistry:
             Metadata for all registered sinks
         """
         result = []
-        for sink in cls._sinks.values():
+        for name, sink in cls._sinks.items():
             try:
                 result.append(sink.metadata())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to get metadata for sink '{name}': {e}")
         return result
 
     @classmethod
@@ -130,12 +130,13 @@ class DataSinkRegistry:
         if not extension.startswith("."):
             extension = f".{extension}"
 
-        for sink in cls._sinks.values():
+        for name, sink in cls._sinks.items():
             try:
                 meta = sink.metadata()
                 if meta.file_extension == extension:
                     return sink
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Sink '{name}' metadata check failed for extension '{extension}': {e}")
                 continue
         return None
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable
 
-from src.gsplay.interaction.events import EventBus, EventType, Event
+from src.gsplay.interaction.events import EventBus, EventType
 
 if TYPE_CHECKING:
     from src.gsplay.core.app import UniversalGSPlay

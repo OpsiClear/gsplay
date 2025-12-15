@@ -117,8 +117,6 @@ def axis_angle_to_euler_deg(
     z = uz * s
 
     r00 = 1 - 2 * (y * y + z * z)
-    r01 = 2 * (x * y - w * z)
-    r02 = 2 * (x * z + w * y)
     r10 = 2 * (x * y + w * z)
     r11 = 1 - 2 * (x * x + z * z)
     r12 = 2 * (y * z - w * x)

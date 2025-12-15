@@ -28,10 +28,7 @@ from numpy.typing import NDArray
 
 import viser.transforms as vt
 
-from .quaternion_utils import (
-    quat_from_euler_deg,
-    quat_to_rotation_matrix,
-)
+from .quaternion_utils import quat_from_euler_deg
 
 
 def _default_look_at() -> np.ndarray:

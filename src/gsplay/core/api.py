@@ -348,33 +348,77 @@ class GSPlayAPI:
         ----------
         scale : float or tuple[float, float, float]
             Uniform scale factor (float) or per-axis scale (sx, sy, sz).
-            Values should be in range [0.1, 10.0].
+            Effective scale range: [0.05, 10.0] (main [0.1, 5.0] × rel [0.5, 2.0]).
 
         Raises
         ------
         ValueError
-            If scale values are out of range
+            If scale values are out of valid range
         """
+        import numpy as np
+
+        # Slider bounds
+        REL_MIN, REL_MAX = 0.5, 2.0
+        MAIN_MIN, MAIN_MAX = 0.1, 5.0
+        # Effective range: [MAIN_MIN * REL_MIN, MAIN_MAX * REL_MAX] = [0.05, 10.0]
+        EFF_MIN, EFF_MAX = MAIN_MIN * REL_MIN, MAIN_MAX * REL_MAX
+
         if isinstance(scale, (int, float)):
             # Uniform scale
-            if not 0.1 <= scale <= 10.0:
-                raise ValueError("Scale must be in range [0.1, 10.0]")
-            sx, sy, sz = float(scale), float(scale), float(scale)
+            if not EFF_MIN <= scale <= EFF_MAX:
+                raise ValueError(f"Scale must be in range [{EFF_MIN}, {EFF_MAX}]")
+            scale_f = float(scale)
+            if MAIN_MIN <= scale_f <= MAIN_MAX:
+                # Fits in main slider range - use directly
+                main_scale = scale_f
+                rel_x, rel_y, rel_z = 1.0, 1.0, 1.0
+            else:
+                # Outside main range - use main at limit with relative compensation
+                if scale_f < MAIN_MIN:
+                    main_scale = MAIN_MIN
+                    rel_val = scale_f / MAIN_MIN  # Will be < 1.0
+                else:
+                    main_scale = MAIN_MAX
+                    rel_val = scale_f / MAIN_MAX  # Will be > 1.0
+                rel_val = max(REL_MIN, min(REL_MAX, rel_val))
+                rel_x, rel_y, rel_z = rel_val, rel_val, rel_val
         else:
-            # Per-axis scale
-            sx, sy, sz = scale
+            # Per-axis scale - decompose into main + relative
+            sx, sy, sz = float(scale[0]), float(scale[1]), float(scale[2])
             for v in (sx, sy, sz):
-                if not 0.1 <= v <= 10.0:
-                    raise ValueError("Scale values must be in range [0.1, 10.0]")
+                if not EFF_MIN <= v <= EFF_MAX:
+                    raise ValueError(f"Scale values must be in range [{EFF_MIN}, {EFF_MAX}]")
+
+            scales = np.array([sx, sy, sz])
+            if np.allclose(scales, scales[0], rtol=1e-5, atol=1e-8):
+                # Uniform
+                main_scale = max(MAIN_MIN, min(MAIN_MAX, sx))
+                rel_x, rel_y, rel_z = 1.0, 1.0, 1.0
+            else:
+                # Non-uniform - find optimal main_scale
+                main_lower = max(s / REL_MAX for s in scales)
+                main_upper = min(s / REL_MIN for s in scales)
+
+                if main_lower <= main_upper:
+                    main_scale = float(np.sqrt(main_lower * main_upper))
+                else:
+                    main_scale = float(np.exp(np.mean(np.log(scales))))
+
+                main_scale = max(MAIN_MIN, min(MAIN_MAX, main_scale))
+                rel_x = max(REL_MIN, min(REL_MAX, sx / main_scale))
+                rel_y = max(REL_MIN, min(REL_MAX, sy / main_scale))
+                rel_z = max(REL_MIN, min(REL_MAX, sz / main_scale))
 
         if self._viewer.ui:
+            if self._viewer.ui.scale_slider:
+                self._viewer.ui.scale_slider.value = main_scale
             if self._viewer.ui.scale_x_slider:
-                self._viewer.ui.scale_x_slider.value = sx
+                self._viewer.ui.scale_x_slider.value = rel_x
             if self._viewer.ui.scale_y_slider:
-                self._viewer.ui.scale_y_slider.value = sy
+                self._viewer.ui.scale_y_slider.value = rel_y
             if self._viewer.ui.scale_z_slider:
-                self._viewer.ui.scale_z_slider.value = sz
-            logger.debug(f"Scale set to ({sx}, {sy}, {sz})")
+                self._viewer.ui.scale_z_slider.value = rel_z
+            logger.debug(f"Scale set to main={main_scale}, rel=({rel_x}, {rel_y}, {rel_z})")
 
     def reset_transform(self) -> None:
         """Reset scene transform to defaults."""

@@ -14,8 +14,9 @@ from typing import TYPE_CHECKING
 
 import viser
 
-# Import InfoPanel from its new home
-from src.gsplay.ui.panels.info_panel import InfoPanel, create_info_panel
+# Import create_info_panel from its new home
+from src.gsplay.ui.panels.info_panel import create_info_panel
+from src.infrastructure.processing_mode import ProcessingMode
 
 if TYPE_CHECKING:
     from src.gsplay.config.settings import UIHandles, GSPlayConfig
@@ -65,10 +66,62 @@ def create_transform_controls(
     center_value = getattr(config.transform_values, "center", None)
 
     # Handle both scalar and tuple scale for backward compatibility
+    # New system: main_scale * (rel_x, rel_y, rel_z)
+    # Relative scale bounds: [0.5, 2.0], Main scale bounds: [0.1, 5.0]
+    REL_MIN, REL_MAX = 0.5, 2.0
+    MAIN_MIN, MAIN_MAX = 0.1, 5.0
+
+    def decompose_scale(sx: float, sy: float, sz: float) -> tuple[float, tuple[float, float, float]]:
+        """Decompose (sx, sy, sz) into main_scale and (rel_x, rel_y, rel_z).
+
+        Finds main_scale such that all relative values fit within [REL_MIN, REL_MAX].
+        """
+        import numpy as np
+        scales = np.array([sx, sy, sz])
+
+        # Check if uniform (using tolerance for floating point)
+        if np.allclose(scales, scales[0], rtol=1e-5, atol=1e-8):
+            return (float(scales[0]), (1.0, 1.0, 1.0))
+
+        # For each axis: REL_MIN <= s/main <= REL_MAX
+        # So: s/REL_MAX <= main <= s/REL_MIN
+        # Find intersection of all valid ranges
+        main_lower = max(s / REL_MAX for s in scales)
+        main_upper = min(s / REL_MIN for s in scales)
+
+        if main_lower <= main_upper:
+            # Valid range exists - pick geometric mean
+            main_scale = float(np.sqrt(main_lower * main_upper))
+        else:
+            # No valid range - use geometric mean of scales as main
+            main_scale = float(np.exp(np.mean(np.log(scales))))
+
+        # Clamp main_scale to slider bounds
+        main_scale = max(MAIN_MIN, min(MAIN_MAX, main_scale))
+
+        # Compute relative scales (will be clamped later by slider init)
+        rel = tuple(float(s / main_scale) for s in scales)
+        return (main_scale, rel)
+
     if isinstance(scale_value, (int, float)):
-        scale_xyz = (float(scale_value), float(scale_value), float(scale_value))
+        # Uniform scale from config
+        scale_f = float(scale_value)
+        if MAIN_MIN <= scale_f <= MAIN_MAX:
+            main_scale = scale_f
+            rel_scale_xyz = (1.0, 1.0, 1.0)
+        else:
+            # Outside main range - use relative compensation
+            if scale_f < MAIN_MIN:
+                main_scale = MAIN_MIN
+                rel_val = scale_f / MAIN_MIN
+            else:
+                main_scale = MAIN_MAX
+                rel_val = scale_f / MAIN_MAX
+            rel_val = max(REL_MIN, min(REL_MAX, rel_val))
+            rel_scale_xyz = (rel_val, rel_val, rel_val)
     else:
-        scale_xyz = (float(scale_value[0]), float(scale_value[1]), float(scale_value[2]))
+        sx, sy, sz = float(scale_value[0]), float(scale_value[1]), float(scale_value[2])
+        main_scale, rel_scale_xyz = decompose_scale(sx, sy, sz)
 
     # === Translation Controls ===
     controls["translation_x"] = server.gui.add_slider(
@@ -98,32 +151,44 @@ def create_transform_controls(
         hint="Move scene along Z axis",
     )
 
-    # === Per-axis Scale Controls (gsmod 0.1.7) ===
-    controls["scale_x"] = server.gui.add_slider(
-        "Scale X",
+    # === Scale Controls ===
+    # Main uniform scale slider
+    controls["scale"] = server.gui.add_slider(
+        "Scale",
         min=0.1,
         max=5.0,
         step=0.01,
-        initial_value=scale_xyz[0],
-        hint="Scale scene along X axis",
+        initial_value=main_scale,
+        hint="Uniform scale for the scene",
+    )
+
+    # Per-axis relative scale multipliers
+    # Max 2.0 ensures effective scale <= 10.0 (5.0 * 2.0)
+    controls["scale_x"] = server.gui.add_slider(
+        "Rel. Scale X",
+        min=0.5,
+        max=2.0,
+        step=0.01,
+        initial_value=min(2.0, max(0.5, rel_scale_xyz[0])),
+        hint="Relative scale along X axis (multiplied by main Scale)",
     )
 
     controls["scale_y"] = server.gui.add_slider(
-        "Scale Y",
-        min=0.1,
-        max=5.0,
+        "Rel. Scale Y",
+        min=0.5,
+        max=2.0,
         step=0.01,
-        initial_value=scale_xyz[1],
-        hint="Scale scene along Y axis",
+        initial_value=min(2.0, max(0.5, rel_scale_xyz[1])),
+        hint="Relative scale along Y axis (multiplied by main Scale)",
     )
 
     controls["scale_z"] = server.gui.add_slider(
-        "Scale Z",
-        min=0.1,
-        max=5.0,
+        "Rel. Scale Z",
+        min=0.5,
+        max=2.0,
         step=0.01,
-        initial_value=scale_xyz[2],
-        hint="Scale scene along Z axis",
+        initial_value=min(2.0, max(0.5, rel_scale_xyz[2])),
+        hint="Relative scale along Z axis (multiplied by main Scale)",
     )
 
     # === Rotation Controls (world-axis, gimbal-lock free) ===
@@ -254,14 +319,12 @@ def create_config_menu(
     tuple
         (processing_mode_dropdown, data_path_input, load_data_button, config_path_input, config_buttons)
     """
-    from src.infrastructure.processing_mode import ProcessingMode
-
     # Convert current config to display string
     try:
         current_mode = ProcessingMode.from_string(config.processing_mode)
         initial_mode = current_mode.to_display_string()
     except (ValueError, AttributeError):
-        initial_mode = "All GPU"
+        initial_mode = ProcessingMode.get_default_display()
 
     # Determine default config path (gsplay.yaml in data folder)
     default_config_path = "gsplay.yaml"
@@ -275,7 +338,7 @@ def create_config_menu(
     # Mode dropdown
     processing_mode = server.gui.add_dropdown(
         "Mode",
-        ["All GPU", "Color+Transform GPU", "Transform GPU", "Color GPU", "All CPU"],
+        ProcessingMode.get_display_options(),
         initial_value=initial_mode,
         hint=(
             "Where to run processing stages:\n"
@@ -355,8 +418,8 @@ def create_config_menu(
         if _reference_sphere_handle is not None:
             try:
                 _reference_sphere_handle.remove()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to remove reference sphere: {e}")
             _reference_sphere_handle = None
 
         # Create new sphere if radius > 0
@@ -468,8 +531,8 @@ def create_data_loader_controls(
                         if viewer_app.ui and viewer_app.ui.config_path_input:
                             viewer_app.ui.config_path_input.value = new_config_path
                         _config_path_auto_updated = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to update config path from data path: {e}")
 
         @data_path_input.on_update
         def _(_) -> None:
@@ -1171,7 +1234,6 @@ def setup_ui_layout(
     if viewer_app is not None:
         from src.gsplay.config.io import import_viewer_config
         from src.gsplay.interaction.events import EventType
-        from src.infrastructure.processing_mode import ProcessingMode
 
         @load_config_button.on_click
         def _load_config_click(event) -> None:
@@ -1215,13 +1277,19 @@ def setup_ui_layout(
                     viewer_app.ui.set_filter_values(
                         viewer_app.config.filter_values
                     )
+                    # Lock/unlock filter gizmo based on transform state
+                    if viewer_app.filter_visualizer:
+                        if viewer_app.ui.is_transform_active():
+                            viewer_app.filter_visualizer.set_gizmo_enabled(False)
+                        elif viewer_app.ui.show_filter_viz and viewer_app.ui.show_filter_viz.value:
+                            viewer_app.filter_visualizer.set_gizmo_enabled(True)
                     # Update processing mode dropdown
                     if viewer_app.ui.processing_mode_dropdown is not None:
                         try:
                             mode = ProcessingMode.from_string(viewer_app.config.processing_mode)
                             viewer_app.ui.processing_mode_dropdown.value = mode.to_display_string()
-                        except (ValueError, AttributeError):
-                            pass
+                        except (ValueError, AttributeError) as e:
+                            logger.debug(f"Failed to update processing mode dropdown: {e}")
 
                     if viewer_app.event_bus:
                         viewer_app.event_bus.emit(EventType.RERENDER_REQUESTED)
@@ -1453,6 +1521,7 @@ def setup_ui_layout(
         translation_x_slider=transform_controls["translation_x"],
         translation_y_slider=transform_controls["translation_y"],
         translation_z_slider=transform_controls["translation_z"],
+        scale_slider=transform_controls["scale"],
         scale_x_slider=transform_controls["scale_x"],
         scale_y_slider=transform_controls["scale_y"],
         scale_z_slider=transform_controls["scale_z"],

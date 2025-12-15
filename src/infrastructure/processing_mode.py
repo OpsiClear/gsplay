@@ -110,3 +110,13 @@ class ProcessingMode(Enum):
             ProcessingMode.ALL_CPU: "All CPU",
         }
         return display_map[self]
+
+    @classmethod
+    def get_display_options(cls) -> list[str]:
+        """Get list of display strings for UI dropdowns."""
+        return [mode.to_display_string() for mode in cls]
+
+    @classmethod
+    def get_default_display(cls) -> str:
+        """Get default mode display string."""
+        return cls.ALL_GPU.to_display_string()

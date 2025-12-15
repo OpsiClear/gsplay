@@ -91,11 +91,11 @@ class DataSourceRegistry:
             Metadata for all registered sources
         """
         result = []
-        for source in cls._sources.values():
+        for name, source in cls._sources.items():
             try:
                 result.append(source.metadata())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to get metadata for source '{name}': {e}")
         return result
 
     @classmethod
@@ -114,11 +114,12 @@ class DataSourceRegistry:
         Type[DataSourceProtocol] | None
             First matching source class, or None
         """
-        for source in cls._sources.values():
+        for name, source in cls._sources.items():
             try:
                 if source.can_load(path):
                     return source
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Source '{name}' can_load check failed for '{path}': {e}")
                 continue
         return None
 

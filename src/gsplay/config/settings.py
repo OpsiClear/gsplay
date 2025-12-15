@@ -9,13 +9,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, asdict
-from typing import Any
 
 import numpy as np
 from gsmod import ColorValues, TransformValues, FilterValues
 from gsmod.transform.api import euler_to_quaternion
 
-from src.domain.entities import SceneBounds
 from src.domain.filters import VolumeFilter  # Re-exported from domain
 from src.infrastructure.io.path_io import UniversalPath
 

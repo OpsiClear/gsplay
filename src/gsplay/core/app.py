@@ -10,10 +10,15 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
 import viser
-from gsmod import ColorValues, FilterValues, TransformValues
+from gsmod import ColorValues, TransformValues
+
+if TYPE_CHECKING:
+    import numpy as np
+    from src.gsplay.ui.filter_visualizer import FilterVisualizer
 
 from src.domain.entities import GSTensor
 from src.domain.interfaces import (
@@ -1401,6 +1406,9 @@ class UniversalGSPlay:
                 self.ui.set_transform_values(self.config.transform_values)
             # Unlock filter controls since transform is now neutral
             self.ui.set_filter_controls_disabled(False)
+            # Re-enable gizmo if filter viz is shown
+            if self.filter_visualizer and self.ui.show_filter_viz and self.ui.show_filter_viz.value:
+                self.filter_visualizer.set_gizmo_enabled(True)
 
         if self.viewer:
             self.viewer.rerender(None)
@@ -1489,9 +1497,11 @@ class UniversalGSPlay:
         tx, ty, tz = -float(centroid[0]), -float(centroid[1]), -float(centroid[2])
         self.api.set_translation(tx, ty, tz)
 
-        # Lock filter controls since center scene applies transformation
+        # Lock filter controls and gizmo since center scene applies transformation
         if self.ui and self.ui.is_transform_active():
             self.ui.set_filter_controls_disabled(True)
+            if self.filter_visualizer:
+                self.filter_visualizer.set_gizmo_enabled(False)
 
         # Trigger rerender
         if self.viewer:
@@ -1718,7 +1728,6 @@ class UniversalGSPlay:
             tv_current = self.ui.get_transform_values()
             q_model = np.array(tv_current.rotation)  # wxyz
             t_model = np.array(tv_current.translation)
-            s_model = tv_current.scale
 
             # IMPORTANT: c_old is the center ACTUALLY used in the current transform
             # This is needed for correct view preservation math
@@ -1860,10 +1869,12 @@ class UniversalGSPlay:
                         f"R_after (viser):\n{R_after}"
                     )
 
-                # Lock filter controls since bake view applies transformation
+                # Lock filter controls and gizmo since bake view applies transformation
                 # (atomic() may suppress callbacks, so lock explicitly)
                 if self.ui.is_transform_active():
                     self.ui.set_filter_controls_disabled(True)
+                    if self.filter_visualizer:
+                        self.filter_visualizer.set_gizmo_enabled(False)
 
                 # 12. Trigger final rerender
                 if self.viewer:
@@ -1938,17 +1949,13 @@ class UniversalGSPlay:
         return (rx, ry, rz)
 
     def _handle_filter_reset(self) -> None:
-        """Reset all filtering to defaults."""
-        logger.info("Resetting volume filters")
-
-        # Reset to default FilterValues and VolumeFilter
-        self.config.filter_values = FilterValues()
-        self.config.volume_filter = VolumeFilter()
+        """Reset filter parameters to defaults (keeps current filter type)."""
+        logger.info("Resetting filter parameters")
 
         if self.ui:
-            # Reset spatial filter type
-            if self.ui.spatial_filter_type:
-                self.ui.spatial_filter_type.value = "None"
+            # Get current filter type (keep it)
+            current_type = self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
+
             # Reset opacity/scale sliders
             if self.ui.min_opacity_slider:
                 self.ui.min_opacity_slider.value = 0.0
@@ -1959,7 +1966,93 @@ class UniversalGSPlay:
             if self.ui.max_scale_slider:
                 self.ui.max_scale_slider.value = 100.0
 
+            # Reset parameters for current filter type
+            if current_type == "Sphere":
+                if self.ui.sphere_center_x:
+                    self.ui.sphere_center_x.value = 0.0
+                if self.ui.sphere_center_y:
+                    self.ui.sphere_center_y.value = 0.0
+                if self.ui.sphere_center_z:
+                    self.ui.sphere_center_z.value = 0.0
+                if self.ui.sphere_radius:
+                    self.ui.sphere_radius.value = 10.0
+
+            elif current_type == "Box":
+                if self.ui.box_center_x:
+                    self.ui.box_center_x.value = 0.0
+                if self.ui.box_center_y:
+                    self.ui.box_center_y.value = 0.0
+                if self.ui.box_center_z:
+                    self.ui.box_center_z.value = 0.0
+                if self.ui.box_size_x:
+                    self.ui.box_size_x.value = 10.0
+                if self.ui.box_size_y:
+                    self.ui.box_size_y.value = 10.0
+                if self.ui.box_size_z:
+                    self.ui.box_size_z.value = 10.0
+                if self.ui.box_rot_x:
+                    self.ui.box_rot_x.value = 0.0
+                if self.ui.box_rot_y:
+                    self.ui.box_rot_y.value = 0.0
+                if self.ui.box_rot_z:
+                    self.ui.box_rot_z.value = 0.0
+
+            elif current_type == "Ellipsoid":
+                if self.ui.ellipsoid_center_x:
+                    self.ui.ellipsoid_center_x.value = 0.0
+                if self.ui.ellipsoid_center_y:
+                    self.ui.ellipsoid_center_y.value = 0.0
+                if self.ui.ellipsoid_center_z:
+                    self.ui.ellipsoid_center_z.value = 0.0
+                if self.ui.ellipsoid_radius_x:
+                    self.ui.ellipsoid_radius_x.value = 5.0
+                if self.ui.ellipsoid_radius_y:
+                    self.ui.ellipsoid_radius_y.value = 5.0
+                if self.ui.ellipsoid_radius_z:
+                    self.ui.ellipsoid_radius_z.value = 5.0
+                if self.ui.ellipsoid_rot_x:
+                    self.ui.ellipsoid_rot_x.value = 0.0
+                if self.ui.ellipsoid_rot_y:
+                    self.ui.ellipsoid_rot_y.value = 0.0
+                if self.ui.ellipsoid_rot_z:
+                    self.ui.ellipsoid_rot_z.value = 0.0
+
+            elif current_type == "Frustum":
+                if self.ui.frustum_pos_x:
+                    self.ui.frustum_pos_x.value = 0.0
+                if self.ui.frustum_pos_y:
+                    self.ui.frustum_pos_y.value = 0.0
+                if self.ui.frustum_pos_z:
+                    self.ui.frustum_pos_z.value = 0.0
+                if self.ui.frustum_rot_x:
+                    self.ui.frustum_rot_x.value = 0.0
+                if self.ui.frustum_rot_y:
+                    self.ui.frustum_rot_y.value = 0.0
+                if self.ui.frustum_rot_z:
+                    self.ui.frustum_rot_z.value = 0.0
+                if self.ui.frustum_fov:
+                    self.ui.frustum_fov.value = 60.0
+                if self.ui.frustum_aspect:
+                    self.ui.frustum_aspect.value = 1.0
+                if self.ui.frustum_near:
+                    self.ui.frustum_near.value = 0.1
+                if self.ui.frustum_far:
+                    self.ui.frustum_far.value = 100.0
+
+            # Update config from reset UI values
+            camera_pos, camera_rot = None, None
+            if self.viewer:
+                camera_pos, camera_rot = self.viewer._get_camera_state()
+            self.config.filter_values = self.ui.get_filter_values(
+                camera_position=camera_pos,
+                camera_rotation=camera_rot,
+            )
+
+        # Reset VolumeFilter config
+        self.config.volume_filter = VolumeFilter()
+
         if self.viewer:
+            self.viewer._update_filter_visualization()
             self.viewer.rerender(None)
 
     # =========================================================================
