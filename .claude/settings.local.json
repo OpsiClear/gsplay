@@ -120,7 +120,8 @@
       "Bash(.venv/bin/pip show:*)",
       "Bash(npm run build:*)",
       "Bash(source:*)",
-      "Bash(sort:*)"
+      "Bash(sort:*)",
+      "Bash(.venv/bin/gsplay:*)"
     ],
     "deny": [],
     "ask": []

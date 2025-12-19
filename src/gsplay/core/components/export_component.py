@@ -7,9 +7,24 @@ This component is responsible for:
 - Progress tracking
 - Integration with exporter factory and data sink registry
 
-Supports two modes:
-1. Legacy mode: Uses GSTensor and ExporterFactory
-2. New mode: Uses GaussianData and DataSinkRegistry
+Data Type Contract
+------------------
+IMPORTANT: This export system ONLY accepts standard gsply data types:
+
+- GSTensor (gsply.torch.GSTensor) - GPU tensors for rendering
+- GSData (gsply.GSData) - CPU numpy arrays
+- GaussianData (src.domain.data.GaussianData) - Unified abstraction
+
+All input sources (plugins) MUST decode their data to these standard types.
+The export system will NOT handle arbitrary data formats.
+
+Required fields for all data types:
+- means: [N, 3] float32 - Gaussian positions
+- scales: [N, 3] float32 - Gaussian scales (log or linear space)
+- quats: [N, 4] float32 - Quaternion rotations (wxyz convention)
+- opacities: [N] or [N, 1] float32 - Opacity values (logit or linear)
+- sh0: [N, 3] float32 - DC color coefficients (RGB or SH)
+- shN: [N, K, 3] float32 or None - Higher-order SH coefficients
 """
 
 from __future__ import annotations
@@ -19,7 +34,7 @@ import sys
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tqdm import tqdm
 
@@ -34,6 +49,63 @@ if TYPE_CHECKING:
     from src.domain.data import GaussianData
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_gaussian_data(data: Any, context: str = "export") -> bool:
+    """Validate that data is a supported gsply type.
+
+    Parameters
+    ----------
+    data : Any
+        Data to validate
+    context : str
+        Context for error messages
+
+    Returns
+    -------
+    bool
+        True if valid
+
+    Raises
+    ------
+    TypeError
+        If data is not a supported type
+    ValueError
+        If data is missing required fields
+    """
+    if data is None:
+        return False
+
+    # Check for supported types
+    type_name = type(data).__name__
+    supported_types = {"GSTensor", "GSData", "GaussianData", "GSDataPro", "GSTensorPro"}
+
+    if type_name not in supported_types:
+        raise TypeError(
+            f"[{context}] Unsupported data type: {type_name}. "
+            f"Expected one of: {', '.join(sorted(supported_types))}. "
+            "All input sources must decode to standard gsply types."
+        )
+
+    # Validate required fields exist
+    required_fields = ["means", "scales", "quats", "opacities", "sh0"]
+    missing = []
+
+    for field in required_fields:
+        if not hasattr(data, field):
+            missing.append(field)
+        else:
+            value = getattr(data, field)
+            if value is None:
+                missing.append(f"{field} (is None)")
+
+    if missing:
+        raise ValueError(
+            f"[{context}] Data missing required fields: {', '.join(missing)}. "
+            "All Gaussian data must have: means, scales, quats, opacities, sh0."
+        )
+
+    return True
 
 
 @contextmanager
@@ -292,6 +364,334 @@ class ExportComponent:
 
         except Exception as e:
             logger.error(f"Single frame export failed: {e}", exc_info=True)
+            return False
+
+    def export_at_source_time(
+        self,
+        model: ModelInterface,
+        source_time: float,
+        output_path: Path | str,
+        export_format: str = "compressed-ply",
+        edit_applier: Callable[[GSTensor], GSTensor] | None = None,
+        **exporter_options,
+    ) -> bool:
+        """
+        Export single frame at exact source time.
+
+        Supports continuous time sources by querying the model at the
+        specified source time (which may involve interpolation).
+
+        Parameters
+        ----------
+        model : ModelInterface
+            Model to export frame from
+        source_time : float
+            Time in source-native units (frames, seconds, etc.)
+        output_path : Path | str
+            Output file path
+        export_format : str
+            Export format (default "compressed-ply")
+        edit_applier : Callable[[GSTensor], GSTensor] | None
+            Function to apply edits to GSTensor before export
+        **exporter_options
+            Format-specific options passed to exporter
+
+        Returns
+        -------
+        bool
+            True if export succeeded, False otherwise
+        """
+        try:
+            output_path = UniversalPath(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Get data at source time (supports interpolation for continuous sources)
+            if hasattr(model, 'get_frame_at_source_time'):
+                gaussian_data = model.get_frame_at_source_time(source_time)
+            else:
+                # Fallback for legacy models without source time support
+                from src.domain.time import TimeDomain
+                time_domain = getattr(model, 'time_domain', None)
+                if time_domain:
+                    normalized = time_domain.to_normalized(source_time)
+                else:
+                    total = model.get_total_frames()
+                    normalized = source_time / (total - 1) if total > 1 else 0.0
+                gaussian_data = model.get_gaussians_at_normalized_time(normalized)
+
+            if gaussian_data is None:
+                logger.error(f"No data at source_time={source_time}")
+                return False
+
+            # Validate data type (enforces standard gsply types only)
+            try:
+                _validate_gaussian_data(gaussian_data, context=f"export_at_source_time(t={source_time})")
+            except (TypeError, ValueError) as e:
+                logger.error(str(e))
+                return False
+
+            # Apply edits if provided
+            if edit_applier:
+                gaussian_data = edit_applier(gaussian_data)
+
+            # Export
+            exporter = ExporterFactory.get_exporter(export_format)
+            exporter.export_frame(gaussian_data, output_path, **exporter_options)
+
+            logger.info(f"Exported frame at t={source_time} to {output_path}")
+
+            if self.event_bus:
+                self.event_bus.emit(
+                    EventType.EXPORT_COMPLETED,
+                    source="export_component",
+                    num_frames=1,
+                    output_path=str(output_path),
+                )
+            return True
+
+        except Exception as e:
+            logger.error(f"Export at source_time={source_time} failed: {e}", exc_info=True)
+            if self.event_bus:
+                self.event_bus.emit(
+                    EventType.EXPORT_FAILED,
+                    source="export_component",
+                    error=str(e),
+                )
+            return False
+
+    def export_source_time_range(
+        self,
+        model: ModelInterface,
+        source_time_start: float,
+        source_time_end: float,
+        source_time_step: float,
+        output_dir: Path | str,
+        export_format: str = "compressed-ply",
+        edit_applier: Callable[[GSTensor], GSTensor] | None = None,
+        progress_callback: Callable[[int, int, float], None] | None = None,
+        snap_to_keyframe: bool = False,
+        **exporter_options,
+    ) -> bool:
+        """
+        Export frames at custom source time intervals (resampling).
+
+        Iterates over a time range with a specified step size, exporting
+        each frame. Supports interpolation for continuous time sources.
+
+        Parameters
+        ----------
+        model : ModelInterface
+            Model to export frames from
+        source_time_start : float
+            Start time in source-native units
+        source_time_end : float
+            End time in source-native units
+        source_time_step : float
+            Step size in source-native units
+        output_dir : Path | str
+            Output directory for exported frames
+        export_format : str
+            Export format (default "compressed-ply")
+        edit_applier : Callable[[GSTensor], GSTensor] | None
+            Function to apply edits to GSTensor before export
+        progress_callback : Callable[[int, int, float], None] | None
+            Callback for progress updates: (current_idx, total_count, source_time)
+        snap_to_keyframe : bool
+            If True, snap each sample time to nearest keyframe and use
+            get_frame(idx) instead of get_frame_at_source_time(t).
+            Consecutive duplicates are deduplicated.
+        **exporter_options
+            Format-specific options passed to exporter
+
+        Returns
+        -------
+        bool
+            True if export succeeded, False otherwise
+        """
+        import numpy as np
+
+        # Validate parameters
+        if source_time_step <= 0:
+            logger.error(f"source_time_step must be positive, got {source_time_step}")
+            return False
+
+        # Swap if inverted
+        if source_time_start > source_time_end:
+            logger.warning(f"start ({source_time_start}) > end ({source_time_end}), swapping")
+            source_time_start, source_time_end = source_time_end, source_time_start
+
+        # Calculate export times
+        # Add small epsilon to ensure end is included when it's an exact multiple
+        export_times = np.arange(source_time_start, source_time_end + source_time_step * 0.5, source_time_step)
+
+        if len(export_times) == 0:
+            logger.error("No frames to export (empty time range)")
+            return False
+
+        if len(export_times) > 10000:
+            logger.warning(f"Large export requested: {len(export_times)} frames")
+
+        # Prepare output directory
+        output_dir = UniversalPath(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Get exporter and file extension
+        exporter = ExporterFactory.get_exporter(export_format)
+        exporter_info = ExporterFactory.get_exporter_info(export_format)
+        ext = exporter_info.file_extension if exporter_info else ".ply"
+
+        # Get time_domain for snap logic
+        time_domain = getattr(model, 'time_domain', None)
+
+        try:
+            exported_count = 0
+
+            # SNAP MODE: Convert sample times to keyframe indices, then dedup
+            # Only use snap mode if time_domain has keyframe_times (consistent with UI preview)
+            use_snap = (snap_to_keyframe and time_domain is not None
+                        and time_domain.keyframe_times is not None
+                        and len(time_domain.keyframe_times) > 0)
+            if use_snap:
+                # Convert sample times to keyframe indices
+                keyframe_data = [
+                    time_domain.source_time_to_nearest_keyframe(float(t))
+                    for t in export_times
+                ]
+
+                # Deduplicate consecutive indices
+                export_keyframes = []  # List of (output_idx, keyframe_idx, keyframe_time)
+                prev_kf_idx = None
+                for kf_idx, kf_time in keyframe_data:
+                    if kf_idx != prev_kf_idx:
+                        export_keyframes.append((len(export_keyframes), kf_idx, kf_time))
+                        prev_kf_idx = kf_idx
+
+                total_frames = len(export_keyframes)
+                logger.info(
+                    f"Snap mode: {len(export_times)} samples → {total_frames} unique keyframes "
+                    f"(from t={source_time_start:.4f} to t={source_time_end:.4f})"
+                )
+
+                # Export loop using get_keyframe(idx) for direct keyframe access
+                # This avoids interpolation - uses raw keyframe data
+                for out_idx, kf_idx, kf_time in export_keyframes:
+                    # Prefer get_keyframe() (InterpolatableSource) for direct access
+                    # Fall back to get_frame_at_source_time() for discrete sources
+                    if hasattr(model, 'get_keyframe'):
+                        gaussian_data = model.get_keyframe(kf_idx)
+                    else:
+                        gaussian_data = model.get_frame_at_source_time(float(kf_idx))
+
+                    if gaussian_data is None:
+                        logger.warning(f"No data at keyframe {kf_idx}, skipping")
+                        continue
+
+                    # Validate data type (enforces standard gsply types only)
+                    try:
+                        _validate_gaussian_data(gaussian_data, context=f"snap_export(keyframe={kf_idx})")
+                    except (TypeError, ValueError) as e:
+                        logger.error(str(e))
+                        continue
+
+                    if edit_applier:
+                        gaussian_data = edit_applier(gaussian_data)
+
+                    output_path = output_dir / f"frame_{out_idx:05d}{ext}"
+                    exporter.export_frame(gaussian_data, output_path, **exporter_options)
+                    exported_count += 1
+
+                    if progress_callback:
+                        progress_callback(out_idx + 1, total_frames, kf_time)
+
+                    # Emit progress event periodically
+                    if self.event_bus and out_idx % 10 == 0:
+                        self.event_bus.emit(
+                            EventType.EXPORT_PROGRESS,
+                            source="export_component",
+                            current=out_idx + 1,
+                            total=total_frames,
+                            source_time=kf_time,
+                        )
+            else:
+                # INTERPOLATED MODE: Original behavior
+                total_frames = len(export_times)
+                logger.info(
+                    f"Exporting {total_frames} frames from t={source_time_start:.4f} to "
+                    f"t={source_time_end:.4f} (step={source_time_step:.4f})"
+                )
+
+                for idx, t in enumerate(export_times):
+                    t_float = float(t)
+
+                    # Get data at this time
+                    if hasattr(model, 'get_frame_at_source_time'):
+                        gaussian_data = model.get_frame_at_source_time(t_float)
+                    else:
+                        # Fallback for legacy models
+                        from src.domain.time import TimeDomain as TD
+                        td = getattr(model, 'time_domain', None)
+                        if td:
+                            normalized = td.to_normalized(t_float)
+                        else:
+                            total = model.get_total_frames()
+                            normalized = t_float / max(1, total - 1)
+                        gaussian_data = model.get_gaussians_at_normalized_time(normalized)
+
+                    if gaussian_data is None:
+                        logger.warning(f"No data at t={t_float:.4f}, skipping")
+                        continue
+
+                    # Validate data type (enforces standard gsply types only)
+                    try:
+                        _validate_gaussian_data(gaussian_data, context=f"interpolated_export(t={t_float:.4f})")
+                    except (TypeError, ValueError) as e:
+                        logger.error(str(e))
+                        continue
+
+                    # Apply edits
+                    if edit_applier:
+                        gaussian_data = edit_applier(gaussian_data)
+
+                    # Build output path
+                    output_path = output_dir / f"frame_{idx:05d}{ext}"
+
+                    # Export
+                    exporter.export_frame(gaussian_data, output_path, **exporter_options)
+                    exported_count += 1
+
+                    # Progress callback
+                    if progress_callback:
+                        progress_callback(idx + 1, total_frames, t_float)
+
+                    # Emit progress event periodically
+                    if self.event_bus and idx % 10 == 0:
+                        self.event_bus.emit(
+                            EventType.EXPORT_PROGRESS,
+                            source="export_component",
+                            current=idx + 1,
+                            total=total_frames,
+                            source_time=t_float,
+                        )
+
+            logger.info(f"Time range export completed: {exported_count} frames to {output_dir}")
+
+            if self.event_bus:
+                self.event_bus.emit(
+                    EventType.EXPORT_COMPLETED,
+                    source="export_component",
+                    num_frames=exported_count,
+                    output_dir=str(output_dir),
+                )
+            return True
+
+        except Exception as e:
+            logger.error(f"Time range export failed: {e}", exc_info=True)
+            if self.event_bus:
+                self.event_bus.emit(
+                    EventType.EXPORT_FAILED,
+                    source="export_component",
+                    error=str(e),
+                )
             return False
 
     def _resolve_output_dir(self, requested_dir: (Path | str) | None) -> UniversalPath:

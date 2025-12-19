@@ -115,11 +115,18 @@ def create_render_function(
             W_scaled, H_scaled = W, H
 
         # Determine the current time to render (normal interactive mode)
-        frame_index = int(ui.time_slider.value) if ui.time_slider else 0
-        total_frames = ui.time_slider.max + 1 if ui.time_slider else 1
-        normalized_time = (
-            frame_index / max(1, total_frames - 1) if total_frames > 1 else 0.0
-        )
+        # Support both discrete (int) and continuous (float) time sliders
+        if ui.time_slider:
+            slider_value = ui.time_slider.value
+            slider_max = ui.time_slider.max
+            # Use float division to preserve precision for continuous sources
+            normalized_time = slider_value / max(1.0, slider_max) if slider_max > 0 else 0.0
+            frame_index = int(slider_value)  # For display purposes only
+            total_frames = int(slider_max) + 1
+        else:
+            frame_index = 0
+            total_frames = 1
+            normalized_time = 0.0
 
         # Get gaussians from model
         _checkpoint_load = time.perf_counter()

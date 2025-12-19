@@ -41,6 +41,8 @@ class EventType(Enum):
     EXPORT_REQUESTED = auto()
     EXPORT_COMPLETED = auto()
     EXPORT_FAILED = auto()
+    EXPORT_PROGRESS = auto()    # Progress during multi-frame export: {"current": int, "total": int, "source_time": float}
+    EXPORT_CANCELLED = auto()   # Export was cancelled
 
     # Edit events
     EDIT_APPLIED = auto()

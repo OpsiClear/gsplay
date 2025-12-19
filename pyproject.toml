@@ -81,6 +81,14 @@ webrtc = [
 [project.scripts]
 gsplay = "src.gsplay.core.main:cli"
 
+# Plugin entry points for auto-discovery
+[project.entry-points."gsplay.plugins"]
+load-ply = "src.models.ply.optimized_model:OptimizedPlyModel"
+composite = "src.models.composite.composite_model:CompositeModel"
+
+[project.entry-points."gsplay.sinks"]
+ply = "src.infrastructure.exporters.ply_sink:PlySink"
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

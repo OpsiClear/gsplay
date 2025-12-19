@@ -25,8 +25,9 @@ except ImportError:
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Union
 
 import torch
 # Pre-import torchvision to avoid circular import issues when imported from threads
@@ -40,136 +41,150 @@ logger = logging.getLogger(__name__)
 
 
 def setup_logging(level: str = "INFO") -> None:
-    """
-    Setup logging configuration.
-
-    Parameters
-    ----------
-    level : str
-        Logging level (DEBUG, INFO, WARNING, ERROR)
-    """
+    """Setup logging configuration."""
     logging.basicConfig(
         level=getattr(logging, level.upper()),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-
-    # Suppress verbose gsply logging (per-frame load messages)
     logging.getLogger("gsply.torch.compression").setLevel(logging.WARNING)
     logging.getLogger("gsply.torch").setLevel(logging.WARNING)
 
 
-def main(
-    config: Annotated[Path, tyro.conf.Positional],
-    port: int = 6019,
-    host: str = "0.0.0.0",
-    stream_port: int = -1,
-    log_level: str = "INFO",
-    gpu: int | None = None,
-    view_only: bool = False,
-    compact: bool = False,
-) -> None:
-    """
-    Universal 4D Gaussian Splatting GSPlay.
+# ============================================================================
+# CLI Commands
+# ============================================================================
 
-    Parameters
-    ----------
-    config : Path
-        Path to model configuration (JSON file or PLY folder)
-    port : int
-        Viser server port (default: 6019)
-    host : str
-        Host to bind to (default: 0.0.0.0 for external access, use 127.0.0.1 for localhost only)
-    stream_port : int
-        WebSocket stream port for view-only access. Default: -1 (auto-assign to viser_port+1).
-        Set to 0 to disable streaming.
-    log_level : str
-        Logging level: DEBUG, INFO, WARNING, ERROR (default: INFO)
-    gpu : int | None
-        GPU device number (e.g., 0, 1, 2). If None, defaults to GPU 0 if CUDA is available, otherwise CPU.
-        Examples: --gpu 0, --gpu 3
-    view_only : bool
-        Hide input path, config save, and export options from UI (default: False)
-    compact : bool
-        Mobile-friendly UI with smaller control panel and collapsible sections (default: False)
 
-    Examples
-    --------
-    View PLY sequence:
-        uv run python src/viewer/main.py --config ./export_with_edits
+@dataclass
+class ViewCmd:
+    """Launch the GSPlay viewer."""
 
-    Use specific GPU:
-        uv run python src/viewer/main.py --config ./export_with_edits --gpu 0
-        uv run python src/viewer/main.py --config ./export_with_edits --gpu 3
+    config: Annotated[Path, tyro.conf.Positional]
+    """Path to model configuration (JSON file or PLY folder)."""
 
-    Default behavior (uses GPU 0 if available, otherwise CPU):
-        uv run python src/viewer/main.py --config ./export_with_edits
+    port: int = 6019
+    """Viser server port."""
 
-    Custom port:
-        uv run python src/viewer/main.py --config ./export_with_edits --port 8080
+    host: str = "0.0.0.0"
+    """Host to bind to."""
 
-    Jellyfin streaming:
-        uv run python src/viewer/main.py --config ./module_config/gif_elly.json
+    stream_port: int = -1
+    """WebSocket stream port. Default: -1 (auto). Set to 0 to disable."""
 
-    Debug logging:
-        uv run python src/viewer/main.py --config ./export_with_edits --log-level DEBUG
-    """
-    # Setup logging
-    setup_logging(log_level)
+    log_level: str = "INFO"
+    """Logging level: DEBUG, INFO, WARNING, ERROR."""
+
+    gpu: int | None = None
+    """GPU device number. If None, uses GPU 0 if available."""
+
+    view_only: bool = False
+    """Hide input path, config save, and export options from UI."""
+
+    compact: bool = False
+    """Mobile-friendly compact UI."""
+
+
+@dataclass
+class PluginListCmd:
+    """List all discovered plugins."""
+
+    verbose: bool = False
+    """Show detailed plugin information."""
+
+
+@dataclass
+class PluginInfoCmd:
+    """Show information about a specific plugin."""
+
+    name: Annotated[str, tyro.conf.Positional]
+    """Plugin name to show info for."""
+
+
+@dataclass
+class PluginTestCmd:
+    """Test a plugin with the test harness."""
+
+    name: Annotated[str, tyro.conf.Positional]
+    """Plugin name to test."""
+
+    config: Path | None = None
+    """Optional JSON config file for the plugin."""
+
+    device: str = "cuda"
+    """Device to use for testing."""
+
+
+# Main command union with flat subcommands
+MainCommand = Union[
+    Annotated[ViewCmd, tyro.conf.subcommand("view", default=True)],
+    Annotated[PluginListCmd, tyro.conf.subcommand("plugins-list")],
+    Annotated[PluginInfoCmd, tyro.conf.subcommand("plugins-info")],
+    Annotated[PluginTestCmd, tyro.conf.subcommand("plugins-test")],
+]
+
+
+# ============================================================================
+# Command Handlers
+# ============================================================================
+
+
+def run_view(cmd: ViewCmd) -> None:
+    """Run the viewer with the given configuration."""
+    setup_logging(cmd.log_level)
 
     # Convert GPU number to device string
-    if gpu is not None:
-        device = f"cuda:{gpu}"
+    if cmd.gpu is not None:
+        device = f"cuda:{cmd.gpu}"
     else:
-        # Default to GPU 0 if CUDA is available, otherwise CPU
         if torch.cuda.is_available():
             device = "cuda:0"
         else:
             device = "cpu"
 
     logger.info("=== GSPlay ===")
-    logger.info(f"Config: {config}")
-    logger.info(f"Host: {host}")
-    logger.info(f"Port: {port}")
-    if stream_port != 0:
-        logger.info(f"Stream port: {port + 1} (auto)")
+    logger.info(f"Config: {cmd.config}")
+    logger.info(f"Host: {cmd.host}")
+    logger.info(f"Port: {cmd.port}")
+    if cmd.stream_port != 0:
+        logger.info(f"Stream port: {cmd.port + 1} (auto)")
     logger.info(f"Device: {device}")
 
     # Create viewer config
     viewer_config = GSPlayConfig(
-        port=port,
-        host=host,
-        stream_port=stream_port,
+        port=cmd.port,
+        host=cmd.host,
+        stream_port=cmd.stream_port,
         device=device,
-        model_config_path=config,
-        view_only=view_only,
-        compact_ui=compact,
+        model_config_path=cmd.config,
+        view_only=cmd.view_only,
+        compact_ui=cmd.compact,
     )
 
     # Create viewer
     viewer = UniversalGSPlay(viewer_config)
 
     # Load model
-    if config.is_dir():
+    if cmd.config.is_dir():
         # PLY folder
-        logger.info(f"Loading PLY files from directory: {config}")
+        logger.info(f"Loading PLY files from directory: {cmd.config}")
         config_dict = {
             "module": "load-ply",
             "config": {
-                "ply_folder": str(config),
+                "ply_folder": str(cmd.config),
                 "device": device,
             },
         }
-        viewer.load_model_from_config(config_dict, config_file=str(config))
+        viewer.load_model_from_config(config_dict, config_file=str(cmd.config))
 
-    elif config.is_file() and config.suffix == ".json":
+    elif cmd.config.is_file() and cmd.config.suffix == ".json":
         # JSON config
-        logger.info(f"Loading configuration from: {config}")
-        with open(config, "r") as f:
+        logger.info(f"Loading configuration from: {cmd.config}")
+        with open(cmd.config, "r") as f:
             config_dict = json.load(f)
-        viewer.load_model_from_config(config_dict, config_file=str(config))
+        viewer.load_model_from_config(config_dict, config_file=str(cmd.config))
 
     else:
-        logger.error(f"Invalid config: {config}")
+        logger.error(f"Invalid config: {cmd.config}")
         logger.error("Config must be either a PLY folder or JSON file")
         return
 
@@ -180,9 +195,135 @@ def main(
     viewer.run()
 
 
+def run_plugin_list(cmd: PluginListCmd) -> None:
+    """List all discovered plugins."""
+    from src.plugins.discovery import discover_plugins, get_plugin_info
+
+    plugins = discover_plugins()
+    if not plugins:
+        print("No plugins discovered.")
+        return
+
+    print(f"\nDiscovered {len(plugins)} plugin(s):\n")
+    print(f"{'Name':<20} {'Class':<30} {'Module'}")
+    print("-" * 80)
+
+    for name, cls in plugins.items():
+        print(f"{name:<20} {cls.__name__:<30} {cls.__module__}")
+
+    if cmd.verbose:
+        print("\n" + "=" * 80)
+        info = get_plugin_info()
+        for name, details in info.items():
+            print(f"\n{name}:")
+            if "metadata" in details:
+                meta = details["metadata"]
+                print(f"  Name: {meta.get('name', 'N/A')}")
+                print(f"  Description: {meta.get('description', 'N/A')}")
+                print(f"  Extensions: {meta.get('file_extensions', [])}")
+                print(f"  Version: {meta.get('version', 'N/A')}")
+            elif "metadata_error" in details:
+                print(f"  Metadata error: {details['metadata_error']}")
+
+
+def run_plugin_info(cmd: PluginInfoCmd) -> None:
+    """Show information about a specific plugin."""
+    from src.plugins.discovery import discover_plugins
+
+    plugins = discover_plugins()
+    if cmd.name not in plugins:
+        print(f"Plugin '{cmd.name}' not found.")
+        print(f"Available plugins: {', '.join(plugins.keys())}")
+        return
+
+    cls = plugins[cmd.name]
+    print(f"\nPlugin: {cmd.name}")
+    print(f"  Class: {cls.__name__}")
+    print(f"  Module: {cls.__module__}")
+
+    if hasattr(cls, "metadata"):
+        try:
+            meta = cls.metadata()
+            print(f"\nMetadata:")
+            print(f"  Display Name: {meta.name}")
+            print(f"  Description: {meta.description}")
+            print(f"  File Extensions: {meta.file_extensions}")
+            print(f"  Version: {meta.version}")
+            if meta.config_schema:
+                print(f"  Config Schema: {meta.config_schema.__name__}")
+        except Exception as e:
+            print(f"\nMetadata error: {e}")
+
+    # Show required methods
+    print(f"\nProtocol compliance:")
+    for method in ["metadata", "can_load", "total_frames", "get_frame_at_time"]:
+        has_method = hasattr(cls, method)
+        status = "+" if has_method else "-"
+        print(f"  {status} {method}")
+
+
+def run_plugin_test(cmd: PluginTestCmd) -> None:
+    """Test a plugin with the test harness."""
+    from src.plugins.discovery import discover_plugins
+    from src.plugins.testing import PluginTestHarness
+
+    plugins = discover_plugins()
+    if cmd.name not in plugins:
+        print(f"Plugin '{cmd.name}' not found.")
+        print(f"Available plugins: {', '.join(plugins.keys())}")
+        return
+
+    cls = plugins[cmd.name]
+
+    # Load config
+    config: dict = {}
+    if cmd.config:
+        if cmd.config.exists():
+            with open(cmd.config) as f:
+                config = json.load(f)
+        else:
+            print(f"Config file not found: {cmd.config}")
+            return
+
+    config["device"] = cmd.device
+
+    print(f"\nTesting plugin: {cmd.name}")
+    print(f"Config: {config}")
+    print()
+
+    harness = PluginTestHarness(cls)
+    harness.run_all_tests(config, device=cmd.device)
+    harness.print_results()
+
+
+# ============================================================================
+# Entry Point
+# ============================================================================
+
+
 def cli() -> None:
     """Entry point for the installed script."""
-    tyro.cli(main)
+    import sys
+
+    # Check if first arg looks like a path (not a subcommand)
+    # This allows `gsplay /path/to/ply` to work without `view` prefix
+    if len(sys.argv) > 1:
+        first_arg = sys.argv[1]
+        subcommands = {"view", "plugins-list", "plugins-info", "plugins-test", "-h", "--help"}
+        if first_arg not in subcommands and not first_arg.startswith("-"):
+            # Insert 'view' as the subcommand
+            sys.argv.insert(1, "view")
+
+    cmd = tyro.cli(MainCommand)
+
+    if isinstance(cmd, ViewCmd):
+        run_view(cmd)
+    elif isinstance(cmd, PluginListCmd):
+        run_plugin_list(cmd)
+    elif isinstance(cmd, PluginInfoCmd):
+        run_plugin_info(cmd)
+    elif isinstance(cmd, PluginTestCmd):
+        run_plugin_test(cmd)
 
 
 if __name__ == "__main__":

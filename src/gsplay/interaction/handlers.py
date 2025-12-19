@@ -137,6 +137,8 @@ class HandlerManager:
         """
         Setup time slider callback for immediate frame updates.
 
+        Supports both discrete frame indices and continuous source time.
+
         Parameters
         ----------
         ui : UIHandles
@@ -146,9 +148,15 @@ class HandlerManager:
 
             @ui.time_slider.on_update
             def _(_) -> None:
-                # Use playback controller to set frame
                 if self.playback_controller:
-                    self.playback_controller.set_frame(ui.time_slider.value)
+                    # Check if we have a continuous time domain
+                    time_domain = self.playback_controller.time_domain
+                    if time_domain is not None and time_domain.is_continuous:
+                        # Use source time for continuous sources
+                        self.playback_controller.set_source_time(ui.time_slider.value)
+                    else:
+                        # Use frame index for discrete sources
+                        self.playback_controller.set_frame(int(ui.time_slider.value))
                 else:
                     # Fallback
                     self.event_bus.emit(
@@ -242,7 +250,10 @@ class HandlerManager:
 
             def update_fps(_):
                 if self.playback_controller:
-                    self.playback_controller.set_fps(ui.play_speed.value)
+                    # set_fps returns False if FPS is locked
+                    if not self.playback_controller.set_fps(ui.play_speed.value):
+                        # Reset slider to current FPS (locked value)
+                        ui.play_speed.value = self.playback_controller.config.animation.play_speed_fps
                 else:
                     self.trigger_rerender()
 
@@ -305,6 +316,33 @@ class HandlerManager:
                     )
 
             ui.auto_quality_checkbox.on_update(update_auto_quality)
+
+        # Source FPS input (for runtime configuration)
+        if ui.source_fps_input is not None:
+
+            def update_source_fps(_):
+                new_fps = ui.source_fps_input.value
+                # 0 means "not specified" - treat as None
+                fps_value = new_fps if new_fps > 0 else None
+
+                # Update model's source_fps if available (via playback controller)
+                if self.playback_controller is not None:
+                    model = self.playback_controller._model
+                    if model is not None and hasattr(model, 'source_fps'):
+                        model.source_fps = fps_value
+                        logger.info(f"Source FPS updated to {fps_value}")
+
+                        # Refresh playback controller's cached time domain
+                        self.playback_controller.refresh_time_domain()
+
+                        # Re-emit MODEL_CHANGED to update time display
+                        if hasattr(model, 'time_domain'):
+                            self.event_bus.emit(
+                                EventType.MODEL_CHANGED,
+                                time_domain=model.time_domain,
+                            )
+
+            ui.source_fps_input.on_update(update_source_fps)
 
         logger.debug("Animation callbacks registered")
 
@@ -493,6 +531,124 @@ class HandlerManager:
 
         logger.debug("Button callbacks registered")
 
+    def setup_export_scope_callbacks(self, ui: UIHandles) -> None:
+        """
+        Setup callbacks for export scope dropdown and time range controls.
+
+        Handles visibility toggling and dynamic button label updates.
+
+        Parameters
+        ----------
+        ui : UIHandles
+            UI handles
+        """
+        if ui.export_scope_dropdown is None:
+            return
+
+        @ui.export_scope_dropdown.on_update
+        def _on_scope_change(_):
+            scope = ui.export_scope_dropdown.value
+            show_time_range = (scope == "Custom Time Range")
+
+            # Toggle visibility of time range controls
+            for ctrl in [ui.export_start_time_slider, ui.export_end_time_slider,
+                         ui.export_time_step_slider, ui.export_frame_preview,
+                         ui.export_snap_to_keyframe]:
+                if ctrl:
+                    ctrl.visible = show_time_range
+
+            # Update button label based on scope
+            if ui.export_ply_button:
+                if scope == "Snapshot at Current Time":
+                    ui.export_ply_button.content = "Export 1 Frame"
+                elif scope == "Custom Time Range":
+                    self._update_export_frame_preview(ui)
+                else:
+                    ui.export_ply_button.content = "Export All Frames"
+
+            logger.debug(f"Export scope changed to: {scope}")
+
+        # Update preview when time range controls change
+        for slider in [ui.export_start_time_slider, ui.export_end_time_slider,
+                       ui.export_time_step_slider]:
+            if slider:
+                @slider.on_update
+                def _on_time_range_change(_):
+                    self._update_export_frame_preview(ui)
+
+        # Update preview when snap checkbox changes
+        if ui.export_snap_to_keyframe:
+            @ui.export_snap_to_keyframe.on_update
+            def _on_snap_change(_):
+                self._update_export_frame_preview(ui)
+
+        logger.debug("Export scope callbacks registered")
+
+    def _update_export_frame_preview(self, ui: UIHandles) -> None:
+        """
+        Update the frame count preview for time range export.
+
+        Handles snap-to-keyframe mode by calculating deduped keyframe count.
+
+        Parameters
+        ----------
+        ui : UIHandles
+            UI handles
+        """
+        if not all([ui.export_start_time_slider, ui.export_end_time_slider,
+                    ui.export_time_step_slider]):
+            return
+
+        start = ui.export_start_time_slider.value
+        end = ui.export_end_time_slider.value
+        step = ui.export_time_step_slider.value
+
+        if step <= 0 or end < start:
+            if ui.export_frame_preview:
+                ui.export_frame_preview.value = "Invalid range"
+            if ui.export_ply_button:
+                ui.export_ply_button.content = "Export"
+            return
+
+        # Calculate sample count
+        import numpy as np
+        sample_times = np.arange(start, end + step * 0.5, step)
+        raw_count = len(sample_times)
+
+        # Check if snap is enabled and we have playback controller with time_domain
+        snap_enabled = (ui.export_snap_to_keyframe and
+                        ui.export_snap_to_keyframe.value)
+
+        if snap_enabled and self.playback_controller:
+            time_domain = self.playback_controller.time_domain
+            if (time_domain and time_domain.keyframe_times is not None
+                    and len(time_domain.keyframe_times) > 0):
+                # Calculate actual count after snap + dedup
+                # Use same algorithm as export_source_time_range for consistency
+                keyframe_indices = [
+                    time_domain.source_time_to_nearest_keyframe(float(t))[0]
+                    for t in sample_times
+                ]
+                # Deduplicate consecutive (same algorithm as export)
+                unique_count = 0
+                prev_idx = None
+                for idx in keyframe_indices:
+                    if idx != prev_idx:
+                        unique_count += 1
+                        prev_idx = idx
+
+                if ui.export_frame_preview:
+                    ui.export_frame_preview.value = f"~{unique_count} keyframes (from {raw_count} samples)"
+                if ui.export_ply_button:
+                    ui.export_ply_button.content = f"Export {unique_count} Keyframes"
+                return
+
+        # Default: show raw count
+        if ui.export_frame_preview:
+            ui.export_frame_preview.value = f"~{raw_count} frames"
+        if ui.export_ply_button:
+            ui.export_ply_button.content = f"Export {raw_count} Frames"
+
     def setup_all_callbacks(
         self, ui: UIHandles, initial_scene_bounds: dict | None = None
     ) -> None:
@@ -516,6 +672,7 @@ class HandlerManager:
         self.setup_filter_type_callback(ui, initial_scene_bounds)
         self.setup_processing_mode_callback(ui)
         self.setup_button_callbacks(ui)
+        self.setup_export_scope_callbacks(ui)
 
         logger.debug("All UI callbacks registered successfully")
 

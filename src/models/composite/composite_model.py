@@ -4,6 +4,8 @@ Composite model for multi-asset Gaussian Splatting.
 This module provides a model that manages multiple sub-models as layers,
 enabling composition of static and dynamic Gaussian datasets.
 
+Now uses SourceRegistry for layer creation, supporting any registered source type.
+
 Note: Uses dependency injection for edit management to avoid coupling
 to the viewer layer. The edit_manager_factory should be provided by
 the viewer when creating CompositeModel instances.
@@ -16,7 +18,17 @@ from typing import Any, TYPE_CHECKING
 
 from src.domain.entities import GSTensor, GaussianLayer, CompositeGSTensor
 from src.domain.filters import VolumeFilter
-from src.domain.interfaces import ModelInterface, EditManagerProtocol, EditManagerFactory
+from src.domain.interfaces import (
+    BaseGaussianSource,
+    SourceMetadata,
+    EditManagerProtocol,
+    EditManagerFactory,
+    PluginState,
+    HealthStatus,
+    HealthCheckResult,
+)
+from src.domain.lifecycle import LifecycleMixin
+from src.domain.data import GaussianData
 from src.infrastructure.processing_mode import ProcessingMode
 from gsmod import ColorValues, TransformValues, FilterValues
 
@@ -26,7 +38,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class CompositeModel(ModelInterface):
+class CompositeModel(LifecycleMixin):
     """
     A composite model that manages multiple sub-models as layers.
 
@@ -35,17 +47,40 @@ class CompositeModel(ModelInterface):
     unified rendering. Each layer is managed independently and can be
     controlled via visibility, z-ordering, and opacity.
 
-    The model implements the standard ModelInterface, so it can be used
-    as a drop-in replacement for single-asset models.
+    Implements BaseGaussianSource protocol for unified plugin system.
+    Uses SourceRegistry for layer creation, supporting any registered source type.
 
     Attributes:
-        models: Dictionary mapping layer_id to ModelInterface instances
+        models: Dictionary mapping layer_id to BaseGaussianSource instances
         layer_configs: Dictionary mapping layer_id to layer configuration
         layer_edit_managers: Dictionary mapping layer_id to EditManager instances
         layer_viewer_configs: Dictionary mapping layer_id to GSPlayConfig instances
         layer_scene_bounds: Dictionary mapping layer_id to SceneBounds
         total_frames: Total frames (synchronized across all layers)
     """
+
+    # --- BaseGaussianSource Protocol Class Methods ---
+
+    @classmethod
+    def metadata(cls) -> SourceMetadata:
+        """Return metadata about this source type."""
+        return SourceMetadata(
+            name="Composite",
+            description="Multi-layer composition of Gaussian sources",
+            file_extensions=[],  # Doesn't load files directly
+            config_schema=None,  # Complex config, validated manually
+            supports_streaming=True,
+            supports_seeking=True,
+            version="2.0.0",
+        )
+
+    @classmethod
+    def can_load(cls, path: str) -> bool:
+        """Check if this source can handle the given path.
+
+        CompositeModel doesn't load paths directly - it's configured via dict.
+        """
+        return False
 
     def __init__(
         self,
@@ -60,7 +95,7 @@ class CompositeModel(ModelInterface):
             layer_configs: Dictionary mapping layer_id to layer config:
                 {
                     "layer_id": {
-                        "type": "ply",
+                        "type": "ply" | "load-ply" | any registered source,
                         "config": {...},  # Type-specific config
                         "visible": bool,  # Default visibility
                         "z_order": int,   # Rendering order
@@ -79,8 +114,11 @@ class CompositeModel(ModelInterface):
                 If provided, enables per-layer edit pipelines. Signature:
                 (config: dict, device: str) -> EditManagerProtocol
         """
+        # Initialize lifecycle mixin
+        LifecycleMixin.__init__(self)
+
         self.device = device
-        self.models: dict[str, ModelInterface] = {}
+        self.models: dict[str, BaseGaussianSource] = {}
         self.layer_configs = layer_configs
         self._edit_manager_factory = edit_manager_factory
 
@@ -89,7 +127,7 @@ class CompositeModel(ModelInterface):
         self.layer_viewer_configs: dict[str, Any] = {}  # GSPlayConfig when factory provided
         self.layer_scene_bounds: dict[str, dict[str, Any]] = {}
 
-        # Create sub-models for each layer
+        # Create sub-models for each layer using SourceRegistry
         for layer_id, config in layer_configs.items():
             logger.info(f"Loading layer '{layer_id}' (type: {config['type']})")
             model = self._create_model_from_config(config, device)
@@ -107,80 +145,87 @@ class CompositeModel(ModelInterface):
             self._calculate_layer_bounds(layer_id, model)
 
         # Determine total frames (use maximum across all layers)
-        self.total_frames = max(
-            (model.get_total_frames() for model in self.models.values()), default=0
+        self._total_frames = max(
+            (model.total_frames for model in self.models.values()), default=0
         )
+
+        # Transition to READY state
+        self._state = PluginState.READY
 
         logger.info(
             f"CompositeModel initialized with {len(self.models)} layers, "
-            f"{self.total_frames} total frames, per-layer edits enabled"
+            f"{self._total_frames} total frames, per-layer edits enabled"
         )
+
+    # --- BaseGaussianSource Protocol Properties ---
+
+    @property
+    def total_frames(self) -> int:
+        """Total number of frames available."""
+        return self._total_frames
 
     def _create_model_from_config(
         self, config: dict[str, Any], device: str
-    ) -> ModelInterface:
+    ) -> BaseGaussianSource:
         """
-        Factory method to create a model instance from config.
+        Factory method to create a model instance from config using SourceRegistry.
 
         Args:
             config: Layer configuration
             device: Target device
 
         Returns:
-            Model instance implementing ModelInterface
+            Model instance implementing BaseGaussianSource
 
         Raises:
-            ValueError: If model type is unknown
+            ValueError: If model type is unknown or not registered
         """
+        from src.infrastructure.registry import SourceRegistry, register_defaults
+
+        # Ensure registry is initialized
+        register_defaults()
+
         model_type = config["type"]
-        model_config = config["config"]
+        model_config = config.get("config", {}).copy()
 
+        # Normalize type name (support both "ply" and "load-ply")
         if model_type == "ply":
-            from src.models.ply.optimized_model import (
-                create_optimized_ply_model_from_folder,
-            )
+            model_type = "load-ply"
 
-            ply_folder = model_config.get("ply_folder")
-
-            # Extract PLY loading config (with defaults matching PlyLoadingConfig)
-            opacity_threshold = model_config.get("opacity_threshold", 0.01)
-            scale_threshold = model_config.get("scale_threshold", 1e-7)
-            enable_quality_filtering = model_config.get(
-                "enable_quality_filtering", True
+        # Extract processing mode from edits if present
+        edits = config.get("edits", {})
+        volume_filter = edits.get("volume_filter", {})
+        raw_mode = volume_filter.get(
+            "processing_mode", model_config.get("processing_mode", "all_gpu")
+        )
+        try:
+            processing_mode = ProcessingMode.from_string(raw_mode).loader_mode
+        except ValueError:
+            logger.warning(
+                "Invalid processing mode '%s' for layer '%s'; defaulting to ALL_GPU",
+                raw_mode,
+                config.get("id", "unknown"),
             )
-            enable_concurrent_prefetch = model_config.get(
-                "enable_concurrent_prefetch", True
-            )
+            processing_mode = ProcessingMode.ALL_GPU.value
 
-            # Get processing_mode from edits config (VolumeFilter) or model config
-            # This unifies PLY loading mode with edit processing mode
-            edits = config.get("edits", {})
-            volume_filter = edits.get("volume_filter", {})
-            raw_mode = volume_filter.get(
-                "processing_mode", model_config.get("processing_mode", "all_gpu")
-            )
-            try:
-                processing_mode = ProcessingMode.from_string(raw_mode).loader_mode
-            except ValueError:
-                logger.warning(
-                    "Invalid processing mode '%s' for layer '%s'; defaulting loader to ALL_GPU",
-                    raw_mode,
-                    config.get("id", "unknown"),
-                )
-                processing_mode = ProcessingMode.ALL_GPU.value
+        # Build config for registry
+        model_config["processing_mode"] = processing_mode
 
-            return create_optimized_ply_model_from_folder(
-                ply_folder=ply_folder,
+        # Create via registry
+        try:
+            source = SourceRegistry.create_validated(
+                model_type,
+                model_config,
                 device=device,
-                enable_concurrent_prefetch=enable_concurrent_prefetch,
-                processing_mode=processing_mode,
-                opacity_threshold=opacity_threshold,
-                scale_threshold=scale_threshold,
-                enable_quality_filtering=enable_quality_filtering,
             )
-
-        else:
-            raise ValueError(f"Unknown model type: {model_type}. Supported: 'ply'")
+            return source
+        except ValueError as e:
+            # Re-raise with available sources for better error message
+            available = SourceRegistry.names()
+            raise ValueError(
+                f"Unknown model type: {model_type}. "
+                f"Available: {', '.join(available)}"
+            ) from e
 
     def _create_layer_viewer_config(self, config: dict[str, Any]) -> Any:
         """
@@ -264,7 +309,7 @@ class CompositeModel(ModelInterface):
 
         return viewer_config
 
-    def _calculate_layer_bounds(self, layer_id: str, model: ModelInterface) -> None:
+    def _calculate_layer_bounds(self, layer_id: str, model: BaseGaussianSource) -> None:
         """
         Calculate scene bounds for a layer.
 
@@ -272,9 +317,17 @@ class CompositeModel(ModelInterface):
             layer_id: ID of the layer
             model: Model instance for this layer
         """
+        import numpy as np
+
         try:
             # Get first frame to calculate bounds
-            gaussian_data = model.get_gaussians_at_normalized_time(0.0)
+            # Use get_gaussians_at_normalized_time if available (backward compat)
+            # Otherwise use get_frame_at_time (new protocol)
+            if hasattr(model, "get_gaussians_at_normalized_time"):
+                gaussian_data = model.get_gaussians_at_normalized_time(0.0)
+            else:
+                gaussian_data = model.get_frame_at_time(0.0)
+
             if gaussian_data is None:
                 logger.warning(
                     f"Could not calculate bounds for layer '{layer_id}': no data at frame 0"
@@ -283,22 +336,22 @@ class CompositeModel(ModelInterface):
 
             # Calculate bounds from means
             means = gaussian_data.means
-            if means.shape[0] == 0:
+            if means is None or (hasattr(means, "shape") and means.shape[0] == 0):
                 logger.warning(f"Layer '{layer_id}' has no gaussians")
                 return
 
-            # Move to CPU for bounds calculation
-            if means.device.type == "cuda":
+            # Handle both numpy and torch tensors
+            if hasattr(means, "device") and means.device.type == "cuda":
                 means = means.cpu()
+            if hasattr(means, "numpy"):
+                means = means.numpy()
 
-            import torch
+            mins = np.min(means, axis=0)
+            maxs = np.max(means, axis=0)
 
-            mins = torch.min(means, dim=0)[0]
-            maxs = torch.max(means, dim=0)[0]
-
-            center = ((mins + maxs) / 2).numpy()
-            size = (maxs - mins).numpy()
-            radius = float(torch.norm(maxs - mins).item() / 2)
+            center = (mins + maxs) / 2
+            size = maxs - mins
+            radius = float(np.linalg.norm(maxs - mins) / 2)
 
             self.layer_scene_bounds[layer_id] = {
                 "center": tuple(center.tolist()),
@@ -436,6 +489,169 @@ class CompositeModel(ModelInterface):
         if self.total_frames <= 1:
             return 0.0
         return frame_idx / (self.total_frames - 1)
+
+    @property
+    def time_domain(self):
+        """Get the time domain for this source.
+
+        Returns discrete frame-based time domain for composite sources.
+        Composite models aggregate discrete layers, so the overall
+        time domain is discrete.
+
+        Returns
+        -------
+        TimeDomain
+            Discrete frame-based time domain
+        """
+        from src.domain.time import TimeDomain
+        return TimeDomain.discrete(self._total_frames)
+
+    def get_frame_at_source_time(self, source_time: float) -> GaussianData:
+        """Get frame at source-native time (frames).
+
+        For composite sources, this rounds to the nearest frame index.
+
+        Parameters
+        ----------
+        source_time : float
+            Time in frames (e.g., 0.0, 1.0, 2.0, ...)
+
+        Returns
+        -------
+        GaussianData
+            Frame data at the nearest frame
+        """
+        # Round to nearest frame index
+        frame_idx = int(round(source_time))
+        frame_idx = max(0, min(frame_idx, self._total_frames - 1))
+
+        # Convert to normalized time and use existing implementation
+        if self._total_frames <= 1:
+            normalized_time = 0.0
+        else:
+            normalized_time = frame_idx / (self._total_frames - 1)
+
+        return self.get_frame_at_time(normalized_time)
+
+    # --- BaseGaussianSource Protocol Methods ---
+
+    def get_frame_at_time(self, normalized_time: float) -> GaussianData:
+        """Get frame at normalized time [0, 1].
+
+        This is the primary method for retrieving Gaussian data per BaseGaussianSource protocol.
+
+        Parameters
+        ----------
+        normalized_time : float
+            Normalized time in range [0.0, 1.0]
+
+        Returns
+        -------
+        GaussianData
+            Frame data at the specified time
+        """
+        import numpy as np
+
+        # Delegate to existing implementation
+        result = self.get_gaussians_at_normalized_time(normalized_time)
+
+        if result is None:
+            # Return empty GaussianData on failure
+            return GaussianData(
+                means=np.zeros((0, 3), dtype=np.float32),
+                scales=np.zeros((0, 3), dtype=np.float32),
+                quats=np.zeros((0, 4), dtype=np.float32),
+                opacities=np.zeros((0,), dtype=np.float32),
+                sh0=np.zeros((0, 3), dtype=np.float32),
+            )
+
+        # Convert to GaussianData
+        if isinstance(result, GaussianData):
+            return result
+        elif hasattr(result, "means") and hasattr(result, "scales"):
+            # GSTensor (PyTorch) - wrap in GaussianData
+            return GaussianData.from_gstensor(result)
+        else:
+            logger.error("Unexpected result type from get_gaussians_at_normalized_time: %s", type(result))
+            return GaussianData(
+                means=np.zeros((0, 3), dtype=np.float32),
+                scales=np.zeros((0, 3), dtype=np.float32),
+                quats=np.zeros((0, 4), dtype=np.float32),
+                opacities=np.zeros((0,), dtype=np.float32),
+                sh0=np.zeros((0, 3), dtype=np.float32),
+            )
+
+    # --- Lifecycle Methods ---
+
+    def on_shutdown(self, timeout: float = 5.0) -> None:
+        """Shutdown the composite model and all sub-models.
+
+        Parameters
+        ----------
+        timeout : float
+            Maximum seconds to wait for each sub-model shutdown
+        """
+        if self._state in (PluginState.TERMINATED, PluginState.SHUTTING_DOWN):
+            return
+
+        logger.info("[CompositeModel] Shutting down %d layers...", len(self.models))
+        self._state = PluginState.SHUTTING_DOWN
+
+        # Shutdown all sub-models
+        for layer_id, model in self.models.items():
+            try:
+                if hasattr(model, "on_shutdown"):
+                    model.on_shutdown(timeout=timeout)
+                    logger.debug("Shutdown layer '%s'", layer_id)
+            except Exception as e:
+                logger.warning("Error shutting down layer '%s': %s", layer_id, e)
+
+        self._state = PluginState.TERMINATED
+        logger.info("[CompositeModel] Shutdown complete")
+
+    # --- HealthCheckable Methods ---
+
+    def health_check(self) -> HealthCheckResult:
+        """Perform health check and return result."""
+        if self._state != PluginState.READY:
+            return HealthCheckResult(
+                status=HealthStatus.UNHEALTHY,
+                message=f"Composite model in {self._state.name} state",
+            )
+
+        # Check health of all sub-models
+        unhealthy_layers = []
+        for layer_id, model in self.models.items():
+            if hasattr(model, "health_check"):
+                result = model.health_check()
+                if result.status == HealthStatus.UNHEALTHY:
+                    unhealthy_layers.append(layer_id)
+
+        if unhealthy_layers:
+            return HealthCheckResult(
+                status=HealthStatus.DEGRADED,
+                message=f"Unhealthy layers: {', '.join(unhealthy_layers)}",
+            )
+
+        return HealthCheckResult(
+            status=HealthStatus.HEALTHY,
+            message=f"Ready with {len(self.models)} layers, {self._total_frames} frames",
+            details={
+                "layers": list(self.models.keys()),
+                "total_frames": self._total_frames,
+            },
+        )
+
+    def get_diagnostics(self) -> dict[str, Any]:
+        """Get diagnostic information about this model."""
+        return {
+            "class": self.__class__.__name__,
+            "state": self._state.name,
+            "total_frames": self._total_frames,
+            "layers": list(self.models.keys()),
+            "device": self.device,
+            "layer_info": self.get_layer_info(),
+        }
 
     def set_layer_visibility(self, layer_id: str, visible: bool) -> None:
         """

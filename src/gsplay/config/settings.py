@@ -48,6 +48,17 @@ class ExportSettings:
     """Export configuration for sequence and video export.
 
     Supports local filesystem and cloud storage paths.
+
+    Attributes
+    ----------
+    export_scope : ExportScope
+        Scope of frames to export (current frame, all keyframes, or time range)
+    source_time_start : float | None
+        Start time in source units (for TIME_RANGE scope)
+    source_time_end : float | None
+        End time in source units (for TIME_RANGE scope)
+    source_time_step : float | None
+        Step size in source units (for TIME_RANGE scope)
     """
 
     # Sequence export
@@ -61,6 +72,12 @@ class ExportSettings:
     start_frame: int | None = None  # Starting frame (None = first frame)
     end_frame: int | None = None  # Ending frame (None = last frame)
     exporter_options: dict = field(default_factory=dict)  # Format-specific options
+
+    # Continuous time export support
+    export_scope: str = "all_keyframes"  # "current_frame", "all_keyframes", "time_range"
+    source_time_start: float | None = None  # Start time in source units
+    source_time_end: float | None = None  # End time in source units
+    source_time_step: float | None = None  # Step size in source units
 
     # Aliases for backward compatibility
     @property
@@ -78,6 +95,14 @@ class ExportSettings:
     video_duration_sec: float = 10.0
     video_width: int = 800
     video_height: int = 600
+
+    def __post_init__(self):
+        """Validate settings after initialization."""
+        if self.export_scope == "time_range":
+            if self.source_time_step is not None and self.source_time_step <= 0:
+                raise ValueError(
+                    f"source_time_step must be positive, got {self.source_time_step}"
+                )
 
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary (convert UniversalPath to str)."""

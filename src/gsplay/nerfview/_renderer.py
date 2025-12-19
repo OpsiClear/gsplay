@@ -771,9 +771,10 @@ class SharedRenderer(threading.Thread):
                 camera_ctrl.rotation_step()
 
                 # Throttle slider sync to every 250ms
+                # Use force=True to sync even in APP mode (rotation is app-controlled)
                 current_time = time.perf_counter()
                 if current_time - self._last_slider_sync > 0.25:
-                    camera_ctrl.trigger_slider_sync()
+                    camera_ctrl.trigger_slider_sync(force=True)
                     self._last_slider_sync = current_time
 
                 # rotation_step() already pushed to viser (or stored headless state)

@@ -43,6 +43,7 @@ from .camera_ui import (
     create_quality_controls,
     create_supersplat_camera_controls,
     create_view_controls,
+    update_time_slider_for_source,
 )
 from .quaternion_utils import quat_from_axis_angle, quat_from_euler_deg, quat_multiply, quat_to_rotation_matrix
 
@@ -66,6 +67,7 @@ __all__ = [
     "create_quality_controls",
     "create_playback_controls",
     "create_supersplat_camera_controls",
+    "update_time_slider_for_source",
     "PlaybackButton",
 ]
 

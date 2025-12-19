@@ -1,19 +1,14 @@
 """
 Model factory for creating model instances based on configuration.
 
-This module provides a centralized factory for instantiating different model types,
-removing model-specific logic from the viewer layer and enabling easier extensibility.
-
-Now integrates with DataSourceRegistry for unified source discovery.
+This module provides a thin facade over SourceRegistry for backward compatibility.
+New code should use SourceRegistry.create_validated() directly.
 """
+
 import logging
-from collections.abc import Callable
 from typing import Any, Protocol
 
-from src.domain.interfaces import ModelInterface, DataLoaderInterface, ConfigurableModelInterface
-from src.infrastructure.io.path_io import UniversalPath
-from src.infrastructure.io.discovery import discover_and_sort_ply_files
-from src.infrastructure.processing.gaussian_constants import GaussianConstants as GC
+from src.domain.interfaces import BaseGaussianSource, DataLoaderInterface
 
 logger = logging.getLogger(__name__)
 
@@ -33,87 +28,36 @@ class ModelFactoryInterface(Protocol):
         module_config: dict[str, Any],
         device: str,
         config_file: str | None = None,
-        **kwargs
-    ) -> tuple[ModelInterface, DataLoaderInterface | None, dict[str, Any]]:
-        """
-        Create a model instance based on configuration.
-
-        Parameters
-        ----------
-        module_type : str
-            Type of module to create ('load-ply', 'sogs', 'composite', etc.)
-        module_config : dict
-            Module-specific configuration parameters
-        device : str
-            Device to use for computation ('cuda', 'cpu')
-        config_file : str | None
-            Optional path to original config file (for reference)
-        **kwargs
-            Additional parameters passed to model constructors
-
-        Returns
-        -------
-        tuple[ModelInterface, DataLoaderInterface | None, dict[str, Any]]
-            - The created model instance
-            - Optional data loader (None for streaming models)
-            - Metadata dict with optional fields like 'source_path' and 'recommended_max_scale'
-        """
+        **kwargs: Any,
+    ) -> tuple[BaseGaussianSource, DataLoaderInterface | None, dict[str, Any]]:
+        """Create a model instance based on configuration."""
         ...
-
-
-type BuilderResult = tuple[ModelInterface, DataLoaderInterface | None, dict[str, Any]]
-type ModelBuilder = Callable[[dict[str, Any], str, str | None], BuilderResult]
 
 
 class ModelFactory:
     """
     Factory for creating model instances based on configuration.
 
-    This factory centralizes all model instantiation logic, making it easy
-    to add new model types without modifying the viewer code.
+    This factory is now a thin facade over SourceRegistry. New code should
+    use SourceRegistry.create_validated() directly.
+
+    Maintains backward compatibility with existing code that uses:
+    - ModelFactory.create()
+    - ModelFactory.create_from_path()
+    - ModelFactory.register_builder()
     """
 
-    # Registry of model types that support from_config
-    _configurable_models: dict[str, type[ConfigurableModelInterface]] = {}
-    _builders: dict[str, ModelBuilder] = {}
+    # Legacy builder support (deprecated)
+    _builders: dict[str, Any] = {}
 
     @classmethod
-    def register_model(
-        cls,
-        module_type: str,
-        model_class: type[ConfigurableModelInterface]
-    ) -> None:
-        """
-        Register a model class that implements from_config.
+    def register_builder(cls, module_type: str, builder: Any) -> None:
+        """Register a legacy builder (deprecated).
 
-        Parameters
-        ----------
-        module_type : str
-            Module type identifier (e.g., "load-ply", "sogs")
-        model_class : type[ConfigurableModelInterface]
-            Model class implementing from_config method
-        """
-        cls._configurable_models[module_type] = model_class
-        logger.debug(f"Registered configurable model: {module_type} -> {model_class.__name__}")
-
-    @classmethod
-    def register_builder(
-        cls,
-        module_type: str,
-        builder: ModelBuilder,
-    ) -> None:
-        """
-        Register a builder callable for a module type.
-
-        Parameters
-        ----------
-        module_type : str
-            Module type identifier
-        builder : ModelBuilder
-            Callable that returns (model, data_loader, metadata)
+        Use SourceRegistry.register() instead.
         """
         cls._builders[module_type] = builder
-        logger.debug("Registered model builder: %s -> %s", module_type, builder.__name__)
+        logger.debug("Registered legacy builder: %s", module_type)
 
     @staticmethod
     def create(
@@ -121,8 +65,8 @@ class ModelFactory:
         module_config: dict[str, Any],
         device: str,
         config_file: str | None = None,
-        **kwargs
-    ) -> tuple[ModelInterface, DataLoaderInterface | None, dict[str, Any]]:
+        **kwargs: Any,
+    ) -> tuple[BaseGaussianSource, DataLoaderInterface | None, dict[str, Any]]:
         """
         Create a model instance based on configuration.
 
@@ -141,76 +85,44 @@ class ModelFactory:
 
         Returns
         -------
-        tuple[ModelInterface, DataLoaderInterface | None, dict[str, Any]]
+        tuple[BaseGaussianSource, DataLoaderInterface | None, dict[str, Any]]
             - The created model instance
-            - Optional data loader (None for streaming models)
+            - Optional data loader (None for most models)
             - Metadata dict with optional fields like 'source_path' and 'recommended_max_scale'
 
         Raises
         ------
         ValueError
             If module_type is not recognized or configuration is invalid
-        ImportError
-            If required model module cannot be imported
         """
-        logger.debug(f"Creating model: {module_type}")
+        logger.debug("Creating model: %s", module_type)
 
         # Ensure registry is initialized
         _ensure_registry_initialized()
 
-        # First check legacy builders (for backward compatibility)
+        # Handle composite model specially (it has unique requirements)
+        if module_type == "composite":
+            return ModelFactory._create_composite_model(
+                module_config, device, config_file, **kwargs
+            )
+
+        # Check legacy builders first
         builder = ModelFactory._builders.get(module_type)
         if builder:
             return builder(module_config, device, config_file, **kwargs)
 
-        configurable = ModelFactory._configurable_models.get(module_type)
-        if configurable:
-            return ModelFactory._create_from_configurable(
-                configurable,
-                module_config,
-                device,
-                config_file=config_file,
-                **kwargs,
-            )
+        # Use unified SourceRegistry
+        from src.infrastructure.registry import SourceRegistry
 
-        # Check registry for new-style data sources
-        from src.infrastructure.registry import DataSourceRegistry
-        source_class = DataSourceRegistry.get(module_type)
-        if source_class:
-            return ModelFactory._create_from_data_source(
-                source_class,
-                module_config,
-                device,
-                config_file=config_file,
-                **kwargs,
-            )
-
-        # Collect all available types for error message
-        all_types = set(ModelFactory._builders.keys())
-        all_types.update(DataSourceRegistry.names())
-
-        raise ValueError(
-            f"Unknown module type: {module_type}. "
-            f"Registered types: {', '.join(sorted(all_types))}"
+        source = SourceRegistry.create_validated(
+            module_type,
+            module_config,
+            device=device,
+            **kwargs,
         )
 
-    @staticmethod
-    def _create_from_data_source(
-        source_class: type,
-        config: dict[str, Any],
-        device: str,
-        config_file: str | None = None,
-        **kwargs,
-    ) -> tuple[ModelInterface, DataLoaderInterface | None, dict[str, Any]]:
-        """Create model from a DataSourceProtocol implementation."""
-        # Add device to config
-        config_with_device = {**config, "device": device}
-
-        # Create source instance
-        source = source_class(config_with_device)
-
         # Build metadata
-        metadata = {
+        metadata: dict[str, Any] = {
             "config_file": config_file,
             "total_frames": source.total_frames,
         }
@@ -219,13 +131,14 @@ class ModelFactory:
         if hasattr(source, "ply_folder"):
             metadata["source_path"] = source.ply_folder
         if hasattr(source, "get_recommended_max_scale"):
-            metadata["recommended_max_scale"] = source.get_recommended_max_scale()
+            recommended = source.get_recommended_max_scale()
+            if recommended is not None:
+                metadata["recommended_max_scale"] = recommended
 
-        # DataSource implements TimeSampledModel methods for compatibility
         return source, None, metadata
 
     @staticmethod
-    def create_from_path(path: str, device: str = "cuda") -> ModelInterface:
+    def create_from_path(path: str, device: str = "cuda") -> BaseGaussianSource:
         """Auto-detect source type from path and create model.
 
         Parameters
@@ -237,7 +150,7 @@ class ModelFactory:
 
         Returns
         -------
-        ModelInterface
+        BaseGaussianSource
             Created model instance
 
         Raises
@@ -247,8 +160,9 @@ class ModelFactory:
         """
         _ensure_registry_initialized()
 
-        from src.infrastructure.registry import DataSourceRegistry
-        source_class = DataSourceRegistry.find_for_path(path)
+        from src.infrastructure.registry import SourceRegistry
+
+        source_class = SourceRegistry.find_for_path(path)
 
         if source_class is None:
             raise ValueError(f"No loader found for: {path}")
@@ -258,87 +172,12 @@ class ModelFactory:
         return source
 
     @staticmethod
-    def _create_ply_model(
-        config: dict[str, Any],
-        device: str,
-        config_file: str | None = None,
-        **kwargs
-    ) -> tuple[ModelInterface, DataLoaderInterface, dict[str, Any]]:
-        """Create PLY model and data loader."""
-        from src.models.ply.optimized_model import (
-            OptimizedPlyModel,
-            OptimizedPlyDataLoader,
-        )
-
-        ply_folder = config.get("ply_folder", ".")
-        enable_concurrent_prefetch = config.get("enable_concurrent_prefetch", True)
-
-        # Processing mode and quality filtering (unified with VolumeFilter)
-        processing_mode = config.get("processing_mode", "all_gpu")
-        opacity_threshold = config.get("opacity_threshold", 0.01)
-        scale_threshold = config.get("scale_threshold", 1e-7)
-        enable_quality_filtering = config.get("enable_quality_filtering", True)
-
-        logger.debug(f"Loading PLY files from: {ply_folder}")
-        logger.debug(f"Processing mode: {processing_mode}")
-
-        # Store source path for default export location
-        source_path = UniversalPath(ply_folder)
-
-        # Discover and sort PLY files using SINGLE authoritative function
-        ply_files = discover_and_sort_ply_files(ply_folder)
-
-        logger.info(
-            f"Found {len(ply_files)} PLY files (numerically sorted by "
-            f"discover_and_sort_ply_files)"
-        )
-
-        # Log file order for verification
-        if len(ply_files) > 20:
-            logger.debug(f"First 10 frames: {[f.name for f in ply_files[:10]]}")
-            logger.debug(f"Last 10 frames: {[f.name for f in ply_files[-10:]]}")
-        else:
-            logger.debug(f"All frames: {[f.name for f in ply_files]}")
-
-        # Create model and data loader
-        model = OptimizedPlyModel(
-            ply_files=[str(p) for p in ply_files],
-            device=device,
-            enable_concurrent_prefetch=enable_concurrent_prefetch,
-            processing_mode=processing_mode,
-            opacity_threshold=opacity_threshold,
-            scale_threshold=scale_threshold,
-            enable_quality_filtering=enable_quality_filtering,
-        )
-
-        data_loader = OptimizedPlyDataLoader(
-            ply_files=[str(p) for p in ply_files],
-        )
-
-        # Get recommended max_scale from model
-        recommended_max_scale = model.get_recommended_max_scale()
-
-        metadata = {
-            "source_path": source_path,
-            "recommended_max_scale": recommended_max_scale,
-            "total_frames": len(ply_files),
-        }
-
-        if recommended_max_scale is not None:
-            logger.info(
-                f"Calculated initial max_scale: {recommended_max_scale:.6f} "
-                f"({GC.Filtering.get_percentile_label()} from first frame)"
-            )
-
-        return model, data_loader, metadata
-
-    @staticmethod
     def _create_composite_model(
         config: dict[str, Any],
         device: str,
         config_file: str | None = None,
-        **kwargs
-    ) -> tuple[ModelInterface, None, dict[str, Any]]:
+        **kwargs: Any,
+    ) -> tuple[BaseGaussianSource, None, dict[str, Any]]:
         """Create composite multi-asset model.
 
         Accepts optional `edit_manager_factory` in kwargs for per-layer edit
@@ -365,43 +204,19 @@ class ModelFactory:
             edit_manager_factory=edit_manager_factory,
         )
 
-        metadata = {
+        metadata: dict[str, Any] = {
             "layers": list(layer_dict.keys()),
-            "total_frames": model.get_total_frames() if hasattr(model, "get_total_frames") else 0,
+            "total_frames": model.total_frames,
         }
 
         logger.info(
-            f"Loaded composite model with {len(layer_dict)} layers: "
-            f"{', '.join(layer_dict.keys())}"
+            "Loaded composite model with %d layers: %s",
+            len(layer_dict),
+            ", ".join(layer_dict.keys()),
         )
 
-        # Composite doesn't need a separate data loader
-        return model, None, metadata
-
-    @staticmethod
-    def _create_from_configurable(
-        model_class: type[ConfigurableModelInterface],
-        config: dict[str, Any],
-        device: str,
-        config_file: str | None = None,
-        **kwargs,
-    ) -> BuilderResult:
-        """
-        Build a model that implements ConfigurableModelInterface.
-
-        Currently returns the model without an explicit data loader; more
-        sophisticated models can register dedicated builders for richer metadata.
-        """
-        model = model_class.from_config(config, device=device, **kwargs)
-        metadata = {
-            "config_file": config_file,
-        }
         return model, None, metadata
 
 
 # Export for convenience
 __all__ = ["ModelFactory", "ModelFactoryInterface"]
-
-# Register built-in builders
-ModelFactory.register_builder("load-ply", ModelFactory._create_ply_model)
-ModelFactory.register_builder("composite", ModelFactory._create_composite_model)

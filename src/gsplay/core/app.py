@@ -1263,7 +1263,35 @@ class UniversalGSPlay:
         )
 
     def _handle_export_ply(self) -> None:
-        """Handle frame sequence export using ExportComponent."""
+        """Handle export based on selected scope (dispatcher).
+
+        Dispatches to appropriate export handler:
+        - Snapshot at Current Time → _handle_export_current_frame()
+        - Original Frames → _handle_export_all_keyframes()
+        - Custom Time Range → _handle_export_time_range()
+        """
+        if not self.model:
+            logger.error("No model loaded to export")
+            return
+
+        # Get export scope from UI (default: all keyframes)
+        export_scope = "Original Frames"
+        if self.ui and self.ui.export_scope_dropdown:
+            export_scope = self.ui.export_scope_dropdown.value
+
+        logger.info(f"Export requested with scope: {export_scope}")
+
+        # Dispatch based on scope
+        if export_scope == "Snapshot at Current Time":
+            self._handle_export_current_frame()
+        elif export_scope == "Custom Time Range":
+            self._handle_export_time_range()
+        else:
+            # Default: export all keyframes
+            self._handle_export_all_keyframes()
+
+    def _handle_export_all_keyframes(self) -> None:
+        """Export all keyframes (original export behavior)."""
         if not self.model:
             logger.error("No model loaded to export")
             return
@@ -1371,6 +1399,217 @@ class UniversalGSPlay:
             logger.error(f"Export configuration error: {e}")
         except Exception as e:
             logger.error(f"Export failed: {e}", exc_info=True)
+
+    def _handle_export_time_range(self) -> None:
+        """Export frames at custom time intervals."""
+        if not self.model:
+            logger.error("No model loaded to export")
+            return
+
+        if not self.ui:
+            logger.error("UI not available for time range export")
+            return
+
+        # Validate time range controls exist
+        if not all([self.ui.export_start_time_slider, self.ui.export_end_time_slider,
+                    self.ui.export_time_step_slider]):
+            logger.error("Time range controls not available")
+            return
+
+        # Pause playback during export
+        was_playing = self.config.animation.auto_play
+        if self.playback_controller:
+            self.playback_controller.pause()
+        if self.config.animation.auto_play:
+            self.config.animation.auto_play = False
+
+        try:
+            # Read time range from UI
+            source_time_start = self.ui.export_start_time_slider.value
+            source_time_end = self.ui.export_end_time_slider.value
+            source_time_step = self.ui.export_time_step_slider.value
+
+            # Get export format from UI or config
+            export_format = "compressed-ply"
+            if self.ui and self.ui.export_format:
+                from src.infrastructure.registry import register_defaults, DataSinkRegistry
+                register_defaults()
+                format_map = {}
+                for key in DataSinkRegistry.names():
+                    sink_class = DataSinkRegistry.get(key)
+                    if sink_class:
+                        try:
+                            meta = sink_class.metadata()
+                            format_map[meta.name.lower()] = key
+                        except Exception:
+                            format_map[key.lower()] = key
+                ui_value = self.ui.export_format.value.lower()
+                export_format = format_map.get(ui_value, ui_value)
+
+            # Get export device
+            export_device = "cpu"
+            if self.ui and self.ui.export_device:
+                device_value = self.ui.export_device.value.upper()
+                if device_value == "GPU":
+                    import torch
+                    if torch.cuda.is_available():
+                        export_device = "cuda:0"
+
+            # Build output directory
+            if self.ui and self.ui.export_path and self.ui.export_path.value.strip():
+                output_dir = UniversalPath(self.ui.export_path.value.strip())
+            else:
+                output_dir = self._build_default_export_dir(export_format, export_device)
+                if self.ui and self.ui.export_path:
+                    self.ui.export_path.value = str(output_dir)
+
+            # Get snap-to-keyframe option from UI
+            snap_to_keyframe = False
+            if self.ui and self.ui.export_snap_to_keyframe:
+                snap_to_keyframe = self.ui.export_snap_to_keyframe.value
+
+            logger.info(
+                f"Starting time range export: t={source_time_start:.4f} to "
+                f"t={source_time_end:.4f} (step={source_time_step:.4f})"
+                f"{' [snap to keyframe]' if snap_to_keyframe else ''}"
+            )
+
+            # Create edit applier for this export
+            from src.gsplay.core.container import create_edit_manager
+            export_edit_manager = create_edit_manager(self.config, export_device)
+
+            def apply_edits_for_export(gaussians: GSTensor) -> GSTensor:
+                return export_edit_manager.apply_edits(
+                    gaussians, scene_bounds=self.scene_bounds_manager.get_bounds()
+                )
+
+            # Export using ExportComponent
+            success = self.export_component.export_source_time_range(
+                model=self.model,
+                source_time_start=source_time_start,
+                source_time_end=source_time_end,
+                source_time_step=source_time_step,
+                output_dir=output_dir,
+                export_format=export_format,
+                edit_applier=apply_edits_for_export,
+                snap_to_keyframe=snap_to_keyframe,
+            )
+
+            if success:
+                logger.info(f"Time range export completed to {output_dir}")
+            else:
+                logger.error("Time range export failed")
+
+        except Exception as e:
+            logger.error(f"Time range export failed: {e}", exc_info=True)
+
+        finally:
+            # Restore playback state if it was playing
+            if was_playing and self.playback_controller:
+                self.playback_controller.play()
+
+    def _handle_export_current_frame(self) -> None:
+        """Export frame at current viewing time (supports interpolation)."""
+        if not self.model:
+            logger.error("No model loaded to export")
+            return
+
+        if not self.playback_controller:
+            logger.error("No playback controller available")
+            return
+
+        # Pause playback during export
+        was_playing = self.config.animation.auto_play
+        if self.playback_controller:
+            self.playback_controller.pause()
+        if self.config.animation.auto_play:
+            self.config.animation.auto_play = False
+
+        try:
+            source_time = self.playback_controller.current_source_time
+            time_domain = self.playback_controller.time_domain
+
+            # Build output path with sanitized time string
+            if time_domain and time_domain.is_continuous:
+                # Continuous source: use decimal time (replace . with _)
+                time_str = f"t{source_time:.4f}".replace(".", "_")
+            else:
+                # Discrete source: use frame index
+                time_str = f"{int(round(source_time)):05d}"
+
+            # Get export format from UI or config
+            export_format = "compressed-ply"
+            if self.ui and self.ui.export_format:
+                from src.infrastructure.registry import register_defaults, DataSinkRegistry
+                register_defaults()
+                format_map = {}
+                for key in DataSinkRegistry.names():
+                    sink_class = DataSinkRegistry.get(key)
+                    if sink_class:
+                        try:
+                            meta = sink_class.metadata()
+                            format_map[meta.name.lower()] = key
+                        except Exception:
+                            format_map[key.lower()] = key
+                ui_value = self.ui.export_format.value.lower()
+                export_format = format_map.get(ui_value, ui_value)
+
+            # Get export device
+            export_device = "cpu"
+            if self.ui and self.ui.export_device:
+                device_value = self.ui.export_device.value.upper()
+                if device_value == "GPU":
+                    import torch
+                    if torch.cuda.is_available():
+                        export_device = "cuda:0"
+
+            # Build output directory and file path
+            if self.ui and self.ui.export_path and self.ui.export_path.value.strip():
+                output_dir = UniversalPath(self.ui.export_path.value.strip())
+            else:
+                output_dir = self._build_default_export_dir(export_format, export_device)
+                if self.ui and self.ui.export_path:
+                    self.ui.export_path.value = str(output_dir)
+
+            # Get file extension from exporter
+            from src.infrastructure.exporters.factory import ExporterFactory
+            exporter_info = ExporterFactory.get_exporter_info(export_format)
+            ext = exporter_info.file_extension if exporter_info else ".ply"
+
+            output_path = output_dir / f"frame_{time_str}{ext}"
+
+            logger.info(f"Exporting current frame at source_time={source_time} to {output_path}")
+
+            # Create edit applier for this export
+            from src.gsplay.core.container import create_edit_manager
+            export_edit_manager = create_edit_manager(self.config, export_device)
+
+            def apply_edits_for_export(gaussians: GSTensor) -> GSTensor:
+                return export_edit_manager.apply_edits(
+                    gaussians, scene_bounds=self.scene_bounds_manager.get_bounds()
+                )
+
+            # Export single frame at source time
+            success = self.export_component.export_at_source_time(
+                model=self.model,
+                source_time=source_time,
+                output_path=output_path,
+                export_format=export_format,
+                edit_applier=apply_edits_for_export,
+            )
+
+            if success:
+                logger.info(f"Export completed: {output_path}")
+            else:
+                logger.error("Export failed")
+
+        except Exception as e:
+            logger.error(f"Export current frame failed: {e}", exc_info=True)
+
+        finally:
+            # Restore playback state if it was playing
+            if was_playing and self.playback_controller:
+                self.playback_controller.play()
 
     def _handle_color_reset(self) -> None:
         """Reset all color adjustments to defaults."""

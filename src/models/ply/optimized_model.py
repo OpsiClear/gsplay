@@ -9,26 +9,43 @@ Features:
 - Uses gsply v0.2.5 denormalize() and to_rgb() methods directly
 - In-place operations for better performance
 - Calculates recommended max_scale threshold (percentile) for UI
+- Implements BaseGaussianSource protocol for unified plugin system
+- Lifecycle management with LifecycleMixin
 """
 
 # --- REQUIRED IMPORTS ---
+from __future__ import annotations
+
 import logging
 import time
 import threading
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import torch
 import numpy as np
 import gsply
-from src.domain.interfaces import ModelInterface, DataLoaderInterface
+
+from src.domain.interfaces import (
+    BaseGaussianSource,
+    SourceMetadata,
+    DataLoaderInterface,
+    PluginState,
+    HealthStatus,
+    HealthCheckResult,
+)
+from src.domain.lifecycle import LifecycleMixin
 from src.domain.entities import GSData, GSTensor
+from src.domain.data import GaussianData
 from src.infrastructure.io.path_io import UniversalPath
-from src.shared.perf import PerfMonitor
 from src.infrastructure.io.discovery import discover_and_sort_ply_files
 from src.infrastructure.processing.ply.format_loader import (
     FormatAwarePlyLoader,
     PlyFrameEncoding,
 )
+from src.infrastructure.resources.executor_manager import ManagedExecutor
+from src.shared.perf import PerfMonitor
 from src.shared.perf import (
     FrameLoadEvent,
     FrameLoadObserver,
@@ -40,34 +57,263 @@ logger = logging.getLogger(__name__)
 # --- End of Imports ---
 
 
+# --- Configuration Dataclass ---
+@dataclass
+class OptimizedPlyConfig:
+    """Configuration schema for OptimizedPlyModel.
+
+    Used for config validation when creating via SourceRegistry.
+
+    Time Configuration
+    ------------------
+    source_fps : float | None
+        Original capture FPS. If set, enables dual time display
+        showing both seconds and frame number (e.g., "1.67s (Frame 50)").
+    frame_count : int | None
+        Override auto-detected frame count. If specified and exceeds
+        available files, will warn and clamp to actual count.
+    frame_start : int
+        Start frame index (0-based). Default 0.
+    frame_end : int | None
+        End frame index (exclusive). None means all frames.
+    playback_fps : float
+        Suggested playback speed in FPS. Default 30.0.
+    lock_playback_fps : bool
+        If True, UI cannot change playback FPS. Default False.
+    autoplay : bool
+        If True, start playback automatically on load. Default False.
+    """
+
+    ply_folder: Path | str
+    device: str = "cuda"
+    enable_concurrent_prefetch: bool = True
+    processing_mode: str = "all_gpu"
+    opacity_threshold: float = 0.01
+    scale_threshold: float = 1e-7
+    enable_quality_filtering: bool = True
+
+    # Time configuration
+    source_fps: float | None = None
+    frame_count: int | None = None
+    frame_start: int = 0
+    frame_end: int | None = None
+    playback_fps: float = 30.0
+    lock_playback_fps: bool = False
+    autoplay: bool = False
+
+
 # --- Model Implementation ---
 
-class OptimizedPlyModel(ModelInterface):
+class OptimizedPlyModel(LifecycleMixin):
     """
-    ModelInterface implementation for loading a sequence of .ply files.
+    BaseGaussianSource implementation for loading a sequence of .ply files.
     Applies smart activations and forces RGB mode to fix artifacts.
 
     Features:
+    - Implements BaseGaussianSource protocol for unified plugin system
+    - Lifecycle management via LifecycleMixin
     - Clustered LUT for fast activation functions
     - Smart format detection for scales and opacities
     - Calculates recommended max_scale threshold (default percentile) for UI
+    - Health monitoring support
     """
+
+    # --- BaseGaussianSource Protocol Class Methods ---
+
+    @classmethod
+    def metadata(cls) -> SourceMetadata:
+        """Return metadata about this source type."""
+        return SourceMetadata(
+            name="PLY Sequence",
+            description="Load sequences of Gaussian PLY files (local or cloud)",
+            file_extensions=[".ply"],
+            config_schema=OptimizedPlyConfig,
+            supports_streaming=True,
+            supports_seeking=True,
+            version="2.0.0",
+        )
+
+    @classmethod
+    def can_load(cls, path: str) -> bool:
+        """Check if this source can handle the given path.
+
+        Returns True if:
+        - Path is a directory containing .ply files
+        - Path is a single .ply file
+        """
+        try:
+            p = UniversalPath(path)
+            if p.is_dir():
+                # Check if directory contains any .ply files
+                ply_files = list(p.glob("*.ply"))
+                return len(ply_files) > 0
+            elif p.is_file():
+                return str(path).lower().endswith(".ply")
+            return False
+        except Exception:
+            return False
+
+    # --- Frame Range Validation ---
+
+    @staticmethod
+    def _validate_frame_range(
+        frame_start: int,
+        frame_end: int | None,
+        frame_count: int | None,
+        actual_file_count: int,
+    ) -> tuple[int, int]:
+        """Validate and adjust frame range configuration.
+
+        Implements warn-and-clamp behavior for invalid ranges.
+
+        Parameters
+        ----------
+        frame_start : int
+            Requested start frame index
+        frame_end : int | None
+            Requested end frame index (None = all)
+        frame_count : int | None
+            Override for frame count (None = use range)
+        actual_file_count : int
+            Actual number of files discovered
+
+        Returns
+        -------
+        tuple[int, int]
+            (validated_start, validated_end) - clamped to valid range
+        """
+        # Validate start
+        if frame_start < 0:
+            logger.warning(f"frame_start={frame_start} < 0, clamping to 0")
+            frame_start = 0
+        if frame_start >= actual_file_count:
+            logger.warning(
+                f"frame_start={frame_start} >= actual files ({actual_file_count}), "
+                f"clamping to {actual_file_count - 1}"
+            )
+            frame_start = actual_file_count - 1
+
+        # Determine end
+        if frame_end is None:
+            frame_end = actual_file_count
+        elif frame_end > actual_file_count:
+            logger.warning(
+                f"frame_end={frame_end} exceeds available files ({actual_file_count}), "
+                f"clamping to {actual_file_count}"
+            )
+            frame_end = actual_file_count
+
+        # Ensure end > start
+        if frame_end <= frame_start:
+            logger.warning(
+                f"frame_end={frame_end} <= frame_start={frame_start}, "
+                f"using frame_end={frame_start + 1}"
+            )
+            frame_end = min(frame_start + 1, actual_file_count)
+
+        # Apply frame_count override
+        if frame_count is not None:
+            available = frame_end - frame_start
+            if frame_count > available:
+                logger.warning(
+                    f"frame_count={frame_count} exceeds available range "
+                    f"({available} frames from {frame_start} to {frame_end}), "
+                    f"using {available}"
+                )
+            else:
+                # Limit to frame_count
+                frame_end = frame_start + frame_count
+
+        return frame_start, frame_end
+
+    # --- Constructors ---
+
     def __init__(
         self,
-        ply_files: list[str | Path | UniversalPath],
+        ply_files_or_config: list[str | Path | UniversalPath] | dict[str, Any],
         device: str = "cuda",
         enable_concurrent_prefetch: bool = True,
-        processing_mode: str = "all_gpu",  # Global processing mode from VolumeFilter
-        opacity_threshold: float = 0.01,  # Quality filtering threshold
+        processing_mode: str = "all_gpu",
+        opacity_threshold: float = 0.01,
         scale_threshold: float = 1e-7,
         enable_quality_filtering: bool = True,
         format_loader: FormatAwarePlyLoader | None = None,
     ) -> None:
-        super().__init__()
+        """Initialize OptimizedPlyModel.
+
+        Parameters
+        ----------
+        ply_files_or_config : list | dict
+            Either a list of PLY file paths, or a config dict containing
+            'ply_folder' (for SourceRegistry creation)
+        device : str
+            Target device for GPU operations
+        enable_concurrent_prefetch : bool
+            Enable background frame prefetching
+        processing_mode : str
+            Processing mode ('all_gpu', 'all_cpu', etc.)
+        opacity_threshold : float
+            Quality filtering threshold for opacity
+        scale_threshold : float
+            Quality filtering threshold for scale
+        enable_quality_filtering : bool
+            Enable quality-based Gaussian filtering
+        format_loader : FormatAwarePlyLoader | None
+            Custom format loader (uses default if None)
+        """
+        # Initialize lifecycle mixin first
+        LifecycleMixin.__init__(self)
+
+        # Handle dict config from SourceRegistry
+        if isinstance(ply_files_or_config, dict):
+            config = ply_files_or_config
+            ply_folder = config.get("ply_folder")
+            if not ply_folder:
+                raise ValueError("Config must contain 'ply_folder'")
+            ply_files = discover_and_sort_ply_files(ply_folder)
+            device = config.get("device", device)
+            enable_concurrent_prefetch = config.get("enable_concurrent_prefetch", enable_concurrent_prefetch)
+            processing_mode = config.get("processing_mode", processing_mode)
+            opacity_threshold = config.get("opacity_threshold", opacity_threshold)
+            scale_threshold = config.get("scale_threshold", scale_threshold)
+            enable_quality_filtering = config.get("enable_quality_filtering", enable_quality_filtering)
+            self.ply_folder = UniversalPath(ply_folder)
+
+            # Parse time configuration
+            self._source_fps = config.get("source_fps", None)
+            self._playback_fps = config.get("playback_fps", 30.0)
+            self._lock_playback_fps = config.get("lock_playback_fps", False)
+            self._autoplay = config.get("autoplay", False)
+            frame_start = config.get("frame_start", 0)
+            frame_end = config.get("frame_end", None)
+            frame_count_override = config.get("frame_count", None)
+        else:
+            ply_files = ply_files_or_config
+            self.ply_folder = UniversalPath(ply_files[0]).parent if ply_files else None
+            # Default time configuration for direct instantiation
+            self._source_fps = None
+            self._playback_fps = 30.0
+            self._lock_playback_fps = False
+            self._autoplay = False
+            frame_start = 0
+            frame_end = None
+            frame_count_override = None
+
         # Convert all paths to UniversalPath for cloud storage support
-        self.ply_files = [UniversalPath(f) for f in ply_files]
+        all_ply_files = [UniversalPath(f) for f in ply_files]
+        actual_file_count = len(all_ply_files)
+
+        # Validate and apply frame range (warn and clamp)
+        frame_start, frame_end = self._validate_frame_range(
+            frame_start, frame_end, frame_count_override, actual_file_count
+        )
+        self._frame_start = frame_start
+        self._frame_end = frame_end
+
+        # Apply frame range to get effective files
+        self.ply_files = all_ply_files[frame_start:frame_end]
         self.device = device
-        self.total_frames = len(ply_files)
+        self._total_frames = len(self.ply_files)
 
         # Processing configuration (unified with VolumeFilter modes)
         self._processing_mode = processing_mode
@@ -78,15 +324,15 @@ class OptimizedPlyModel(ModelInterface):
         self._format_loader = format_loader or FormatAwarePlyLoader(device=self.device)
         self._format_loader.set_device(self.device)
 
-        if self.total_frames == 0:
+        if self._total_frames == 0:
             raise ValueError("No .ply files were provided.")
 
         # Concurrent prefetching (optional for background frame loading)
         self.enable_concurrent_prefetch = enable_concurrent_prefetch
-        self._prefetch_executor = None
+        self._prefetch_executor: ManagedExecutor | None = None
         self._last_process_breakdown: dict[str, object] | None = None
         self._last_load_profile: dict[str, object] | None = None
-        self._cpu_prefetch_results: dict[int, 'GSData | GSTensor'] = {}
+        self._cpu_prefetch_results: dict[int, GSData | GSTensor] = {}
         self._cpu_prefetch_inflight: set[int] = set()
         self._cpu_prefetch_lock = threading.Lock()
         self._calculated_max_scale_percentile: float | None = None
@@ -97,21 +343,21 @@ class OptimizedPlyModel(ModelInterface):
 
         # Frame-level cache: avoid re-reading PLY when same frame is requested
         self._cached_frame_idx: int | None = None
-        self._cached_frame_data: 'GSData | GSTensor | None' = None
+        self._cached_frame_data: GSData | GSTensor | None = None
 
         # Cached folder-level format (avoids per-file detection for homogeneous sequences)
         self._cached_folder_format: tuple[PlyFrameEncoding, int | None] | None = None
 
+        # Initialize prefetch executor using ManagedExecutor
         if self.enable_concurrent_prefetch:
-            from concurrent.futures import ThreadPoolExecutor
-            # Use 2 threads (don't compete with rendering)
-            self._prefetch_executor = ThreadPoolExecutor(
+            self._prefetch_executor = ManagedExecutor(
                 max_workers=2,
-                thread_name_prefix="ply_prefetch"
+                name="PlyPrefetch",
+                thread_name_prefix="ply_prefetch",
             )
             logger.debug("[OptimizedPlyModel] Concurrent prefetching enabled (2 background threads)")
 
-        logger.debug(f"[OptimizedPlyModel] Initialized with {self.total_frames} PLY files.")
+        logger.debug(f"[OptimizedPlyModel] Initialized with {self._total_frames} PLY files.")
         logger.debug(
             "[OptimizedPlyModel] Concurrent prefetch: %s",
             "enabled" if enable_concurrent_prefetch else "disabled",
@@ -124,6 +370,16 @@ class OptimizedPlyModel(ModelInterface):
         logger.debug(f"[File Order at Init] Last 10: {last_10}")
         self._log_folder_format_hint()
 
+        # Immediately transition to READY (no heavy init needed)
+        self._state = PluginState.READY
+
+    # --- BaseGaussianSource Protocol Properties ---
+
+    @property
+    def total_frames(self) -> int:
+        """Total number of frames available."""
+        return self._total_frames
+
 
     def get_total_frames(self) -> int:
         return self.total_frames
@@ -132,6 +388,78 @@ class OptimizedPlyModel(ModelInterface):
         if self.total_frames <= 1:
             return 0.0
         return frame_idx / (self.total_frames - 1)
+
+    @property
+    def time_domain(self):
+        """Get the time domain for this source.
+
+        Returns discrete frame-based time domain for PLY sequences.
+        If source_fps is set, enables dual time display (seconds + frames).
+
+        Returns
+        -------
+        TimeDomain
+            Discrete frame-based time domain
+        """
+        from src.domain.time import TimeDomain
+        return TimeDomain.discrete(
+            self._total_frames,
+            source_fps=self._source_fps,
+        )
+
+    # --- Time Configuration Properties ---
+
+    @property
+    def source_fps(self) -> float | None:
+        """Original capture FPS, or None if not specified."""
+        return self._source_fps
+
+    @source_fps.setter
+    def source_fps(self, value: float | None) -> None:
+        """Set source FPS (for runtime configuration from UI)."""
+        self._source_fps = value
+
+    @property
+    def playback_fps(self) -> float:
+        """Suggested playback FPS."""
+        return self._playback_fps
+
+    @property
+    def lock_playback_fps(self) -> bool:
+        """Whether UI should lock playback FPS to configured value."""
+        return self._lock_playback_fps
+
+    @property
+    def autoplay(self) -> bool:
+        """Whether to auto-start playback on load."""
+        return self._autoplay
+
+    def get_frame_at_source_time(self, source_time: float) -> GaussianData:
+        """Get frame at source-native time (frames).
+
+        For discrete PLY sources, this rounds to the nearest frame index.
+
+        Parameters
+        ----------
+        source_time : float
+            Time in frames (e.g., 0.0, 1.0, 2.0, ...)
+
+        Returns
+        -------
+        GaussianData
+            Frame data at the nearest frame
+        """
+        # Round to nearest frame index
+        frame_idx = int(round(source_time))
+        frame_idx = max(0, min(frame_idx, self._total_frames - 1))
+
+        # Convert to normalized time and use existing implementation
+        if self._total_frames <= 1:
+            normalized_time = 0.0
+        else:
+            normalized_time = frame_idx / (self._total_frames - 1)
+
+        return self.get_frame_at_time(normalized_time)
 
     @property
     def processing_mode(self) -> str:
@@ -612,11 +940,149 @@ class OptimizedPlyModel(ModelInterface):
             with self._cpu_prefetch_lock:
                 self._cpu_prefetch_inflight.discard(frame_idx)
 
-    def __del__(self):
-        """Cleanup: Shutdown ThreadPoolExecutor if enabled."""
+    # --- Lifecycle Methods ---
+
+    def on_shutdown(self, timeout: float = 5.0) -> None:
+        """Shutdown the model and release resources.
+
+        Parameters
+        ----------
+        timeout : float
+            Maximum seconds to wait for executor shutdown
+        """
+        if self._state in (PluginState.TERMINATED, PluginState.SHUTTING_DOWN):
+            return
+
+        logger.info("[OptimizedPlyModel] Shutting down...")
+        self._state = PluginState.SHUTTING_DOWN
+
+        # Shutdown prefetch executor with timeout
         if self._prefetch_executor is not None:
-            logger.info("[OptimizedPlyModel] Shutting down concurrent prefetch executor")
-            self._prefetch_executor.shutdown(wait=True, cancel_futures=False)
+            success = self._prefetch_executor.shutdown(timeout=timeout)
+            if not success:
+                logger.warning("[OptimizedPlyModel] Prefetch executor shutdown timed out")
+
+        # Clear caches
+        self._cached_frame_data = None
+        self._cached_frame_idx = None
+        with self._cpu_prefetch_lock:
+            self._cpu_prefetch_results.clear()
+
+        self._state = PluginState.TERMINATED
+        logger.info("[OptimizedPlyModel] Shutdown complete")
+
+    def __del__(self) -> None:
+        """Cleanup: Call on_shutdown if not already terminated."""
+        try:
+            if hasattr(self, "_state") and self._state != PluginState.TERMINATED:
+                self.on_shutdown(timeout=2.0)
+        except Exception:
+            pass  # Best effort cleanup
+
+    # --- HealthCheckable Methods ---
+
+    def health_check(self) -> HealthCheckResult:
+        """Perform health check and return result."""
+        if self._state != PluginState.READY:
+            return HealthCheckResult(
+                status=HealthStatus.UNHEALTHY,
+                message=f"Plugin in {self._state.name} state",
+            )
+
+        # Check if we can access files
+        try:
+            if self.ply_files and not self.ply_files[0].exists():
+                return HealthCheckResult(
+                    status=HealthStatus.DEGRADED,
+                    message="Source files may have moved",
+                )
+        except Exception as e:
+            return HealthCheckResult(
+                status=HealthStatus.DEGRADED,
+                message=f"File access check failed: {e}",
+            )
+
+        return HealthCheckResult(
+            status=HealthStatus.HEALTHY,
+            message=f"Ready with {self._total_frames} frames",
+            details={
+                "total_frames": self._total_frames,
+                "device": self.device,
+                "prefetch_enabled": self.enable_concurrent_prefetch,
+            },
+        )
+
+    def get_diagnostics(self) -> dict[str, Any]:
+        """Get diagnostic information about this model."""
+        diag = {
+            "class": self.__class__.__name__,
+            "state": self._state.name,
+            "total_frames": self._total_frames,
+            "device": self.device,
+            "processing_mode": self._processing_mode,
+            "prefetch_enabled": self.enable_concurrent_prefetch,
+            "cached_frame_idx": self._cached_frame_idx,
+            "recommended_max_scale": self._calculated_max_scale_percentile,
+        }
+
+        if self._prefetch_executor is not None:
+            diag["prefetch_executor"] = self._prefetch_executor.get_diagnostics()
+
+        if self._last_load_profile is not None:
+            diag["last_load_profile"] = self._last_load_profile
+
+        return diag
+
+    # --- BaseGaussianSource Protocol Methods ---
+
+    def get_frame_at_time(self, normalized_time: float) -> GaussianData:
+        """Get frame at normalized time [0, 1].
+
+        This is the primary method for retrieving Gaussian data per BaseGaussianSource protocol.
+
+        Parameters
+        ----------
+        normalized_time : float
+            Normalized time in range [0.0, 1.0]
+
+        Returns
+        -------
+        GaussianData
+            Frame data at the specified time
+        """
+        # Delegate to existing implementation
+        result = self.get_gaussians_at_normalized_time(normalized_time)
+
+        if result is None:
+            # Return empty GaussianData on failure
+            return GaussianData(
+                means=np.zeros((0, 3), dtype=np.float32),
+                scales=np.zeros((0, 3), dtype=np.float32),
+                quats=np.zeros((0, 4), dtype=np.float32),
+                opacities=np.zeros((0,), dtype=np.float32),
+                sh0=np.zeros((0, 3), dtype=np.float32),
+            )
+
+        # Convert to GaussianData
+        if isinstance(result, GaussianData):
+            return result
+        elif hasattr(result, "means") and hasattr(result, "scales"):
+            # GSData or GSTensor - wrap in GaussianData
+            if hasattr(result, "device"):
+                # GSTensor (PyTorch)
+                return GaussianData.from_gstensor(result)
+            else:
+                # GSData (NumPy)
+                return GaussianData.from_gsdata(result)
+        else:
+            logger.error("Unexpected result type from get_gaussians_at_normalized_time: %s", type(result))
+            return GaussianData(
+                means=np.zeros((0, 3), dtype=np.float32),
+                scales=np.zeros((0, 3), dtype=np.float32),
+                quats=np.zeros((0, 4), dtype=np.float32),
+                opacities=np.zeros((0,), dtype=np.float32),
+                sh0=np.zeros((0, 3), dtype=np.float32),
+            )
 
     def _pop_cpu_prefetch(self, frame_idx: int) -> 'GSData | None':
         with self._cpu_prefetch_lock:

@@ -290,3 +290,226 @@ class GSTensorError(GSPlayError):
             full_message = f"{full_message} (expected shape: {expected_shape}, got: {actual_shape})"
 
         super().__init__(full_message)
+
+
+# ============================================================================
+# Plugin System Exceptions
+# ============================================================================
+
+
+class PluginError(GSPlayError):
+    """Base exception for plugin-related errors.
+
+    All plugin exceptions carry a 'recoverable' flag indicating whether
+    the operation can be retried or if the plugin should be marked as failed.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        plugin_name: str | None = None,
+        *,
+        recoverable: bool = False,
+        cause: Exception | None = None,
+    ):
+        """
+        Initialize PluginError.
+
+        Parameters
+        ----------
+        message : str
+            Error message
+        plugin_name : str | None
+            Name of the plugin that raised the error
+        recoverable : bool
+            Whether the error is recoverable (can retry)
+        cause : Exception | None
+            Original exception that caused this error
+        """
+        self.plugin_name = plugin_name
+        self.recoverable = recoverable
+        self.cause = cause
+
+        full_message = message
+        if plugin_name:
+            full_message = f"[{plugin_name}] {full_message}"
+        if cause:
+            full_message = f"{full_message} (caused by: {cause})"
+
+        super().__init__(full_message)
+
+
+class PluginInitError(PluginError):
+    """Raised when plugin initialization fails.
+
+    This typically indicates a configuration problem or missing resources.
+    Usually not recoverable without user intervention.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        plugin_name: str | None = None,
+        *,
+        cause: Exception | None = None,
+    ):
+        super().__init__(
+            message,
+            plugin_name,
+            recoverable=False,
+            cause=cause,
+        )
+
+
+class PluginLoadError(PluginError):
+    """Raised when loading data from a plugin fails.
+
+    This can occur during frame loading, file reading, or network operations.
+    May be recoverable depending on the cause.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        plugin_name: str | None = None,
+        frame_index: int | None = None,
+        *,
+        recoverable: bool = True,
+        cause: Exception | None = None,
+    ):
+        self.frame_index = frame_index
+
+        full_message = message
+        if frame_index is not None:
+            full_message = f"{full_message} (frame: {frame_index})"
+
+        super().__init__(
+            full_message,
+            plugin_name,
+            recoverable=recoverable,
+            cause=cause,
+        )
+
+
+class PluginResourceError(PluginError):
+    """Raised when plugin resource management fails.
+
+    Examples: GPU memory allocation, thread pool exhaustion, file handle limits.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        plugin_name: str | None = None,
+        resource_type: str | None = None,
+        *,
+        recoverable: bool = True,
+        cause: Exception | None = None,
+    ):
+        self.resource_type = resource_type
+
+        full_message = message
+        if resource_type:
+            full_message = f"{full_message} (resource: {resource_type})"
+
+        super().__init__(
+            full_message,
+            plugin_name,
+            recoverable=recoverable,
+            cause=cause,
+        )
+
+
+class PluginTimeoutError(PluginError):
+    """Raised when a plugin operation times out.
+
+    Usually recoverable - the operation can be retried.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        plugin_name: str | None = None,
+        timeout_seconds: float | None = None,
+        operation: str | None = None,
+        *,
+        cause: Exception | None = None,
+    ):
+        self.timeout_seconds = timeout_seconds
+        self.operation = operation
+
+        full_message = message
+        if operation:
+            full_message = f"{full_message} (operation: {operation})"
+        if timeout_seconds is not None:
+            full_message = f"{full_message} (timeout: {timeout_seconds}s)"
+
+        super().__init__(
+            full_message,
+            plugin_name,
+            recoverable=True,
+            cause=cause,
+        )
+
+
+class ConfigValidationError(PluginError):
+    """Raised when plugin configuration validation fails.
+
+    Not recoverable without fixing the configuration.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        plugin_name: str | None = None,
+        field_name: str | None = None,
+        expected_type: type | None = None,
+        actual_value: object = None,
+        *,
+        cause: Exception | None = None,
+    ):
+        self.field_name = field_name
+        self.expected_type = expected_type
+        self.actual_value = actual_value
+
+        full_message = message
+        if field_name:
+            full_message = f"{full_message} (field: {field_name})"
+        if expected_type is not None:
+            full_message = f"{full_message} (expected: {expected_type.__name__})"
+
+        super().__init__(
+            full_message,
+            plugin_name,
+            recoverable=False,
+            cause=cause,
+        )
+
+
+class CircuitBreakerOpenError(PluginError):
+    """Raised when a circuit breaker is open and the operation is rejected.
+
+    The operation should not be retried until the circuit breaker resets.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        plugin_name: str | None = None,
+        failures_count: int | None = None,
+        reset_timeout: float | None = None,
+    ):
+        self.failures_count = failures_count
+        self.reset_timeout = reset_timeout
+
+        full_message = message
+        if failures_count is not None:
+            full_message = f"{full_message} (failures: {failures_count})"
+        if reset_timeout is not None:
+            full_message = f"{full_message} (reset in: {reset_timeout}s)"
+
+        super().__init__(
+            full_message,
+            plugin_name,
+            recoverable=False,
+        )

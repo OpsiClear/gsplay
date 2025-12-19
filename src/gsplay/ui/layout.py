@@ -20,6 +20,7 @@ from src.infrastructure.processing_mode import ProcessingMode
 
 if TYPE_CHECKING:
     from src.gsplay.config.settings import UIHandles, GSPlayConfig
+    from src.domain.time import TimeDomain
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +300,7 @@ def create_config_menu(
     viser.GuiButtonGroupHandle,
     viser.GuiButtonGroupHandle,
     viser.GuiSliderHandle,
+    viser.GuiNumberHandle,
 ]:
     """
     Create Config menu with processing mode, grid, world axis, and config export/import.
@@ -550,14 +552,10 @@ def create_data_loader_controls(
 def create_export_menu(
     server: viser.ViserServer,
     config: GSPlayConfig,
-) -> tuple[
-    viser.GuiTextHandle,
-    viser.GuiDropdownHandle,
-    viser.GuiDropdownHandle,
-    viser.GuiButtonHandle,
-]:
+    time_domain: "TimeDomain | None" = None,
+) -> dict:
     """
-    Create export controls.
+    Create export controls with optional continuous time support.
 
     Parameters
     ----------
@@ -565,13 +563,24 @@ def create_export_menu(
         Viser server instance
     config : GSPlayConfig
         GSPlay configuration
+    time_domain : TimeDomain | None
+        Time domain for continuous time sources (enables time range export)
 
     Returns
     -------
-    tuple
-        (export_path, export_format, export_device, export_ply_button)
+    dict
+        Dictionary of export control handles:
+        - export_path, export_format, export_device, export_ply_button
+        - export_scope_dropdown, export_start_time, export_end_time,
+          export_time_step, export_frame_preview (for continuous sources)
     """
-    export_path = server.gui.add_text(
+    from typing import TYPE_CHECKING
+    if TYPE_CHECKING:
+        from src.domain.time import TimeDomain
+
+    controls: dict = {}
+
+    controls["export_path"] = server.gui.add_text(
         "Save To Path", str(config.export_settings.export_path)
     )
 
@@ -584,7 +593,7 @@ def create_export_menu(
     # Default to first format or "Compressed PLY" if available
     initial_format = "Compressed PLY" if "Compressed PLY" in format_options else format_options[0]
 
-    export_format = server.gui.add_dropdown(
+    controls["export_format"] = server.gui.add_dropdown(
         "Export Format",
         options=format_options,
         initial_value=initial_format,
@@ -601,24 +610,107 @@ def create_export_menu(
     initial_device = (
         "GPU" if config.export_settings.export_device.startswith("cuda") else "CPU"
     )
-    export_device = server.gui.add_dropdown(
+    controls["export_device"] = server.gui.add_dropdown(
         "Device",
         options=export_device_options,
         initial_value=initial_device,
         hint="Device for export processing: CPU (safer, slower) or GPU (faster, requires GPU memory)",
     )
 
-    export_ply_button = server.gui.add_button(
-        "Export All Frames with Current Edits"
+    # Source FPS input - original capture frame rate (affects time calculations)
+    controls["source_fps_input"] = server.gui.add_number(
+        "Source FPS",
+        initial_value=0.0,
+        min=0.0,
+        max=240.0,
+        step=1.0,
+        hint="Original capture FPS (0 = not specified). Used for time-to-frame conversion.",
     )
 
-    logger.debug("Created export menu")
-    return (
-        export_path,
-        export_format,
-        export_device,
-        export_ply_button,
+    # Determine if continuous time is available
+    is_continuous = time_domain is not None and time_domain.is_continuous
+
+    # Export scope dropdown
+    if is_continuous:
+        scope_options = ["Snapshot at Current Time", "Original Frames", "Custom Time Range"]
+    else:
+        scope_options = ["Original Frames"]
+
+    controls["export_scope_dropdown"] = server.gui.add_dropdown(
+        "What to Export",
+        options=scope_options,
+        initial_value="Original Frames",
+        hint=(
+            "Snapshot: export exactly what you see now\n"
+            "Original: export all keyframes\n"
+            "Custom: export resampled at custom intervals"
+        ) if is_continuous else "Export all frames",
     )
+
+    # Time range controls (only for continuous sources, hidden by default)
+    if is_continuous and time_domain is not None:
+        # Calculate smart defaults for time_step: ~100 frames over duration
+        duration = time_domain.max_time - time_domain.min_time
+        default_step = max(0.001, duration / 100) if duration > 0 else 0.1
+
+        controls["export_start_time"] = server.gui.add_slider(
+            "Start Time",
+            min=time_domain.min_time,
+            max=time_domain.max_time,
+            step=0.001,
+            initial_value=time_domain.min_time,
+            visible=False,
+            hint="Start time (source units)",
+        )
+        controls["export_end_time"] = server.gui.add_slider(
+            "End Time",
+            min=time_domain.min_time,
+            max=time_domain.max_time,
+            step=0.001,
+            initial_value=time_domain.max_time,
+            visible=False,
+            hint="End time (source units)",
+        )
+        controls["export_time_step"] = server.gui.add_slider(
+            "Step Size",
+            min=0.001,
+            max=max(1.0, duration / 10) if duration > 0 else 1.0,
+            step=0.001,
+            initial_value=default_step,
+            visible=False,
+            hint="Smaller step = more frames",
+        )
+        controls["export_frame_preview"] = server.gui.add_text(
+            "Will Export",
+            initial_value="~100 frames",
+            disabled=True,
+            visible=False,
+        )
+
+        # Snap to keyframe checkbox - only for continuous sources with keyframes
+        if time_domain.keyframe_times is not None:
+            controls["export_snap_to_keyframe"] = server.gui.add_checkbox(
+                "Snap to nearest keyframe",
+                initial_value=False,
+                visible=False,  # Only visible when "Custom Time Range" selected
+                hint="Export keyframe data only, no interpolation.\n"
+                     "Samples mapping to the same keyframe will be deduplicated.",
+            )
+        else:
+            controls["export_snap_to_keyframe"] = None
+    else:
+        controls["export_start_time"] = None
+        controls["export_end_time"] = None
+        controls["export_time_step"] = None
+        controls["export_frame_preview"] = None
+        controls["export_snap_to_keyframe"] = None
+
+    controls["export_ply_button"] = server.gui.add_button(
+        "Export All Frames"
+    )
+
+    logger.debug("Created export menu (continuous time support: %s)", is_continuous)
+    return controls
 
 
 def create_volume_filter_controls(
@@ -1153,6 +1245,7 @@ def setup_ui_layout(
     config: GSPlayConfig,
     camera_controller=None,
     viewer_app=None,
+    time_domain: "TimeDomain | None" = None,
 ) -> UIHandles:
     """
     Create complete UI layout for the viewer.
@@ -1165,6 +1258,8 @@ def setup_ui_layout(
         GSPlay configuration
     camera_controller : SuperSplatCamera, optional
         Camera controller instance (if provided, UI will be created here)
+    time_domain : TimeDomain | None, optional
+        Time domain for continuous time sources (enables time range export)
 
     Returns
     -------
@@ -1306,9 +1401,17 @@ def setup_ui_layout(
     export_format = None
     export_device = None
     export_ply_button = None
+    # Export scope controls (for continuous time support)
+    export_scope_dropdown = None
+    export_start_time_slider = None
+    export_end_time_slider = None
+    export_time_step_slider = None
+    export_frame_preview = None
+    export_snap_to_keyframe = None
     config_path_input = None
     config_buttons = None
     reference_sphere_slider = None
+    source_fps_input = None
 
     if compact_ui:
         # Compact mode: wrap tab groups in collapsible folders
@@ -1365,12 +1468,19 @@ def setup_ui_layout(
             # Convert tab (hidden in view-only mode)
             if not view_only:
                 with main_tabs.add_tab("Convert", icon=None):
-                    (
-                        export_path,
-                        export_format,
-                        export_device,
-                        export_ply_button,
-                    ) = create_export_menu(server, config)
+                    export_controls = create_export_menu(server, config, time_domain)
+                    export_path = export_controls["export_path"]
+                    export_format = export_controls["export_format"]
+                    export_device = export_controls["export_device"]
+                    source_fps_input = export_controls.get("source_fps_input")
+                    export_ply_button = export_controls["export_ply_button"]
+                    # Export scope controls (for continuous time)
+                    export_scope_dropdown = export_controls.get("export_scope_dropdown")
+                    export_start_time_slider = export_controls.get("export_start_time")
+                    export_end_time_slider = export_controls.get("export_end_time")
+                    export_time_step_slider = export_controls.get("export_time_step")
+                    export_frame_preview = export_controls.get("export_frame_preview")
+                    export_snap_to_keyframe = export_controls.get("export_snap_to_keyframe")
 
         # Edit folder containing Filter/Transform/Color/Color+ tabs
         with server.gui.add_folder("Edit"):
@@ -1446,12 +1556,19 @@ def setup_ui_layout(
         # Convert tab (hidden in view-only mode)
         if not view_only:
             with main_tabs.add_tab("Convert", icon=None):
-                (
-                    export_path,
-                    export_format,
-                    export_device,
-                    export_ply_button,
-                ) = create_export_menu(server, config)
+                export_controls = create_export_menu(server, config, time_domain)
+                export_path = export_controls["export_path"]
+                export_format = export_controls["export_format"]
+                export_device = export_controls["export_device"]
+                source_fps_input = export_controls.get("source_fps_input")
+                export_ply_button = export_controls["export_ply_button"]
+                # Export scope controls (for continuous time)
+                export_scope_dropdown = export_controls.get("export_scope_dropdown")
+                export_start_time_slider = export_controls.get("export_start_time")
+                export_end_time_slider = export_controls.get("export_end_time")
+                export_time_step_slider = export_controls.get("export_time_step")
+                export_frame_preview = export_controls.get("export_frame_preview")
+                export_snap_to_keyframe = export_controls.get("export_snap_to_keyframe")
 
         # Spacer between tab groups
         server.gui.add_markdown(content=" ")
@@ -1595,11 +1712,20 @@ def setup_ui_layout(
         export_format=export_format,
         export_device=export_device,
         export_ply_button=export_ply_button,
+        # Export scope controls (for continuous time)
+        export_scope_dropdown=export_scope_dropdown,
+        export_start_time_slider=export_start_time_slider,
+        export_end_time_slider=export_end_time_slider,
+        export_time_step_slider=export_time_step_slider,
+        export_frame_preview=export_frame_preview,
+        export_snap_to_keyframe=export_snap_to_keyframe,
         # Config menu
         config_path_input=config_path_input,
         config_buttons=config_buttons,
         load_config_button=load_config_button,
         reference_sphere_slider=reference_sphere_slider,
+        # Time configuration
+        source_fps_input=source_fps_input,
         # Instance control
         terminate_button=terminate_button,
     )

@@ -175,11 +175,22 @@ class UIHandles:
     export_device: viser.GuiDropdownHandle | None = None
     export_ply_button: viser.GuiButtonHandle | None = None
 
+    # Export scope controls (continuous time support)
+    export_scope_dropdown: viser.GuiDropdownHandle | None = None
+    export_start_time_slider: viser.GuiSliderHandle | None = None
+    export_end_time_slider: viser.GuiSliderHandle | None = None
+    export_time_step_slider: viser.GuiSliderHandle | None = None
+    export_frame_preview: viser.GuiTextHandle | None = None
+    export_snap_to_keyframe: viser.GuiCheckboxHandle | None = None  # Snap to nearest keyframe (no interpolation)
+
     # Config menu controls
     config_path_input: viser.GuiTextHandle | None = None
     config_buttons: viser.GuiButtonHandle | None = None  # Export Config button
     load_config_button: viser.GuiButtonHandle | None = None  # Load Config button (under play)
     reference_sphere_slider: viser.GuiSliderHandle | None = None  # Reference sphere radius
+
+    # Time configuration controls (hidden in config panel)
+    source_fps_input: viser.GuiNumberHandle | None = None  # Source capture FPS
 
     # Instance control
     terminate_button: viser.GuiButtonHandle | None = None

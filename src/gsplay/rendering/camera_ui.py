@@ -610,9 +610,9 @@ def create_quality_controls(server: viser.ViserServer, config=None) -> tuple:
     return (render_quality, jpeg_quality_slider, auto_quality_checkbox)
 
 
-def create_playback_controls(server: viser.ViserServer, config=None):
+def create_playback_controls(server: viser.ViserServer, config=None, time_domain=None):
     """
-    Create Frame slider and Play/Pause toggle button for animation playback.
+    Create Frame/Time slider and Play/Pause toggle button for animation playback.
 
     Parameters
     ----------
@@ -620,6 +620,8 @@ def create_playback_controls(server: viser.ViserServer, config=None):
         Viser server instance
     config : GSPlayConfig | None
         GSPlay configuration for animation settings
+    time_domain : TimeDomain | None
+        Time domain from the current source. If None, uses default discrete frames.
 
     Returns
     -------
@@ -632,14 +634,41 @@ def create_playback_controls(server: viser.ViserServer, config=None):
         initial_frame = config.animation.current_frame
         initial_auto_play = config.animation.auto_play
 
-    # Frame slider
+    # Determine slider configuration from time domain
+    if time_domain is not None and time_domain.is_continuous:
+        # Continuous time slider
+        slider_label = "Time"
+        slider_min = time_domain.min_time
+        slider_max = time_domain.max_time
+        # Fine granularity for continuous (1000 steps across range)
+        slider_step = max(0.001, (time_domain.max_time - time_domain.min_time) / 1000)
+        slider_initial = time_domain.min_time
+        slider_hint = "Continuous time (seconds or interpolated)"
+    elif time_domain is not None:
+        # Discrete time domain (non-default)
+        slider_label = "Frame"
+        slider_min = int(time_domain.min_time)
+        slider_max = int(time_domain.max_time)
+        slider_step = 1
+        slider_initial = int(time_domain.min_time)
+        slider_hint = "Frame index"
+    else:
+        # Default: discrete frames (placeholder until model loads)
+        slider_label = "Frame"
+        slider_min = 0
+        slider_max = 1
+        slider_step = 1
+        slider_initial = initial_frame
+        slider_hint = "Time frame for 4D content"
+
+    # Create slider
     time_slider = server.gui.add_slider(
-        "Frame",
-        min=0,
-        max=1,
-        step=1,
-        initial_value=initial_frame,
-        hint="Time frame for 4D content",
+        slider_label,
+        min=slider_min,
+        max=slider_max,
+        step=slider_step,
+        initial_value=slider_initial,
+        hint=slider_hint,
     )
 
     # Single toggle button - starts as Play (not playing) or Pause (playing)
@@ -653,6 +682,35 @@ def create_playback_controls(server: viser.ViserServer, config=None):
     )
 
     return (time_slider, PlaybackButton(toggle_button, initial_auto_play))
+
+
+def update_time_slider_for_source(time_slider, time_domain) -> None:
+    """Update time slider configuration when source changes.
+
+    Called when a new model is loaded to adapt the slider to its time domain.
+
+    Parameters
+    ----------
+    time_slider : viser.GuiSliderHandle
+        The time slider handle
+    time_domain : TimeDomain
+        Time domain from the new source
+    """
+    if time_domain is None:
+        return
+
+    if time_domain.is_continuous:
+        # Continuous time
+        time_slider.min = time_domain.min_time
+        time_slider.max = time_domain.max_time
+        time_slider.step = max(0.001, (time_domain.max_time - time_domain.min_time) / 1000)
+        time_slider.value = time_domain.min_time
+    else:
+        # Discrete frames
+        time_slider.min = int(time_domain.min_time)
+        time_slider.max = int(time_domain.max_time)
+        time_slider.step = int(time_domain.step) if time_domain.step else 1
+        time_slider.value = int(time_domain.min_time)
 
 
 def create_supersplat_camera_controls(

@@ -49,6 +49,19 @@ class ExportFormat(Enum):
     # OBJ = "obj"
 
 
+class ExportScope(Enum):
+    """Scope of frames to export.
+
+    Determines what frames are exported:
+    - CURRENT_FRAME: Single frame at current viewing time (supports interpolation)
+    - ALL_KEYFRAMES: All keyframes from the source (existing behavior, default)
+    - TIME_RANGE: Custom time range with specified step size
+    """
+    CURRENT_FRAME = auto()
+    ALL_KEYFRAMES = auto()
+    TIME_RANGE = auto()
+
+
 @dataclass
 class ExporterInfo:
     """Information about a registered exporter."""

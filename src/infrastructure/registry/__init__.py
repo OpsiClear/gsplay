@@ -7,7 +7,7 @@ and exporters, enabling easy extension with new format support.
 Usage
 -----
 >>> from src.infrastructure.registry import (
-...     DataSourceRegistry,
+...     SourceRegistry,
 ...     DataSinkRegistry,
 ...     register_defaults,
 ... )
@@ -15,8 +15,12 @@ Usage
 >>> # Initialize default sources/sinks
 >>> register_defaults()
 >>>
->>> # Get a source by name
->>> source_class = DataSourceRegistry.get("load-ply")
+>>> # Create a source with validation
+>>> source = SourceRegistry.create_validated(
+...     "load-ply",
+...     {"ply_folder": "/path/to/data"},
+...     device="cuda",
+... )
 >>>
 >>> # Get a sink by name
 >>> sink_class = DataSinkRegistry.get("ply")
@@ -24,7 +28,8 @@ Usage
 
 import logging
 
-from .sources import DataSourceRegistry
+from .source_registry import SourceRegistry
+from .sources import DataSourceRegistry  # Legacy alias
 from .sinks import DataSinkRegistry
 
 logger = logging.getLogger(__name__)
@@ -33,11 +38,25 @@ _defaults_registered = False
 
 
 def register_default_sources() -> None:
-    """Register all built-in data sources."""
-    # Import here to avoid circular imports
-    from src.models.ply.ply_source import PlyDataSource
+    """Register all built-in data sources.
 
-    DataSourceRegistry.register("load-ply", PlyDataSource)
+    Now registers directly with SourceRegistry (OptimizedPlyModel implements
+    BaseGaussianSource protocol directly).
+    """
+    # Import here to avoid circular imports
+    from src.models.ply.optimized_model import OptimizedPlyModel
+    from src.models.ply.interpolated_model import InterpolatedPlyModel
+
+    SourceRegistry.register("load-ply", OptimizedPlyModel)
+    SourceRegistry.register("interpolated-ply", InterpolatedPlyModel)
+
+    # Also register with legacy DataSourceRegistry for backward compatibility
+    # This will be removed in a future version
+    try:
+        DataSourceRegistry.register("load-ply", OptimizedPlyModel)
+        DataSourceRegistry.register("interpolated-ply", InterpolatedPlyModel)
+    except Exception:
+        pass  # Ignore if already registered
 
 
 def register_default_sinks() -> None:
@@ -72,7 +91,8 @@ def register_defaults() -> None:
 
 
 __all__ = [
-    "DataSourceRegistry",
+    "SourceRegistry",
+    "DataSourceRegistry",  # Legacy alias
     "DataSinkRegistry",
     "register_defaults",
     "register_default_sources",
