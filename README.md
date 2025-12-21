@@ -6,7 +6,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.9%2B-EE4C2C.svg)](https://pytorch.org/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](LICENSE)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 [Features](#key-features) | [Installation](#installation) | [Quick Start](#quick-start) | [Documentation](#documentation) | [Architecture](#system-architecture)
@@ -227,27 +227,35 @@ src/
 │   ├── control/             # HTTP control server for remote commands
 │   ├── dispatch/            # Event dispatcher for routing
 │   ├── initialization/      # UI setup and component initialization
+│   ├── processing/          # Data transformation pipeline (color, opacity, filters)
 │   ├── rendering/           # Render pipeline and camera
+│   ├── state/               # State management (edits, scene bounds)
 │   ├── streaming/           # WebSocket stream server (GStream)
 │   ├── ui/                  # UI layout and components
 │   └── nerfview/            # Embedded viser-based viewer
 │
 ├── domain/                  # Core business logic (no infrastructure deps)
-│   ├── entities.py          # GSTensor dataclass
-│   ├── interfaces.py        # Model/DataLoader protocols
-│   └── services/            # Pure math helpers (color, transform)
+│   ├── entities.py          # GSTensor, GSData type definitions
+│   ├── data.py              # GaussianData wrapper (unified CPU/GPU)
+│   ├── interfaces.py        # Model/DataLoader/Plugin protocols
+│   ├── time.py              # TimeDomain (discrete/continuous/interpolated)
+│   └── services/            # Pure math helpers (transform)
 │
 ├── infrastructure/          # External dependencies & I/O adapters
 │   ├── io/                  # Filesystem helpers
-│   │   ├── path_io.py       # Path utilities
-│   │   └── discovery.py     # PLY file discovery
-│   ├── cache/               # Frame caching
 │   ├── processing/          # PLY loader/writer/activation
-│   └── exporters/           # Export format implementations
+│   ├── exporters/           # Export format implementations
+│   ├── registry/            # Plugin registry system
+│   └── validation/          # Config validation
 │
 ├── models/
-│   ├── ply/                 # OptimizedPlyModel
+│   ├── ply/                 # OptimizedPlyModel, InterpolatedModel
 │   └── composite/           # CompositeModel (multi-layer)
+│
+├── plugins/                 # Plugin system (see src/plugins/PLUGINS.md)
+│   ├── base/                # Base classes for plugins
+│   ├── demo/                # Demo plugins
+│   └── testing/             # Plugin test harness
 │
 └── shared/
     ├── math.py              # Math utilities
@@ -405,7 +413,7 @@ Quick answers:
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0) - see the [LICENSE](LICENSE) file for details.
 
 ---
 

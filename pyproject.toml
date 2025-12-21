@@ -25,7 +25,6 @@ dependencies = [
     # Spatial Operations
     "scipy>=1.10.0", # KDTree for KNN
     "tqdm>=4.66.0", # Progress bars for console output
-    "nvidia-nvimgcodec-cu12>=0.6.1.37",
     "websockets>=15.0.1",
     # Triton for GPU kernel acceleration (gsmod uses for color operations)
     "triton-windows>=3.0.0; sys_platform == 'win32'",

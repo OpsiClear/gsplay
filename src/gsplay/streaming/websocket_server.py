@@ -379,13 +379,34 @@ class WebSocketStreamServer:
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
     <title>GSPlay</title>
     <style>
+        /* Industrial Minimalist Dark Theme */
+        :root {
+            --bg-void: #0a0a0a;
+            --bg-primary: #0f0f0f;
+            --bg-secondary: #161616;
+            --bg-tertiary: #1e1e1e;
+            --bg-hover: #262626;
+            --text-primary: #e8e8e8;
+            --text-secondary: #8a8a8a;
+            --text-muted: #5a5a5a;
+            --accent: #b8b8b8;
+            --accent-dim: rgba(184, 184, 184, 0.12);
+            --border-color: #2a2a2a;
+            --transition-base: 0.15s ease-out;
+            --transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            --radius-md: 4px;
+            --radius-lg: 6px;
+            --radius-xl: 8px;
+            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
             width: 100%; height: 100%;
             overflow: hidden;
-            background: #0a0a0a;
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif;
+            background: var(--bg-void);
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
         #stream {
             position: fixed;
@@ -399,15 +420,15 @@ class WebSocketStreamServer:
             display: flex;
             align-items: center;
             justify-content: center;
-            background: #0a0a0a;
+            background: var(--bg-void);
             z-index: 10;
-            transition: opacity 0.3s;
+            transition: opacity var(--transition-smooth);
         }
         .loading.hidden { opacity: 0; pointer-events: none; }
         .spinner {
             width: 20px; height: 20px;
-            border: 1.5px solid rgba(255,255,255,0.1);
-            border-top-color: rgba(255,255,255,0.4);
+            border: 1.5px solid var(--border-color);
+            border-top-color: var(--accent);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
@@ -418,9 +439,9 @@ class WebSocketStreamServer:
             display: flex;
             justify-content: center;
             padding: 20px;
-            background: linear-gradient(transparent, rgba(0,0,0,0.6));
+            background: linear-gradient(transparent, rgba(15,15,15,0.8));
             opacity: 0;
-            transition: opacity 0.25s;
+            transition: opacity var(--transition-smooth);
             z-index: 20;
         }
         .controls:hover, .controls.visible { opacity: 1; }
@@ -428,11 +449,13 @@ class WebSocketStreamServer:
             display: flex;
             align-items: center;
             gap: 2px;
-            background: rgba(255,255,255,0.08);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
-            border-radius: 10px;
+            border-radius: var(--radius-xl);
             padding: 4px;
+            box-shadow: var(--shadow-md);
         }
         .bar button {
             display: flex;
@@ -441,26 +464,26 @@ class WebSocketStreamServer:
             width: 44px; height: 44px;
             background: transparent;
             border: none;
-            border-radius: 10px;
-            color: rgba(255,255,255,0.7);
+            border-radius: var(--radius-lg);
+            color: var(--text-secondary);
             cursor: pointer;
-            transition: all 0.15s;
+            transition: all var(--transition-base);
             -webkit-tap-highlight-color: transparent;
         }
         .bar button:hover {
-            background: rgba(255,255,255,0.1);
-            color: #fff;
+            background: var(--bg-hover);
+            color: var(--text-primary);
         }
-        .bar button:active { transform: scale(0.92); background: rgba(255,255,255,0.15); }
+        .bar button:active { transform: scale(0.92); background: var(--accent-dim); }
         .bar button.on {
-            background: rgba(255,255,255,0.2);
-            color: #fff;
+            background: var(--accent-dim);
+            color: var(--accent);
         }
         .bar button svg { width: 22px; height: 22px; }
-        .sep { width: 1px; height: 24px; background: rgba(255,255,255,0.1); margin: 0 6px; }
+        .sep { width: 1px; height: 24px; background: var(--border-color); margin: 0 6px; }
         @media (hover: none) {
             .controls { opacity: 1; background: none; padding: 16px; }
-            .bar { background: rgba(0,0,0,0.6); padding: 6px; }
+            .bar { background: var(--bg-primary); border-color: var(--border-color); padding: 6px; }
             .bar button { width: 48px; height: 48px; }
             .bar button svg { width: 24px; height: 24px; }
         }

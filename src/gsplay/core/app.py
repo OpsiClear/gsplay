@@ -438,7 +438,8 @@ class UniversalGSPlay:
         """Setup UI, handlers, and nerfview viewer."""
         logger.debug("Setting up viewer...")
 
-        # Configure viser theme to match launcher style (cyan accent #06b6d4)
+        # Configure viser theme - Industrial Minimalist Dark Theme
+        # Silver accent #b8b8b8 (RGB: 184, 184, 184)
         # Use floating panel for compact/mobile UI, fixed panel (right sidebar) for desktop
         layout = "floating" if self.config.compact_ui else "fixed"
 
@@ -446,10 +447,97 @@ class UniversalGSPlay:
             control_layout=layout,
             control_width="medium",
             dark_mode=True,
-            brand_color=(6, 182, 212),
+            brand_color=(184, 184, 184),  # Silver metallic accent
             show_logo=False,
             show_share_button=False,
         )
+
+        # Inject custom CSS for Industrial Minimalist refinements
+        self.server.gui.add_html("""
+<style>
+/* Industrial Minimalist Dark Theme - Custom Overrides */
+:root {
+    --im-bg-void: #0a0a0a;
+    --im-bg-primary: #0f0f0f;
+    --im-bg-secondary: #161616;
+    --im-bg-tertiary: #1e1e1e;
+    --im-text-primary: #e8e8e8;
+    --im-text-secondary: #8a8a8a;
+    --im-text-muted: #5a5a5a;
+    --im-border: #2a2a2a;
+    --im-accent: #b8b8b8;
+}
+
+/* Refined scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--im-bg-primary); }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--im-accent); }
+
+/* Mantine/viser panel refinements */
+.mantine-Paper-root {
+    background: linear-gradient(180deg, #161616 0%, #1e1e1e 100%) !important;
+    border-color: var(--im-border) !important;
+}
+
+/* Button refinements for muted semantic colors */
+.mantine-Button-root[data-variant="filled"] {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* Slider track */
+.mantine-Slider-track {
+    background-color: var(--im-bg-tertiary) !important;
+}
+
+/* Input backgrounds */
+.mantine-Input-input, .mantine-NumberInput-input, .mantine-TextInput-input {
+    background-color: #1a1a1a !important;
+    border-color: var(--im-border) !important;
+}
+
+.mantine-Input-input:focus, .mantine-NumberInput-input:focus, .mantine-TextInput-input:focus {
+    border-color: var(--im-accent) !important;
+}
+
+/* Folder/accordion headers */
+.mantine-Accordion-control {
+    background: rgba(255, 255, 255, 0.02) !important;
+}
+
+.mantine-Accordion-control:hover {
+    background: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Tab styling */
+.mantine-Tabs-tab[data-active="true"] {
+    border-color: var(--im-accent) !important;
+}
+
+/* Checkbox/toggle refinements */
+.mantine-Checkbox-input:checked, .mantine-Switch-input:checked + .mantine-Switch-track {
+    background-color: var(--im-accent) !important;
+    border-color: var(--im-accent) !important;
+}
+
+/* Select dropdown */
+.mantine-Select-dropdown {
+    background-color: var(--im-bg-tertiary) !important;
+    border-color: var(--im-border) !important;
+}
+
+.mantine-Select-option:hover {
+    background-color: #262626 !important;
+}
+
+/* Tooltip styling */
+.mantine-Tooltip-tooltip {
+    background-color: var(--im-bg-tertiary) !important;
+    border: 1px solid var(--im-border) !important;
+    color: var(--im-text-primary) !important;
+}
+</style>
+""")
 
         # Create camera controller first (UI will be created in setup_ui_layout)
         self.camera_controller = create_supersplat_camera_controls(
