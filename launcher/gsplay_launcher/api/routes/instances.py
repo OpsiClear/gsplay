@@ -22,6 +22,7 @@ from gsplay_launcher.services.instance_manager import (
 )
 from gsplay_launcher.services.process_manager import ProcessStartError
 
+
 router = APIRouter(tags=["instances"])
 
 
@@ -39,7 +40,12 @@ def list_instances(
     )
 
 
-@router.get("/instances/{instance_id}", response_model=InstanceResponse, responses={404: {"model": ErrorResponse}}, summary="Get instance by ID")
+@router.get(
+    "/instances/{instance_id}",
+    response_model=InstanceResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Get instance by ID",
+)
 def get_instance(
     instance_id: str,
     manager: InstanceManager = Depends(get_instance_manager),
@@ -54,7 +60,17 @@ def get_instance(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
 
 
-@router.post("/instances", response_model=InstanceResponse, status_code=status.HTTP_201_CREATED, responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}}, summary="Create and start instance")
+@router.post(
+    "/instances",
+    response_model=InstanceResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        400: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+    summary="Create and start instance",
+)
 def create_instance(
     body: CreateInstanceRequest,
     manager: InstanceManager = Depends(get_instance_manager),
@@ -64,10 +80,18 @@ def create_instance(
     """Create and start a new gsplay instance."""
     try:
         instance = manager.create_and_start(
-            config_path=body.config_path, name=body.name, port=body.port, host=body.host,
-            stream_port=body.stream_port, gpu=body.gpu, view_only=body.view_only,
-            compact=body.compact, log_level=body.log_level, custom_ip=body.custom_ip,
-            viewer_id=body.viewer_id, stream_token=body.stream_token,
+            config_path=body.config_path,
+            name=body.name,
+            port=body.port,
+            host=body.host,
+            stream_port=body.stream_port,
+            gpu=body.gpu,
+            view_only=body.view_only,
+            compact=body.compact,
+            log_level=body.log_level,
+            custom_ip=body.custom_ip,
+            viewer_id=body.viewer_id,
+            stream_token=body.stream_token,
         )
         return InstanceResponse.from_instance(instance, external_url, network_url)
     except ConfigPathError as e:
@@ -78,7 +102,12 @@ def create_instance(
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e))
 
 
-@router.post("/instances/{instance_id}/stop", response_model=InstanceResponse, responses={404: {"model": ErrorResponse}}, summary="Stop running instance")
+@router.post(
+    "/instances/{instance_id}/stop",
+    response_model=InstanceResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Stop running instance",
+)
 def stop_instance(
     instance_id: str,
     manager: InstanceManager = Depends(get_instance_manager),
@@ -93,7 +122,12 @@ def stop_instance(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
 
 
-@router.delete("/instances/{instance_id}", status_code=status.HTTP_204_NO_CONTENT, responses={404: {"model": ErrorResponse}}, summary="Delete instance")
+@router.delete(
+    "/instances/{instance_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: {"model": ErrorResponse}},
+    summary="Delete instance",
+)
 def delete_instance(
     instance_id: str,
     manager: InstanceManager = Depends(get_instance_manager),

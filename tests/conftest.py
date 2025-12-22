@@ -1,16 +1,17 @@
 """Pytest configuration and shared fixtures."""
 
-from pathlib import Path
-import tempfile
 import shutil
 import sys
+import tempfile
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 
 from src.domain.entities import GSData, GSTensor
+
 
 # Provide a lightweight viser stub for environments without the dependency installed.
 if "viser" not in sys.modules:

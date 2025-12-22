@@ -1,4 +1,4 @@
-﻿"""
+"""
 Scene bounds calculation and management.
 
 This module extracts scene bounds logic from UniversalGSPlay,
@@ -13,6 +13,7 @@ import numpy as np
 
 from src.domain.interfaces import ModelInterface
 from src.domain.services import TransformService
+
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ class SceneBoundsManager:
                 points, percentile_min=5.0, percentile_max=95.0, padding=0.1
             )
 
-            center, radius = TransformService.calculate_bounding_sphere(
+            _center, radius = TransformService.calculate_bounding_sphere(
                 points, center=np.array(bounds.center)
             )
 
@@ -77,8 +78,7 @@ class SceneBoundsManager:
             }
 
             logger.info(
-                f"Scene bounds: center={bounds.center}, "
-                f"size={bounds.size}, radius={radius:.3f}"
+                f"Scene bounds: center={bounds.center}, size={bounds.size}, radius={radius:.3f}"
             )
 
         except Exception as e:
@@ -123,4 +123,3 @@ class SceneBoundsManager:
         if not self._initial_scene_bounds:
             return None
         return self._initial_scene_bounds["size"]
-

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import viser
 
+
 if TYPE_CHECKING:
     from src.gsplay.rendering.camera import SuperSplatCamera
 
@@ -67,9 +68,7 @@ class PlaybackButton:
                 cb(event)
 
 
-def create_view_controls(
-    server: viser.ViserServer, camera: SuperSplatCamera
-) -> tuple:
+def create_view_controls(server: viser.ViserServer, camera: SuperSplatCamera) -> tuple:
     """
     Create View controls for camera (Zoom, Azimuth, Elevation, Roll, FOV, Presets).
 
@@ -716,7 +715,7 @@ def update_time_slider_for_source(time_slider, time_domain) -> None:
 def create_supersplat_camera_controls(
     server: viser.ViserServer,
     scene_bounds: dict | None = None,
-) -> "SuperSplatCamera":
+) -> SuperSplatCamera:
     """
     Create SuperSplat-style camera controller (UI created separately in ui.py).
 

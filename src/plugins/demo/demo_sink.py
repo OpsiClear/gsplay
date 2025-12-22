@@ -98,14 +98,16 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import numpy as np
 
 from src.domain.data import GaussianData
-from src.domain.interfaces import DataSinkProtocol, DataSinkMetadata
+from src.domain.interfaces import DataSinkMetadata, DataSinkProtocol
+
 
 logger = logging.getLogger(__name__)
 
@@ -398,9 +400,7 @@ class DemoJsonSink(DataSinkProtocol):
     # INTERNAL METHODS
     # =========================================================================
 
-    def _array_to_list(
-        self, arr: np.ndarray, precision: int
-    ) -> list[list[float]] | list[float]:
+    def _array_to_list(self, arr: np.ndarray, precision: int) -> list[list[float]] | list[float]:
         """Convert numpy array to nested list with precision control.
 
         Parameters
@@ -418,10 +418,7 @@ class DemoJsonSink(DataSinkProtocol):
         if arr.ndim == 1:
             return [round(float(x), precision) for x in arr]
         else:
-            return [
-                [round(float(x), precision) for x in row]
-                for row in arr
-            ]
+            return [[round(float(x), precision) for x in row] for row in arr]
 
 
 # =============================================================================

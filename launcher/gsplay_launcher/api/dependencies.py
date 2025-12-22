@@ -7,10 +7,11 @@ state container that gets configured at app startup.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, Request, WebSocket
+
 
 if TYPE_CHECKING:
     from gsplay_launcher.services.file_browser import FileBrowserService
@@ -51,7 +52,7 @@ def get_app_state_ws(websocket: WebSocket) -> AppState:
 
 def get_instance_manager(
     state: AppState = Depends(get_app_state),
-) -> "InstanceManager":
+) -> InstanceManager:
     """Get instance manager from application state (HTTP endpoints)."""
     if state.instance_manager is None:
         raise RuntimeError("Instance manager not initialized")
@@ -60,7 +61,7 @@ def get_instance_manager(
 
 def get_instance_manager_ws(
     state: AppState = Depends(get_app_state_ws),
-) -> "InstanceManager":
+) -> InstanceManager:
     """Get instance manager from application state (WebSocket endpoints)."""
     if state.instance_manager is None:
         raise RuntimeError("Instance manager not initialized")
@@ -69,20 +70,20 @@ def get_instance_manager_ws(
 
 def get_file_browser(
     state: AppState = Depends(get_app_state),
-) -> "FileBrowserService | None":
+) -> FileBrowserService | None:
     """Get file browser service (may be None if disabled)."""
     return state.file_browser
 
 
 def get_external_url(
-    manager: "InstanceManager" = Depends(get_instance_manager),
+    manager: InstanceManager = Depends(get_instance_manager),
 ) -> str | None:
     """Get external URL from manager config."""
     return manager.config.external_url
 
 
 def get_network_url(
-    manager: "InstanceManager" = Depends(get_instance_manager),
+    manager: InstanceManager = Depends(get_instance_manager),
 ) -> str | None:
     """Get network URL from manager config."""
     return manager.config.network_url

@@ -9,11 +9,13 @@ Built on [fsspec](https://filesystem-spec.readthedocs.io/) with automatic protoc
 ## Installation
 
 ### Base (Local Only)
+
 ```bash
 uv pip install -e .
 ```
 
 ### Cloud Providers
+
 ```bash
 # AWS S3
 uv pip install -e ".[s3]"
@@ -110,6 +112,7 @@ viewer --config ./export_with_edits
 ## Authentication
 
 ### AWS S3
+
 ```bash
 # Configure AWS CLI
 aws configure
@@ -120,6 +123,7 @@ export AWS_SECRET_ACCESS_KEY=your_secret
 ```
 
 ### Google Cloud Storage
+
 ```bash
 # Service account key
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
@@ -129,6 +133,7 @@ gcloud auth application-default login
 ```
 
 ### Azure Blob Storage
+
 ```bash
 # Azure CLI
 az login
@@ -140,7 +145,9 @@ export AZURE_STORAGE_CONNECTION_STRING=your_connection_string
 ## Performance
 
 ### In-Memory Loading
+
 Cloud files are loaded entirely into memory (single network request per file):
+
 - **Typical PLY**: 128KB-11MB → loads in 100-500ms
 - **With cache**: ~10-15ms (subsequent loads)
 - **Prefetching**: Background loading for smooth playback
@@ -155,6 +162,7 @@ model = OptimizedPlyModel(
 ```
 
 Use compressed format to reduce network transfer:
+
 ```python
 write_ply(..., format="compressed")  # 16 bytes/splat vs 232 bytes/splat
 ```
@@ -162,27 +170,35 @@ write_ply(..., format="compressed")  # 16 bytes/splat vs 232 bytes/splat
 ## Error Handling
 
 ### Missing Dependencies
+
 ```
 ImportError: S3 support requires s3fs. Install with: pip install s3fs
 ```
+
 **Solution**: `uv pip install -e ".[s3]"` or `uv pip install s3fs>=2024.1.0`
 
 ### Authentication Errors
+
 ```
 PermissionError: Access denied to s3://bucket/data
 ```
+
 **Solution**: Configure credentials (see Authentication section above)
 
 ### File Not Found
+
 ```
 FileNotFoundError: Path does not exist: s3://bucket/missing/file.ply
 ```
+
 **Solution**: Verify bucket name, path, and permissions
 
 ### Network Errors
+
 ```
 ConnectionError: Failed to connect to s3://bucket
 ```
+
 **Solution**: Check internet connectivity, bucket region, firewall/proxy settings
 
 ## API Reference
@@ -202,11 +218,13 @@ ConnectionError: Failed to connect to s3://bucket
 ### Type Signatures
 
 All path functions accept flexible types:
+
 ```python
 str | Path | UniversalPath
 ```
 
 This allows seamless migration:
+
 ```python
 # Old code (still works)
 load_ply("./local/file.ply")

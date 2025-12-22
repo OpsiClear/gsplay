@@ -8,12 +8,12 @@ core modules.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Protocol
-import logging
 
 
 @dataclass(frozen=True)

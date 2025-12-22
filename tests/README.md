@@ -24,6 +24,7 @@ Tests for individual components and utilities in isolation:
 - `test_natural_sort.py` - Tests for natural sorting utilities
 
 **Run unit tests**:
+
 ```bash
 pytest tests/unit/ -v
 ```
@@ -38,6 +39,7 @@ Tests for feature integrationand workflows:
 - `test_gsply.py` - Tests for gsply library integration
 
 **Run integration tests**:
+
 ```bash
 pytest tests/integration/ -v
 ```
@@ -53,6 +55,7 @@ Tests for architecture refactoring and flexibility improvements:
 - `test_phase3_improvements.py` - Tests for Phase 3 improvements
 
 **Run architecture tests**:
+
 ```bash
 pytest tests/architecture/ -v
 ```
@@ -64,6 +67,7 @@ End-to-end functional tests:
 - `test_ply_roundtrip.py` - Tests for PLY export/import roundtrip
 
 **Run functional tests**:
+
 ```bash
 pytest tests/functional/ -v
 ```
@@ -132,6 +136,7 @@ Follow these conventions when writing tests:
 4. **Assertions**: Use clear assertion messages
 
 Example:
+
 ```python
 class TestFrameCache:
     """Tests for frame caching system."""
@@ -182,6 +187,7 @@ Common fixtures are defined in `conftest.py` files:
 ## Continuous Integration
 
 Tests are run automatically on:
+
 - Pull requests
 - Commits to main branch
 - Nightly builds
@@ -189,6 +195,7 @@ Tests are run automatically on:
 ## Contributing Tests
 
 When contributing:
+
 1. Add tests for new features
 2. Add tests for bug fixes
 3. Update tests when modifying existing functionality

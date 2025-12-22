@@ -9,12 +9,23 @@ from gsplay_launcher.api.schemas import ErrorResponse
 from gsplay_launcher.models import InstanceStatus
 from gsplay_launcher.services.instance_manager import InstanceManager, InstanceNotFoundError
 
+
 router = APIRouter(tags=["control"])
 
-_PROXY_ALLOWED_STATUSES = frozenset({InstanceStatus.STARTING, InstanceStatus.RUNNING, InstanceStatus.ORPHANED})
+_PROXY_ALLOWED_STATUSES = frozenset(
+    {InstanceStatus.STARTING, InstanceStatus.RUNNING, InstanceStatus.ORPHANED}
+)
 
 
-@router.post("/instances/{instance_id}/control/{command}", responses={404: {"model": ErrorResponse}, 502: {"model": ErrorResponse}, 503: {"model": ErrorResponse}}, summary="Send control command to instance")
+@router.post(
+    "/instances/{instance_id}/control/{command}",
+    responses={
+        404: {"model": ErrorResponse},
+        502: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+    summary="Send control command to instance",
+)
 async def control_instance(
     request: Request,
     instance_id: str,
@@ -37,9 +48,18 @@ async def control_instance(
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            response = await client.post(backend_url, content=body, headers={"Content-Type": "application/json"})
-            return Response(content=response.content, status_code=response.status_code, headers={"Content-Type": "application/json"})
+            response = await client.post(
+                backend_url, content=body, headers={"Content-Type": "application/json"}
+            )
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers={"Content-Type": "application/json"},
+            )
         except httpx.ConnectError:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Cannot connect to control server on port {control_port}")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                f"Cannot connect to control server on port {control_port}",
+            )
         except httpx.TimeoutException:
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "Control command timed out")

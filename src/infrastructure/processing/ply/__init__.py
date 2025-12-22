@@ -55,10 +55,23 @@ write_ply(
 """
 
 # Public API - Loaders
-from src.infrastructure.processing.ply.loader import load_ply, load_ply_as_gstensor, load_ply_as_gsdata
 from src.infrastructure.processing.ply.format_loader import (
     FormatAwarePlyLoader,
     PlyFrameEncoding,
+)
+from src.infrastructure.processing.ply.loader import (
+    load_ply,
+    load_ply_as_gsdata,
+    load_ply_as_gstensor,
+)
+
+# Public API - Utilities
+from src.infrastructure.processing.ply.utils import (
+    SH_C0,
+    rgb2sh,
+    rgb2sh_np,
+    sh2rgb,
+    sh2rgb_np,
 )
 
 # Public API - Writers
@@ -67,14 +80,6 @@ from src.infrastructure.processing.ply.writer import (
     write_ply_bytes,
 )
 
-# Public API - Utilities
-from src.infrastructure.processing.ply.utils import (
-    sh2rgb,
-    rgb2sh,
-    sh2rgb_np,
-    rgb2sh_np,
-    SH_C0,
-)
 
 __all__ = [
     # Loaders

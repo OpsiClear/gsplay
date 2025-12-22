@@ -5,8 +5,9 @@ Test script to verify flexibility improvements work correctly.
 Run with: python test_flexibility.py
 """
 
-import sys
 import logging
+import sys
+
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ def test_event_bus():
     logger.info("[TEST] Testing event bus system...")
 
     try:
-        from src.viewer.interaction.events import EventBus, EventType, Event
+        from src.viewer.interaction.events import Event, EventBus, EventType
 
         bus = EventBus(name="test")
 
@@ -35,17 +36,13 @@ def test_event_bus():
 
         # Subscribe
         bus.subscribe(EventType.BRIGHTNESS_CHANGED, handler1)
-        bus.subscribe(
-            EventType.BRIGHTNESS_CHANGED, handler2, priority=10
-        )  # Higher priority
+        bus.subscribe(EventType.BRIGHTNESS_CHANGED, handler2, priority=10)  # Higher priority
 
         # Emit event
         bus.emit(EventType.BRIGHTNESS_CHANGED, source="test", value=0.8)
 
         # Check both handlers received it
-        assert len(received_events) == 2, (
-            f"Expected 2 events, got {len(received_events)}"
-        )
+        assert len(received_events) == 2, f"Expected 2 events, got {len(received_events)}"
 
         # Check priority (handler2 should be first due to higher priority)
         assert received_events[0][0] == "handler2", "Priority not working"
@@ -96,15 +93,9 @@ def test_export_component():
         bus.subscribe(EventType.EXPORT_FAILED, track_event)
 
         # Check component exists and has methods
-        assert hasattr(export_component, "export_frame_sequence"), (
-            "Missing export_frame_sequence"
-        )
-        assert hasattr(export_component, "export_single_frame"), (
-            "Missing export_single_frame"
-        )
-        assert hasattr(export_component, "set_default_output_dir"), (
-            "Missing set_default_output_dir"
-        )
+        assert hasattr(export_component, "export_frame_sequence"), "Missing export_frame_sequence"
+        assert hasattr(export_component, "export_single_frame"), "Missing export_single_frame"
+        assert hasattr(export_component, "set_default_output_dir"), "Missing set_default_output_dir"
 
         # Test default output dir
         export_component.set_default_output_dir("./test_export")
@@ -124,8 +115,8 @@ def test_exporter_registry():
 
     try:
         from src.infrastructure.exporters.factory import (
-            ExporterFactory,
             ExportCapability,
+            ExporterFactory,
             ExportFormat,
         )
 
@@ -138,13 +129,11 @@ def test_exporter_registry():
         compressed_formats = ExporterFactory.get_formats_with_capability(
             ExportCapability.COMPRESSION
         )
-        assert "compressed-ply" in compressed_formats, (
-            "Compressed PLY missing COMPRESSION capability"
-        )
+        assert (
+            "compressed-ply" in compressed_formats
+        ), "Compressed PLY missing COMPRESSION capability"
 
-        cloud_formats = ExporterFactory.get_formats_with_capability(
-            ExportCapability.CLOUD_STORAGE
-        )
+        cloud_formats = ExporterFactory.get_formats_with_capability(ExportCapability.CLOUD_STORAGE)
         assert "ply" in cloud_formats, "PLY missing CLOUD_STORAGE capability"
 
         # Test capability check
@@ -222,14 +211,10 @@ def test_render_component():
 
         # Create a mock server (can't actually create without running server)
         # Just test the component can be imported and has required methods
-        assert hasattr(RenderComponent, "create_render_function"), (
-            "Missing create_render_function"
-        )
+        assert hasattr(RenderComponent, "create_render_function"), "Missing create_render_function"
         assert hasattr(RenderComponent, "create_viewer"), "Missing create_viewer"
         assert hasattr(RenderComponent, "setup_viewer"), "Missing setup_viewer"
-        assert hasattr(RenderComponent, "configure_quality"), (
-            "Missing configure_quality"
-        )
+        assert hasattr(RenderComponent, "configure_quality"), "Missing configure_quality"
         assert hasattr(RenderComponent, "get_viewer"), "Missing get_viewer"
         assert hasattr(RenderComponent, "rerender"), "Missing rerender"
 
@@ -247,9 +232,9 @@ def test_flexibility_integration():
 
     try:
         # Import all components
-        from src.viewer.interaction.events import EventBus
-        from src.viewer.core.components import ExportComponent, ModelComponent
         from src.infrastructure.exporters.factory import ExporterFactory
+        from src.viewer.core.components import ExportComponent, ModelComponent
+        from src.viewer.interaction.events import EventBus
 
         # Create instances
         bus = EventBus(name="integration")

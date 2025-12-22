@@ -9,19 +9,28 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import viser
-from gsmod import ColorValues, TransformValues, FilterValues
+from gsmod import ColorValues, FilterValues, TransformValues
 
 from src.gsplay.config.rotation_conversions import (
-    euler_deg_to_axis_angle as _euler_deg_to_axis_angle,
     axis_angle_to_euler_deg as _axis_angle_to_euler_deg,
-    quaternion_to_matrix as _quaternion_to_matrix,
-    matrix_to_euler_deg as _matrix_to_euler_deg,
+)
+from src.gsplay.config.rotation_conversions import (
     camera_to_frustum_axis_angle as _camera_to_frustum_axis_angle,
 )
+from src.gsplay.config.rotation_conversions import (
+    euler_deg_to_axis_angle as _euler_deg_to_axis_angle,
+)
+from src.gsplay.config.rotation_conversions import (
+    matrix_to_euler_deg as _matrix_to_euler_deg,
+)
+from src.gsplay.config.rotation_conversions import (
+    quaternion_to_matrix as _quaternion_to_matrix,
+)
+
 
 if TYPE_CHECKING:
     from src.domain.filters import VolumeFilter
@@ -181,7 +190,9 @@ class UIHandles:
     export_end_time_slider: viser.GuiSliderHandle | None = None
     export_time_step_slider: viser.GuiSliderHandle | None = None
     export_frame_preview: viser.GuiTextHandle | None = None
-    export_snap_to_keyframe: viser.GuiCheckboxHandle | None = None  # Snap to nearest keyframe (no interpolation)
+    export_snap_to_keyframe: viser.GuiCheckboxHandle | None = (
+        None  # Snap to nearest keyframe (no interpolation)
+    )
 
     # Config menu controls
     config_path_input: viser.GuiTextHandle | None = None
@@ -463,9 +474,7 @@ class UIHandles:
             frustum_far=frustum_far,
         )
 
-    def set_color_values(
-        self, values: ColorValues, alpha_scaler: float | None = None
-    ) -> None:
+    def set_color_values(self, values: ColorValues, alpha_scaler: float | None = None) -> None:
         """Update UI sliders with color values (inverse mapping)."""
         if self.temperature_slider:
             # Map [-1, 1] -> [0, 1]
@@ -603,9 +612,9 @@ class UIHandles:
             # gsmod uses wxyz format (w, x, y, z)
             w, x, y, z = rotation
             # Normalize quaternion
-            norm = np.sqrt(w*w + x*x + y*y + z*z)
+            norm = np.sqrt(w * w + x * x + y * y + z * z)
             if norm > 1e-8:
-                w, x, y, z = w/norm, x/norm, y/norm, z/norm
+                w, x, y, z = w / norm, x / norm, y / norm, z / norm
 
             # Convert quaternion to rotation matrix (use wxyz version)
             R = _quaternion_to_matrix((w, x, y, z))
@@ -883,7 +892,12 @@ class UIHandles:
             self.sphere_radius.value = float(sphere_radius)
 
         # Convert box_min/box_max to center/size for UI
-        if hasattr(fv, "box_min") and fv.box_min is not None and hasattr(fv, "box_max") and fv.box_max is not None:
+        if (
+            hasattr(fv, "box_min")
+            and fv.box_min is not None
+            and hasattr(fv, "box_max")
+            and fv.box_max is not None
+        ):
             bmin = fv.box_min
             bmax = fv.box_max
             # Compute center and size
@@ -960,4 +974,3 @@ class UIHandles:
                 self.frustum_rot_y.value = float(ry)
             if self.frustum_rot_z:
                 self.frustum_rot_z.value = float(rz)
-

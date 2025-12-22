@@ -5,8 +5,9 @@ Test script to verify Phase 2 architecture improvements work correctly.
 Run with: python test_phase2_improvements.py
 """
 
-import sys
 import logging
+import sys
+
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -19,25 +20,24 @@ def test_model_factory_integration():
     try:
         # Check that viewer uses ModelFactory
         import inspect
+
         from src.viewer.core.app import UniversalViewer
 
         source = inspect.getsource(UniversalViewer.load_model_from_config)
 
         # Should import and use ModelFactory
-        assert "from src.infrastructure.model_factory import ModelFactory" in source, (
-            "Viewer doesn't import ModelFactory"
-        )
-        assert "ModelFactory.create(" in source, (
-            "Viewer doesn't use ModelFactory.create()"
-        )
+        assert (
+            "from src.infrastructure.model_factory import ModelFactory" in source
+        ), "Viewer doesn't import ModelFactory"
+        assert "ModelFactory.create(" in source, "Viewer doesn't use ModelFactory.create()"
 
         # Should NOT have model-specific imports
-        assert "from src.models.ply.optimized_model import" not in source, (
-            "Viewer still has PLY model imports"
-        )
-        assert "from src.models.streaming.model import" not in source, (
-            "Viewer still has streaming model imports"
-        )
+        assert (
+            "from src.models.ply.optimized_model import" not in source
+        ), "Viewer still has PLY model imports"
+        assert (
+            "from src.models.streaming.model import" not in source
+        ), "Viewer still has streaming model imports"
 
         # Count lines in the method (should be much shorter)
         lines = source.split("\n")
@@ -61,28 +61,29 @@ def test_protocol_based_checks():
 
     try:
         import inspect
+
         from src.viewer.core.app import UniversalViewer
 
         # Check _setup_layer_controls method
         source = inspect.getsource(UniversalViewer._setup_layer_controls)
 
         # Should use hasattr checks or protocol
-        assert "isinstance(" not in source or "CompositeModelInterface" in source, (
-            "Still using isinstance with concrete type"
-        )
-        assert "hasattr(self.model" in source or "CompositeModelInterface" in source, (
-            "Not using protocol-based checking"
-        )
+        assert (
+            "isinstance(" not in source or "CompositeModelInterface" in source
+        ), "Still using isinstance with concrete type"
+        assert (
+            "hasattr(self.model" in source or "CompositeModelInterface" in source
+        ), "Not using protocol-based checking"
 
         # Check that CompositeModelInterface exists
         from src.domain.interfaces import CompositeModelInterface
 
-        assert hasattr(CompositeModelInterface, "get_layer_info"), (
-            "CompositeModelInterface missing get_layer_info"
-        )
-        assert hasattr(CompositeModelInterface, "set_layer_visibility"), (
-            "CompositeModelInterface missing set_layer_visibility"
-        )
+        assert hasattr(
+            CompositeModelInterface, "get_layer_info"
+        ), "CompositeModelInterface missing get_layer_info"
+        assert hasattr(
+            CompositeModelInterface, "set_layer_visibility"
+        ), "CompositeModelInterface missing set_layer_visibility"
 
         logger.info("[PASS] Protocol-based checking implemented")
         return True
@@ -100,6 +101,7 @@ def test_gaussian_constants_usage():
 
     try:
         import inspect
+
         import src.models.ply.optimized_model as ply_module
 
         # Get module source, not just class source
@@ -114,18 +116,14 @@ def test_gaussian_constants_usage():
         ), "OptimizedPlyModel doesn't import GaussianConstants"
 
         # Should use GC constants
-        assert "GC.Format.LOG_SCALE_THRESHOLD" in source, (
-            "Not using GC.Format.LOG_SCALE_THRESHOLD"
-        )
+        assert "GC.Format.LOG_SCALE_THRESHOLD" in source, "Not using GC.Format.LOG_SCALE_THRESHOLD"
         assert "GC.Numerical.MIN_SCALE" in source, "Not using GC.Numerical.MIN_SCALE"
-        assert "GC.Filtering.DEFAULT_PERCENTILE" in source, (
-            "Not using GC.Filtering.DEFAULT_PERCENTILE"
-        )
+        assert (
+            "GC.Filtering.DEFAULT_PERCENTILE" in source
+        ), "Not using GC.Filtering.DEFAULT_PERCENTILE"
 
         # Should NOT have hardcoded constants
-        assert "LOG_SCALE_THRESHOLD = -5.0" not in source, (
-            "Still has hardcoded LOG_SCALE_THRESHOLD"
-        )
+        assert "LOG_SCALE_THRESHOLD = -5.0" not in source, "Still has hardcoded LOG_SCALE_THRESHOLD"
         assert "C0 = 0.28209479177387814" not in source, "Still has hardcoded C0"
 
         logger.info("[PASS] GaussianConstants properly used in models")
@@ -171,22 +169,19 @@ def test_reduced_code_size():
 
     try:
         import inspect
+
         from src.viewer.core.app import UniversalViewer
 
         # Check load_model_from_config size
         load_model_source = inspect.getsource(UniversalViewer.load_model_from_config)
-        load_model_lines = len(
-            [line for line in load_model_source.split("\n") if line.strip()]
-        )
+        load_model_lines = len([line for line in load_model_source.split("\n") if line.strip()])
 
         # Original was 136 lines, should be much smaller now
-        assert load_model_lines < 60, (
-            f"load_model_from_config still too large: {load_model_lines} lines"
-        )
+        assert (
+            load_model_lines < 60
+        ), f"load_model_from_config still too large: {load_model_lines} lines"
 
-        logger.info(
-            f"  load_model_from_config: {load_model_lines} lines (reduced from 136)"
-        )
+        logger.info(f"  load_model_from_config: {load_model_lines} lines (reduced from 136)")
         logger.info(f"  Reduction: {100 * (136 - load_model_lines) / 136:.1f}%")
 
         logger.info("[PASS] Code size successfully reduced")
@@ -207,25 +202,25 @@ def test_clean_architecture_boundaries():
         import inspect
 
         # Domain should not import from infrastructure or models
-        from src.domain import interfaces, entities, services
+        from src.domain import entities, interfaces, services
 
         for module in [interfaces, entities, services]:
             source = inspect.getsource(module)
-            assert "from src.infrastructure" not in source, (
-                f"Domain module {module.__name__} imports from infrastructure"
-            )
-            assert "from src.models" not in source, (
-                f"Domain module {module.__name__} imports from models"
-            )
+            assert (
+                "from src.infrastructure" not in source
+            ), f"Domain module {module.__name__} imports from infrastructure"
+            assert (
+                "from src.models" not in source
+            ), f"Domain module {module.__name__} imports from models"
 
         # Infrastructure should not import from viewer or models (except model_factory)
-        from src.infrastructure import gaussian_constants, config
+        from src.infrastructure import config, gaussian_constants
 
         for module in [gaussian_constants, config]:
             source = inspect.getsource(module)
-            assert "from src.viewer" not in source, (
-                f"Infrastructure module {module.__name__} imports from viewer"
-            )
+            assert (
+                "from src.viewer" not in source
+            ), f"Infrastructure module {module.__name__} imports from viewer"
 
         logger.info("[PASS] Clean Architecture boundaries maintained")
         return True

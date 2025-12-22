@@ -9,11 +9,13 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Callable, TypeVar, ParamSpec, Any
+from typing import Any, ParamSpec, TypeVar
 
 from src.shared.exceptions import CircuitBreakerOpenError
+
 
 logger = logging.getLogger(__name__)
 

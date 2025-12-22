@@ -2,4 +2,5 @@
 
 from src.gsplay.ui.panels.info_panel import InfoPanel
 
+
 __all__ = ["InfoPanel"]

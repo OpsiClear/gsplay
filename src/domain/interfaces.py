@@ -9,12 +9,15 @@ This module defines the core protocols for the plugin system:
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
-from typing import Protocol, Any, Iterator, TYPE_CHECKING, Callable, runtime_checkable
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
 import numpy as np
+
 
 if TYPE_CHECKING:
     from src.domain.data import GaussianData
@@ -29,16 +32,18 @@ if TYPE_CHECKING:
 
 class PluginState(Enum):
     """Plugin lifecycle states."""
-    CREATED = auto()       # Constructor called, not yet initialized
+
+    CREATED = auto()  # Constructor called, not yet initialized
     INITIALIZING = auto()  # on_init() in progress
-    READY = auto()         # Fully initialized, ready for use
-    SUSPENDED = auto()     # Temporarily suspended (e.g., GPU memory freed)
-    SHUTTING_DOWN = auto() # on_shutdown() in progress
-    TERMINATED = auto()    # Fully cleaned up
+    READY = auto()  # Fully initialized, ready for use
+    SUSPENDED = auto()  # Temporarily suspended (e.g., GPU memory freed)
+    SHUTTING_DOWN = auto()  # on_shutdown() in progress
+    TERMINATED = auto()  # Fully cleaned up
 
 
 class HealthStatus(Enum):
     """Health status levels for plugins."""
+
     HEALTHY = auto()
     DEGRADED = auto()
     UNHEALTHY = auto()
@@ -48,6 +53,7 @@ class HealthStatus(Enum):
 @dataclass
 class HealthCheckResult:
     """Result of a health check."""
+
     status: HealthStatus
     message: str = ""
     details: dict[str, Any] = field(default_factory=dict)
@@ -187,11 +193,9 @@ EditManagerFactory = Callable[[dict[str, Any], str], EditManagerProtocol]
 class DataLoaderInterface(Protocol):
     """Standard interface for data loaders (used for camera/point initialization)."""
 
-    def get_camera_data(self) -> dict[str, Any] | None:
-        ...
+    def get_camera_data(self) -> dict[str, Any] | None: ...
 
-    def get_points_for_initialization(self) -> np.ndarray:
-        ...
+    def get_points_for_initialization(self) -> np.ndarray: ...
 
 
 # ============================================================================
@@ -223,6 +227,7 @@ class SourceMetadata:
     version : str
         Plugin version string
     """
+
     name: str
     description: str
     file_extensions: list[str] = field(default_factory=list)
@@ -590,6 +595,7 @@ class DataSinkMetadata:
 
     Used by the registry to provide information about available exporters.
     """
+
     name: str  # Display name (e.g., "PLY Export")
     description: str  # Brief description
     file_extension: str  # Output extension ".ply"
@@ -677,10 +683,7 @@ class ExporterInterface(Protocol):
     """
 
     def export_frame(
-        self,
-        gaussian_data: "GSData | GSTensor",
-        output_path: Path,
-        **options: Any
+        self, gaussian_data: GSData | GSTensor, output_path: Path, **options: Any
     ) -> None:
         """Export single frame of Gaussian data to file.
 
@@ -697,11 +700,11 @@ class ExporterInterface(Protocol):
 
     def export_sequence(
         self,
-        model: "ModelInterface",
+        model: ModelInterface,
         output_dir: Path,
         apply_edits_fn: Any = None,
         progress_callback: Any = None,
-        **options: Any
+        **options: Any,
     ) -> int:
         """Export entire sequence from model.
 

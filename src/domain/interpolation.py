@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+
 if TYPE_CHECKING:
     from src.domain.data import GaussianData
 
@@ -206,16 +207,16 @@ def interpolate_gaussian_data(
 
     # Handle edge cases
     if t <= 0.0:
-        return data0.clone() if hasattr(data0, 'clone') else _clone_gaussian_data(data0)
+        return data0.clone() if hasattr(data0, "clone") else _clone_gaussian_data(data0)
     if t >= 1.0:
-        return data1.clone() if hasattr(data1, 'clone') else _clone_gaussian_data(data1)
+        return data1.clone() if hasattr(data1, "clone") else _clone_gaussian_data(data1)
 
     # NEAREST method: snap to closest keyframe
     if method == InterpolationMethod.NEAREST:
         if t < 0.5:
-            return data0.clone() if hasattr(data0, 'clone') else _clone_gaussian_data(data0)
+            return data0.clone() if hasattr(data0, "clone") else _clone_gaussian_data(data0)
         else:
-            return data1.clone() if hasattr(data1, 'clone') else _clone_gaussian_data(data1)
+            return data1.clone() if hasattr(data1, "clone") else _clone_gaussian_data(data1)
 
     # Ensure same number of Gaussians
     if data0.n_gaussians != data1.n_gaussians:
@@ -287,8 +288,8 @@ def _clone_gaussian_data(data: GaussianData) -> GaussianData:
 
 __all__ = [
     "InterpolationMethod",
-    "slerp_quaternions",
+    "interpolate_gaussian_data",
     "lerp",
     "lerp_log_space",
-    "interpolate_gaussian_data",
+    "slerp_quaternions",
 ]

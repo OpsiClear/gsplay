@@ -2,7 +2,7 @@
 
 from .gaussian_constants import GaussianConstants
 
+
 __all__ = [
     "GaussianConstants",
 ]
-

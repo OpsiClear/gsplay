@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
@@ -162,13 +161,24 @@ def _write_mock_ply(path: Path, data: GaussianData) -> None:
     sh_dc = (data.sh0 - 0.5) / 0.28209479177387814  # C0 = 1/(2*sqrt(pi))
 
     # Pack data
-    dtype = np.dtype([
-        ("x", "<f4"), ("y", "<f4"), ("z", "<f4"),
-        ("scale_0", "<f4"), ("scale_1", "<f4"), ("scale_2", "<f4"),
-        ("rot_0", "<f4"), ("rot_1", "<f4"), ("rot_2", "<f4"), ("rot_3", "<f4"),
-        ("opacity", "<f4"),
-        ("f_dc_0", "<f4"), ("f_dc_1", "<f4"), ("f_dc_2", "<f4"),
-    ])
+    dtype = np.dtype(
+        [
+            ("x", "<f4"),
+            ("y", "<f4"),
+            ("z", "<f4"),
+            ("scale_0", "<f4"),
+            ("scale_1", "<f4"),
+            ("scale_2", "<f4"),
+            ("rot_0", "<f4"),
+            ("rot_1", "<f4"),
+            ("rot_2", "<f4"),
+            ("rot_3", "<f4"),
+            ("opacity", "<f4"),
+            ("f_dc_0", "<f4"),
+            ("f_dc_1", "<f4"),
+            ("f_dc_2", "<f4"),
+        ]
+    )
 
     packed = np.zeros(n, dtype=dtype)
     packed["x"] = data.means[:, 0]

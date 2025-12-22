@@ -10,9 +10,10 @@ the caller, satisfying SOLID and Clean Architecture boundaries.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol, Sequence
+from typing import Protocol
 
 import gsply
 from gsply.formats import detect_format
@@ -20,6 +21,7 @@ from gsply.formats import detect_format
 from src.domain.entities import GSData, GSTensor
 from src.infrastructure.io.path_io import UniversalPath
 from src.infrastructure.processing.ply.loader import load_ply_as_gsdata
+
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +177,7 @@ class FormatAwarePlyLoader:
         """
         Load a PLY file ready for GPU processing.
 
-        Compresssed files are routed to the GPU loader; uncompressed fall back to
+        Compressed files are routed to the GPU loader; uncompressed fall back to
         the CPU loader + tensor conversion. Recoverable loader errors automatically
         downgrade the cached encoding to avoid repeated failures.
         """
@@ -223,8 +225,8 @@ class FormatAwarePlyLoader:
 
 
 __all__ = [
+    "FormatAwarePlyLoader",
     "PlyFrameEncoding",
     "PlyLoadResult",
     "PlyLoaderStrategy",
-    "FormatAwarePlyLoader",
 ]

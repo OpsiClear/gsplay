@@ -9,9 +9,12 @@ from gsplay_launcher.models import InstanceStatus
 from gsplay_launcher.services.id_encoder import decode_instance_id
 from gsplay_launcher.services.instance_manager import InstanceManager, InstanceNotFoundError
 
+
 router = APIRouter(tags=["proxy"])
 
-_PROXY_ALLOWED_STATUSES = frozenset({InstanceStatus.STARTING, InstanceStatus.RUNNING, InstanceStatus.ORPHANED})
+_PROXY_ALLOWED_STATUSES = frozenset(
+    {InstanceStatus.STARTING, InstanceStatus.RUNNING, InstanceStatus.ORPHANED}
+)
 
 _URL_CLEANUP_SCRIPT = b"""<script>
 (function(){
@@ -30,7 +33,10 @@ _URL_CLEANUP_SCRIPT = b"""<script>
 # Viewer Proxy (WebSocket + HTTP) - /v/{instance_id}/
 # =============================================================================
 
-async def _proxy_websocket_impl(websocket: WebSocket, instance_id: str, manager: InstanceManager) -> None:
+
+async def _proxy_websocket_impl(
+    websocket: WebSocket, instance_id: str, manager: InstanceManager
+) -> None:
     """Internal implementation for WebSocket proxy."""
     from gsplay_launcher.services.websocket_proxy import get_proxy
 
@@ -44,24 +50,38 @@ async def _proxy_websocket_impl(websocket: WebSocket, instance_id: str, manager:
         await websocket.close(code=4003, reason="Instance not running")
         return
 
-    requested_subprotocol = websocket.scope.get("subprotocols", [None])[0] if websocket.scope.get("subprotocols") else None
+    requested_subprotocol = (
+        websocket.scope.get("subprotocols", [None])[0]
+        if websocket.scope.get("subprotocols")
+        else None
+    )
     await websocket.accept(subprotocol=requested_subprotocol)
     await get_proxy().proxy(websocket, instance)
 
 
 @router.websocket("/v/{instance_id}/")
-async def proxy_websocket_with_slash(websocket: WebSocket, instance_id: str, manager: InstanceManager = Depends(get_instance_manager_ws)) -> None:
+async def proxy_websocket_with_slash(
+    websocket: WebSocket,
+    instance_id: str,
+    manager: InstanceManager = Depends(get_instance_manager_ws),
+) -> None:
     """Proxy WebSocket connection to a GSPlay instance (with trailing slash)."""
     await _proxy_websocket_impl(websocket, instance_id, manager)
 
 
 @router.websocket("/v/{instance_id}")
-async def proxy_websocket_no_slash(websocket: WebSocket, instance_id: str, manager: InstanceManager = Depends(get_instance_manager_ws)) -> None:
+async def proxy_websocket_no_slash(
+    websocket: WebSocket,
+    instance_id: str,
+    manager: InstanceManager = Depends(get_instance_manager_ws),
+) -> None:
     """Proxy WebSocket connection to a GSPlay instance (without trailing slash)."""
     await _proxy_websocket_impl(websocket, instance_id, manager)
 
 
-async def _proxy_http_impl(request: Request, instance_id: str, path: str, manager: InstanceManager) -> Response:
+async def _proxy_http_impl(
+    request: Request, instance_id: str, path: str, manager: InstanceManager
+) -> Response:
     """Internal implementation for HTTP proxy."""
     try:
         instance = manager.get_by_viewer_id(instance_id)
@@ -79,31 +99,54 @@ async def _proxy_http_impl(request: Request, instance_id: str, path: str, manage
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             response = await client.request(
-                method=request.method, url=backend_url,
-                headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")},
-                content=await request.body() if request.method in ("POST", "PUT", "PATCH") else None,
+                method=request.method,
+                url=backend_url,
+                headers={
+                    k: v
+                    for k, v in request.headers.items()
+                    if k.lower() not in ("host", "content-length")
+                },
+                content=await request.body()
+                if request.method in ("POST", "PUT", "PATCH")
+                else None,
             )
             content = response.content
             if path == "" and "text/html" in response.headers.get("content-type", ""):
                 content = content.replace(b"<head>", b"<head>" + _URL_CLEANUP_SCRIPT, 1)
             return Response(
-                content=content, status_code=response.status_code,
-                headers={k: v for k, v in response.headers.items() if k.lower() not in ("content-encoding", "transfer-encoding", "content-length")},
+                content=content,
+                status_code=response.status_code,
+                headers={
+                    k: v
+                    for k, v in response.headers.items()
+                    if k.lower() not in ("content-encoding", "transfer-encoding", "content-length")
+                },
             )
         except httpx.ConnectError:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Cannot connect to instance {instance_id}")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY, f"Cannot connect to instance {instance_id}"
+            )
         except httpx.TimeoutException:
-            raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, f"Instance {instance_id} timed out")
+            raise HTTPException(
+                status.HTTP_504_GATEWAY_TIMEOUT, f"Instance {instance_id} timed out"
+            )
 
 
 @router.get("/v/{instance_id}/")
-async def proxy_http_root(request: Request, instance_id: str, manager: InstanceManager = Depends(get_instance_manager)) -> Response:
+async def proxy_http_root(
+    request: Request, instance_id: str, manager: InstanceManager = Depends(get_instance_manager)
+) -> Response:
     """Proxy HTTP requests to a GSPlay instance root."""
     return await _proxy_http_impl(request, instance_id, "", manager)
 
 
 @router.get("/v/{instance_id}/{path:path}")
-async def proxy_http_path(request: Request, instance_id: str, path: str, manager: InstanceManager = Depends(get_instance_manager)) -> Response:
+async def proxy_http_path(
+    request: Request,
+    instance_id: str,
+    path: str,
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> Response:
     """Proxy HTTP requests to a GSPlay instance with path."""
     return await _proxy_http_impl(request, instance_id, path, manager)
 
@@ -111,6 +154,7 @@ async def proxy_http_path(request: Request, instance_id: str, path: str, manager
 # =============================================================================
 # Stream Proxy (WebSocket + HTTP) - /s/{token}/
 # =============================================================================
+
 
 def _resolve_stream_instance(token: str, manager: InstanceManager):
     """Resolve instance from stream token or encoded ID."""
@@ -128,14 +172,18 @@ def _resolve_stream_instance(token: str, manager: InstanceManager):
         return None
 
 
-async def _proxy_stream_impl(request: Request, token: str, path: str, manager: InstanceManager) -> Response:
+async def _proxy_stream_impl(
+    request: Request, token: str, path: str, manager: InstanceManager
+) -> Response:
     """Internal implementation for stream HTTP proxy."""
     instance = _resolve_stream_instance(token, manager)
     if instance is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Invalid stream token")
 
     if instance.stream_port == 0:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Streaming not enabled for this instance")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Streaming not enabled for this instance"
+        )
 
     if instance.status not in _PROXY_ALLOWED_STATUSES:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Instance not running")
@@ -149,22 +197,36 @@ async def _proxy_stream_impl(request: Request, token: str, path: str, manager: I
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             response = await client.request(
-                method=request.method, url=backend_url,
-                headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")},
+                method=request.method,
+                url=backend_url,
+                headers={
+                    k: v
+                    for k, v in request.headers.items()
+                    if k.lower() not in ("host", "content-length")
+                },
             )
             # Streaming HTML is now proxy-aware (detects /s/{token}/ path automatically)
             return Response(
                 content=response.content,
                 status_code=response.status_code,
-                headers={k: v for k, v in response.headers.items() if k.lower() not in ("content-encoding", "transfer-encoding", "content-length")},
+                headers={
+                    k: v
+                    for k, v in response.headers.items()
+                    if k.lower() not in ("content-encoding", "transfer-encoding", "content-length")
+                },
             )
         except httpx.ConnectError:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Cannot connect to stream server at port {actual_stream_port}")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                f"Cannot connect to stream server at port {actual_stream_port}",
+            )
         except httpx.TimeoutException:
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "Stream timed out")
 
 
-async def _proxy_stream_websocket_impl(websocket: WebSocket, token: str, manager: InstanceManager) -> None:
+async def _proxy_stream_websocket_impl(
+    websocket: WebSocket, token: str, manager: InstanceManager
+) -> None:
     """Internal implementation for stream WebSocket proxy."""
     from gsplay_launcher.services.websocket_proxy import get_proxy
 
@@ -186,25 +248,33 @@ async def _proxy_stream_websocket_impl(websocket: WebSocket, token: str, manager
 
 
 @router.get("/s/{token}/")
-async def proxy_stream_root(request: Request, token: str, manager: InstanceManager = Depends(get_instance_manager)) -> Response:
+async def proxy_stream_root(
+    request: Request, token: str, manager: InstanceManager = Depends(get_instance_manager)
+) -> Response:
     """Proxy HTTP requests to stream server (view page)."""
     return await _proxy_stream_impl(request, token, "", manager)
 
 
 @router.get("/s/{token}/view")
-async def proxy_stream_view(request: Request, token: str, manager: InstanceManager = Depends(get_instance_manager)) -> Response:
+async def proxy_stream_view(
+    request: Request, token: str, manager: InstanceManager = Depends(get_instance_manager)
+) -> Response:
     """Proxy view-only HTML page."""
     return await _proxy_stream_impl(request, token, "", manager)
 
 
 @router.websocket("/s/{token}/ws")
-async def proxy_stream_websocket(websocket: WebSocket, token: str, manager: InstanceManager = Depends(get_instance_manager_ws)) -> None:
+async def proxy_stream_websocket(
+    websocket: WebSocket, token: str, manager: InstanceManager = Depends(get_instance_manager_ws)
+) -> None:
     """Proxy WebSocket stream connection."""
     await _proxy_stream_websocket_impl(websocket, token, manager)
 
 
 @router.get("/s/{token}/status")
-async def proxy_stream_status(request: Request, token: str, manager: InstanceManager = Depends(get_instance_manager)) -> Response:
+async def proxy_stream_status(
+    request: Request, token: str, manager: InstanceManager = Depends(get_instance_manager)
+) -> Response:
     """Proxy stream status endpoint for debugging."""
     return await _proxy_stream_impl(request, token, "status", manager)
 
@@ -213,7 +283,10 @@ async def proxy_stream_status(request: Request, token: str, manager: InstanceMan
 # Control Proxy (HTTP POST) - /c/{token}/{endpoint}
 # =============================================================================
 
-async def _proxy_control_impl(request: Request, token: str, endpoint: str, manager: InstanceManager) -> Response:
+
+async def _proxy_control_impl(
+    request: Request, token: str, endpoint: str, manager: InstanceManager
+) -> Response:
     """Internal implementation for control HTTP proxy.
 
     Control server runs on viser_port + 2.
@@ -235,28 +308,51 @@ async def _proxy_control_impl(request: Request, token: str, endpoint: str, manag
             response = await client.request(
                 method=request.method,
                 url=backend_url,
-                headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")},
-                content=await request.body() if request.method in ("POST", "PUT", "PATCH") else None,
+                headers={
+                    k: v
+                    for k, v in request.headers.items()
+                    if k.lower() not in ("host", "content-length")
+                },
+                content=await request.body()
+                if request.method in ("POST", "PUT", "PATCH")
+                else None,
             )
             return Response(
                 content=response.content,
                 status_code=response.status_code,
-                headers={k: v for k, v in response.headers.items() if k.lower() not in ("content-encoding", "transfer-encoding", "content-length")},
+                headers={
+                    k: v
+                    for k, v in response.headers.items()
+                    if k.lower() not in ("content-encoding", "transfer-encoding", "content-length")
+                },
             )
         except httpx.ConnectError:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Cannot connect to control server at port {control_port}")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                f"Cannot connect to control server at port {control_port}",
+            )
         except httpx.TimeoutException:
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "Control request timed out")
 
 
 @router.post("/c/{token}/{endpoint}")
-async def proxy_control_post(request: Request, token: str, endpoint: str, manager: InstanceManager = Depends(get_instance_manager)) -> Response:
+async def proxy_control_post(
+    request: Request,
+    token: str,
+    endpoint: str,
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> Response:
     """Proxy POST control commands to GSPlay instance (rotate, playback, etc.)."""
     return await _proxy_control_impl(request, token, endpoint, manager)
 
 
 @router.get("/c/{token}/{endpoint}")
-async def proxy_control_get(request: Request, token: str, endpoint: str, manager: InstanceManager = Depends(get_instance_manager)) -> Response:
+async def proxy_control_get(
+    request: Request,
+    token: str,
+    endpoint: str,
+    manager: InstanceManager = Depends(get_instance_manager),
+) -> Response:
     """Proxy GET control queries to GSPlay instance (rotation-state, etc.)."""
     return await _proxy_control_impl(request, token, endpoint, manager)
 

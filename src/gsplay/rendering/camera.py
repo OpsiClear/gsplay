@@ -29,8 +29,8 @@ Mode transitions:
 import logging
 import threading
 import time
+from collections.abc import Callable
 from enum import Enum
-from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 import viser
@@ -45,30 +45,35 @@ from .camera_ui import (
     create_view_controls,
     update_time_slider_for_source,
 )
-from .quaternion_utils import quat_from_axis_angle, quat_from_euler_deg, quat_multiply, quat_to_rotation_matrix
+from .quaternion_utils import (
+    quat_from_axis_angle,
+    quat_from_euler_deg,
+    quat_multiply,
+    quat_to_rotation_matrix,
+)
 
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
 
 class CameraMode(Enum):
     """Camera ownership mode."""
+
     USER = "user"  # Viser owns camera, we sync from it
-    APP = "app"    # We own camera, we push to viser
+    APP = "app"  # We own camera, we push to viser
+
 
 __all__ = [
-    "CameraState",
     "CameraController",
-    "SuperSplatCamera",  # Alias for backwards compatibility
-    "create_view_controls",
-    "create_fps_control",
-    "create_quality_controls",
-    "create_playback_controls",
-    "create_supersplat_camera_controls",
-    "update_time_slider_for_source",
+    "CameraState",
     "PlaybackButton",
+    "SuperSplatCamera",  # Alias for backwards compatibility
+    "create_fps_control",
+    "create_playback_controls",
+    "create_quality_controls",
+    "create_supersplat_camera_controls",
+    "create_view_controls",
+    "update_time_slider_for_source",
 ]
 
 # Default distance multiplier for camera positioning
@@ -432,9 +437,7 @@ class CameraController:
             logger.info("Starting rotation from CameraState (no clients)")
             with self._lock:
                 self._rotation_base_wxyz = quat_from_euler_deg(
-                    self._state._azimuth,
-                    self._state._elevation,
-                    self._state._roll
+                    self._state._azimuth, self._state._elevation, self._state._roll
                 )
                 R = quat_to_rotation_matrix(self._rotation_base_wxyz)
                 forward = -R[:, 2]
@@ -445,7 +448,9 @@ class CameraController:
                 self._headless_wxyz = self._rotation_base_wxyz.copy()
                 self._headless_position = self._rotation_base_position.copy()
                 self._headless_fov = self._state.fov if self._state.fov > 0.1 else 0.82
-                self._headless_aspect = self._state.aspect if self._state.aspect > 0.1 else 16.0 / 9.0
+                self._headless_aspect = (
+                    self._state.aspect if self._state.aspect > 0.1 else 16.0 / 9.0
+                )
         else:
             logger.warning("Cannot rotate - no camera state available")
             return
@@ -768,8 +773,10 @@ class CameraController:
 
         with self._lock:
             distance = explicit_distance or (self._state.distance if preserve_distance else None)
-            look_at = explicit_lookat if explicit_lookat is not None else (
-                self._state.look_at if preserve_lookat else None
+            look_at = (
+                explicit_lookat
+                if explicit_lookat is not None
+                else (self._state.look_at if preserve_lookat else None)
             )
 
             if distance is None and self.scene_bounds is not None:

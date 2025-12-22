@@ -9,11 +9,8 @@ infrastructure modules directly.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
-from src.infrastructure.processing_mode import ProcessingMode
 from src.gsplay.config.settings import GSPlayConfig
-from src.gsplay.state.edit_manager import EditManager
 from src.gsplay.processing import (
     AllCpuStrategy,
     AllGpuStrategy,
@@ -31,6 +28,8 @@ from src.gsplay.processing import (
     TransformGpuStrategy,
     VolumeFilterService,
 )
+from src.gsplay.state.edit_manager import EditManager
+from src.infrastructure.processing_mode import ProcessingMode
 
 
 @dataclass
@@ -67,7 +66,7 @@ def build_default_processing_providers() -> ProcessingProviders:
 def create_edit_manager(
     config: GSPlayConfig,
     device: str,
-    providers: Optional[ProcessingProviders] = None,
+    providers: ProcessingProviders | None = None,
 ) -> EditManager:
     """
     Build an EditManager with injected processing dependencies.

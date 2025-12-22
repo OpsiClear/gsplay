@@ -8,10 +8,16 @@ from gsplay_launcher.api.schemas import ErrorResponse, LogResponse
 from gsplay_launcher.services.instance_manager import InstanceManager, InstanceNotFoundError
 from gsplay_launcher.services.log_service import get_log_service
 
+
 router = APIRouter(tags=["logs"])
 
 
-@router.get("/instances/{instance_id}/logs", response_model=LogResponse, responses={404: {"model": ErrorResponse}}, summary="Get instance logs")
+@router.get(
+    "/instances/{instance_id}/logs",
+    response_model=LogResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Get instance logs",
+)
 def get_instance_logs(
     instance_id: str,
     lines: int = 200,
@@ -26,7 +32,12 @@ def get_instance_logs(
 
     log_service = get_log_service()
     chunk = log_service.read_logs(instance.port, lines=lines, offset=offset)
-    return LogResponse(lines=chunk.lines, total_lines=chunk.total_lines, offset=chunk.offset, has_more=chunk.has_more)
+    return LogResponse(
+        lines=chunk.lines,
+        total_lines=chunk.total_lines,
+        offset=chunk.offset,
+        has_more=chunk.has_more,
+    )
 
 
 @router.get("/instances/{instance_id}/logs/stream", summary="Stream instance logs (SSE)")

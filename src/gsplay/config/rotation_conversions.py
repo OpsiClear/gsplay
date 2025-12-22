@@ -99,9 +99,7 @@ def euler_deg_to_axis_angle(
     )
 
 
-def axis_angle_to_euler_deg(
-    axis_angle: tuple[float, float, float]
-) -> tuple[float, float, float]:
+def axis_angle_to_euler_deg(axis_angle: tuple[float, float, float]) -> tuple[float, float, float]:
     """Convert axis-angle (axis * angle) to Euler XYZ in degrees."""
     ax, ay, az = axis_angle
     angle = math.sqrt(ax * ax + ay * ay + az * az)
@@ -170,11 +168,14 @@ def matrix_to_euler_deg(R: np.ndarray) -> tuple[float, float, float]:
 def quaternion_to_matrix(q: tuple[float, float, float, float]) -> np.ndarray:
     """Convert quaternion (w, x, y, z) to rotation matrix."""
     w, x, y, z = q
-    return np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
-    ], dtype=float)
+    return np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+        ],
+        dtype=float,
+    )
 
 
 def quaternion_to_matrix_xyzw(q: tuple[float, float, float, float]) -> np.ndarray:
@@ -183,11 +184,14 @@ def quaternion_to_matrix_xyzw(q: tuple[float, float, float, float]) -> np.ndarra
     gsmod uses (x, y, z, w) format for quaternions.
     """
     x, y, z, w = q
-    return np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
-    ], dtype=float)
+    return np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+        ],
+        dtype=float,
+    )
 
 
 def matrix_to_quaternion(R: np.ndarray) -> tuple[float, float, float, float]:

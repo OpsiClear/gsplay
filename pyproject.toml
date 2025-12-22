@@ -37,6 +37,8 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
+    "pre-commit>=4.0.0",
+    "ruff>=0.14.0",
 ]
 
 # Cloud Storage (optional - for loading PLY files from cloud)
@@ -108,13 +110,101 @@ gsplay-launcher = { path = "launcher" }
 
 [tool.ruff]
 target-version = "py312"
+line-length = 100
 exclude = [
     ".venv",
     "__pycache__",
     "**/site-packages/**",
+    "build",
+    "dist",
+    ".git",
+    "node_modules",
 ]
 
 [tool.ruff.lint]
-ignore = [
-    "F821",  # Undefined name (handled by target-version for built-ins)
+select = ["E", "W", "F", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+force-single-line = false
+lines-after-imports = 2
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+
+# =============================================================================
+# Bandit security scanning
+# =============================================================================
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "node_modules"]
+skips = [
+    "B101",  # assert_used (ok in tests)
+    "B104",  # hardcoded_bind_all_interfaces (intentional for dev servers)
+    "B110",  # try_except_pass (used for cleanup code)
+    "B311",  # random (used for jitter, not security)
+    "B404",  # subprocess import (needed for process management)
+    "B602",  # shell=True (used for vcvars64.bat on Windows)
+    "B603",  # subprocess_without_shell (intentional for security)
+    "B607",  # partial_path (nvidia-smi, etc.)
 ]
+
+# =============================================================================
+# Codespell configuration
+# =============================================================================
+[tool.codespell]
+skip = "*.lock,*.min.js,*.min.css,node_modules,dist,.venv,__pycache__"
+ignore-words-list = "ot,nd,rouge,coo,datas,fro"
+
+# =============================================================================
+# ty type checker configuration (Astral's fast type checker)
+# https://docs.astral.sh/ty/
+# =============================================================================
+[tool.ty.environment]
+# ty auto-detects Python version from requires-python in [project]
+# ty auto-detects src layout
+
+[tool.ty.rules]
+# Lenient settings for gradual type adoption
+# See https://docs.astral.sh/ty/reference/rules/ for all rules
+# ty is strict by default - ignore most errors initially, tighten over time
+#
+# Import/attribute resolution
+unresolved-import = "ignore"
+unresolved-attribute = "ignore"
+possibly-unresolved-reference = "ignore"
+possibly-missing-attribute = "ignore"
+#
+# Argument/assignment errors (common in dynamic Python)
+invalid-argument-type = "ignore"
+invalid-assignment = "ignore"
+missing-argument = "ignore"
+unknown-argument = "ignore"
+too-many-positional-arguments = "ignore"
+#
+# Return type errors
+invalid-return-type = "ignore"
+#
+# Parameter default errors (None defaults for optional params)
+invalid-parameter-default = "ignore"
+#
+# Callable/subscriptable/iterable errors
+non-subscriptable = "ignore"
+call-non-callable = "ignore"
+no-matching-overload = "ignore"
+not-iterable = "ignore"
+#
+# Operator errors (numpy/torch operations)
+unsupported-operator = "ignore"
+#
+# Context manager errors
+invalid-context-manager = "ignore"
+#
+# Type form errors (for gradual migration)
+invalid-type-form = "ignore"

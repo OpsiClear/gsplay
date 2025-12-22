@@ -8,23 +8,25 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 from gsplat.rendering import rasterization as _rasterization
 
 from src.domain.entities import SH_DEGREE_MAP
-from src.infrastructure.processing_mode import ProcessingMode
-from src.gsplay.nerfview import RenderCamera, RenderTabState
 from src.gsplay.interaction.events import EventBus, EventType
-from src.gsplay.rendering.jpeg_encoder import encode_and_cache, get_service as get_jpeg_service
+from src.gsplay.nerfview import RenderCamera, RenderTabState
+from src.gsplay.rendering.jpeg_encoder import encode_and_cache
+from src.gsplay.rendering.jpeg_encoder import get_service as get_jpeg_service
+from src.infrastructure.processing_mode import ProcessingMode
+
 
 if TYPE_CHECKING:
     from src.domain.entities import GSData, GSTensor
     from src.domain.interfaces import ModelInterface
-    from src.gsplay.config.settings import UIHandles, GSPlayConfig
+    from src.gsplay.config.settings import GSPlayConfig, UIHandles
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +36,7 @@ def create_render_function(
     ui: UIHandles,
     device: str,
     apply_edits_fn: Callable[[GSData | GSTensor], GSTensor],
-    config: "GSPlayConfig" = None,
+    config: GSPlayConfig = None,
     event_bus: EventBus | None = None,
 ) -> Callable:
     """
@@ -65,9 +67,7 @@ def create_render_function(
     _cuda_stream = torch.cuda.Stream() if device.startswith("cuda") else None
 
     @torch.no_grad()
-    def render_fn(
-        camera_state: RenderCamera, render_tab_state: RenderTabState
-    ) -> np.ndarray:
+    def render_fn(camera_state: RenderCamera, render_tab_state: RenderTabState) -> np.ndarray:
         """
         Main render callback function.
 
@@ -103,7 +103,7 @@ def create_render_function(
 
         # Apply resolution limit (only scale if difference is significant)
         # Avoid upscaling overhead when window size is close to target quality
-        if W > max_res or H > max_res:
+        if max_res < W or max_res < H:
             scale_factor = min(max_res / W, max_res / H)
             W_scaled, H_scaled = int(W * scale_factor), int(H * scale_factor)
         elif abs(W - max_res) / max(W, 1) > 0.15 or abs(H - max_res) / max(H, 1) > 0.15:
@@ -121,26 +121,18 @@ def create_render_function(
             slider_max = ui.time_slider.max
             # Use float division to preserve precision for continuous sources
             normalized_time = slider_value / max(1.0, slider_max) if slider_max > 0 else 0.0
-            frame_index = int(slider_value)  # For display purposes only
-            total_frames = int(slider_max) + 1
+            int(slider_value)  # For display purposes only
+            int(slider_max) + 1
         else:
-            frame_index = 0
-            total_frames = 1
             normalized_time = 0.0
 
         # Get gaussians from model
         _checkpoint_load = time.perf_counter()
 
         # Apply volume filter processing mode if configured
-        if (
-            config
-            and hasattr(config, "volume_filter")
-            and hasattr(model, "processing_mode")
-        ):
+        if config and hasattr(config, "volume_filter") and hasattr(model, "processing_mode"):
             try:
-                edit_mode = ProcessingMode.from_string(
-                    config.volume_filter.processing_mode
-                )
+                edit_mode = ProcessingMode.from_string(config.volume_filter.processing_mode)
                 model.processing_mode = edit_mode.loader_mode
             except ValueError:
                 logger.warning(
@@ -208,9 +200,7 @@ def create_render_function(
             camera_params = np.concatenate(
                 [
                     camera_state.c2w.flatten(),  # 16 values (4x4 matrix)
-                    camera_state.get_K(
-                        (W_scaled, H_scaled)
-                    ).flatten(),  # 9 values (3x3 matrix)
+                    camera_state.get_K((W_scaled, H_scaled)).flatten(),  # 9 values (3x3 matrix)
                 ],
                 axis=0,
             )
@@ -226,9 +216,7 @@ def create_render_function(
                 # Sync to ensure camera params are on GPU before use
                 _cuda_stream.synchronize()
             else:
-                camera_params_gpu = (
-                    torch.from_numpy(camera_params).float().to(device)
-                )
+                camera_params_gpu = torch.from_numpy(camera_params).float().to(device)
 
             # Unpack on GPU (creates views, no data copy)
             c2w = camera_params_gpu[:16].reshape(4, 4).contiguous()
@@ -281,7 +269,11 @@ def create_render_function(
                     render_colors, render_alphas, _ = _rasterization(**render_kwargs)
 
                     # Normalize output layout to channels-last
-                    if render_colors.dim() == 4 and render_colors.shape[-1] not in (3, 4) and render_colors.shape[1] in (3, 4):
+                    if (
+                        render_colors.dim() == 4
+                        and render_colors.shape[-1] not in (3, 4)
+                        and render_colors.shape[1] in (3, 4)
+                    ):
                         render_colors = render_colors.permute(0, 2, 3, 1).contiguous()
                         if render_alphas.dim() == 4:
                             render_alphas = render_alphas.permute(0, 2, 3, 1).contiguous()
@@ -352,7 +344,11 @@ def create_render_function(
                 render_colors, render_alphas, _ = _rasterization(**render_kwargs)
 
                 # Format normalization
-                if render_colors.dim() == 4 and render_colors.shape[-1] not in (3, 4) and render_colors.shape[1] in (3, 4):
+                if (
+                    render_colors.dim() == 4
+                    and render_colors.shape[-1] not in (3, 4)
+                    and render_colors.shape[1] in (3, 4)
+                ):
                     render_colors = render_colors.permute(0, 2, 3, 1).contiguous()
                     if render_alphas.dim() == 4:
                         render_alphas = render_alphas.permute(0, 2, 3, 1).contiguous()
@@ -413,9 +409,7 @@ def create_render_function(
             # Performance logging
             _t_render = (time.perf_counter() - _checkpoint_render) * 1000  # ms
             _t_total = (time.perf_counter() - _frame_start) * 1000  # ms
-            _t_other = (
-                _t_total - _t_load - _t_edits - _t_render
-            )  # Missing time (UI updates, etc.)
+            _t_other = _t_total - _t_load - _t_edits - _t_render  # Missing time (UI updates, etc.)
 
             if not hasattr(model, "_perf_frame_count"):
                 model._perf_frame_count = 0
@@ -423,9 +417,7 @@ def create_render_function(
 
             if model._perf_frame_count % 90 == 0:
                 _fps = 1000.0 / _t_total if _t_total > 0 else 0
-                _n_gaussians = (
-                    render_gaussians.means.shape[0] if render_gaussians else 0
-                )
+                _n_gaussians = render_gaussians.means.shape[0] if render_gaussians else 0
                 perf_msg = (
                     f"[PERF] Frame {model._perf_frame_count}: "
                     f"Total={_t_total:.1f}ms, "
@@ -543,8 +535,7 @@ def create_render_function(
                     )
                 except Exception as cleanup_error:
                     logger.error(
-                        f"Failed to cleanup CUDA state after error: {cleanup_error}",
-                        exc_info=False
+                        f"Failed to cleanup CUDA state after error: {cleanup_error}", exc_info=False
                     )
 
             logger.error(f"Render failed: {e}", exc_info=True)

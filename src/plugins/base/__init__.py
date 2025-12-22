@@ -34,4 +34,5 @@ Example
 from src.plugins.base.data_source_base import BaseDataSource
 from src.plugins.base.decorators import source_metadata
 
+
 __all__ = ["BaseDataSource", "source_metadata"]

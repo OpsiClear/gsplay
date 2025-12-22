@@ -7,14 +7,15 @@ running the full viewer.
 from __future__ import annotations
 
 import logging
-from typing import Type, Any
+from typing import Any
 
+from src.domain.data import GaussianData
 from src.domain.interfaces import (
     BaseGaussianSource,
-    PluginState,
     HealthStatus,
+    PluginState,
 )
-from src.domain.data import GaussianData
+
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class PluginTestHarness:
     >>> assert all(r["passed"] for r in results.values())
     """
 
-    def __init__(self, plugin_class: Type[BaseGaussianSource]) -> None:
+    def __init__(self, plugin_class: type[BaseGaussianSource]) -> None:
         """Initialize test harness.
 
         Parameters
@@ -237,9 +238,9 @@ class PluginTestHarness:
 
     def print_results(self) -> None:
         """Print test results to console."""
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Plugin Test Results: {self.plugin_class.__name__}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         for test_name, result in self.results.items():
             status = "PASS" if result.get("passed") else "FAIL"
@@ -249,7 +250,7 @@ class PluginTestHarness:
         total = len(self.results)
         passed = sum(1 for r in self.results.values() if r.get("passed"))
         print(f"\n  Total: {passed}/{total} tests passed")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
 
 __all__ = ["PluginTestHarness"]

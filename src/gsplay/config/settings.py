@@ -8,23 +8,24 @@ Supports local filesystem and cloud storage paths.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 
 import numpy as np
-from gsmod import ColorValues, TransformValues, FilterValues
+from gsmod import ColorValues, FilterValues, TransformValues
 from gsmod.transform.api import euler_to_quaternion
 
 from src.domain.filters import VolumeFilter  # Re-exported from domain
-from src.infrastructure.io.path_io import UniversalPath
 
 # Re-export UIHandles from its new home for backward compatibility
 from src.gsplay.config.ui_handles import UIHandles
+from src.infrastructure.io.path_io import UniversalPath
+
 
 logger = logging.getLogger(__name__)
 
 
 # Re-export for backward compatibility
-__all__ = ["VolumeFilter", "GSPlayConfig", "ExportSettings", "AnimationSettings", "UIHandles"]
+__all__ = ["AnimationSettings", "ExportSettings", "GSPlayConfig", "UIHandles", "VolumeFilter"]
 
 
 @dataclass
@@ -62,9 +63,7 @@ class ExportSettings:
     """
 
     # Sequence export
-    export_path: UniversalPath = field(
-        default_factory=lambda: UniversalPath("./export_with_edits")
-    )
+    export_path: UniversalPath = field(default_factory=lambda: UniversalPath("./export_with_edits"))
     export_format: str = "compressed-ply"  # Export format: "compressed-ply", "ply"
     export_device: str = (
         "cpu"  # Export processing device: "cpu" or "cuda" (or "cuda:0", "cuda:1", etc.)
@@ -100,9 +99,7 @@ class ExportSettings:
         """Validate settings after initialization."""
         if self.export_scope == "time_range":
             if self.source_time_step is not None and self.source_time_step <= 0:
-                raise ValueError(
-                    f"source_time_step must be positive, got {self.source_time_step}"
-                )
+                raise ValueError(f"source_time_step must be positive, got {self.source_time_step}")
 
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary (convert UniversalPath to str)."""
@@ -117,9 +114,7 @@ class RenderSettings:
 
     # JPEG quality for frontend image streaming (1-100)
     jpeg_quality_static: int = 90  # Quality when camera is static/UI updates
-    jpeg_quality_move: int = (
-        60  # Quality during camera movement (lower for performance)
-    )
+    jpeg_quality_move: int = 60  # Quality during camera movement (lower for performance)
 
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary for easy serialization."""
@@ -162,9 +157,7 @@ class GSPlayConfig:
     model_config_path: UniversalPath | None = None
 
     # Output paths
-    output_dir: UniversalPath = field(
-        default_factory=lambda: UniversalPath("./nerfview_output")
-    )
+    output_dir: UniversalPath = field(default_factory=lambda: UniversalPath("./nerfview_output"))
 
     # Sub-configurations
     color_values: ColorValues = field(default_factory=ColorValues)
@@ -202,9 +195,7 @@ class GSPlayConfig:
             "host": self.host,
             "stream_port": self.stream_port,
             "device": self.device,
-            "model_config_path": (
-                str(self.model_config_path) if self.model_config_path else None
-            ),
+            "model_config_path": (str(self.model_config_path) if self.model_config_path else None),
             "output_dir": str(self.output_dir),
             "color_values": asdict(self.color_values),
             "transform_values": asdict(self.transform_values),
@@ -226,7 +217,7 @@ class GSPlayConfig:
     def from_dict(cls, data: dict[str, object]) -> GSPlayConfig:
         """Create GSPlayConfig from dictionary (supports cloud storage paths)."""
         # Convert string paths back to UniversalPath objects
-        if "model_config_path" in data and data["model_config_path"]:
+        if data.get("model_config_path"):
             data["model_config_path"] = UniversalPath(data["model_config_path"])
         if "output_dir" in data:
             data["output_dir"] = UniversalPath(data["output_dir"])

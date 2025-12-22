@@ -27,8 +27,10 @@ from typing import Literal
 import torch
 from torch import Tensor
 
+
 try:
     import matplotlib
+
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
@@ -51,9 +53,7 @@ class RenderTabState:
 Colormaps = Literal["turbo", "viridis", "magma", "inferno", "cividis", "gray"]
 
 
-def apply_float_colormap(
-    image: Tensor, colormap: Colormaps = "viridis"
-) -> Tensor:
+def apply_float_colormap(image: Tensor, colormap: Colormaps = "viridis") -> Tensor:
     """Copied from nerfstudio/utils/colormaps.py
     Convert single channel to a color image.
 

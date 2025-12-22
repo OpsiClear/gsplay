@@ -3,19 +3,20 @@
 from src.gsplay.config.settings import (
     AnimationSettings,
     ExportSettings,
+    GSPlayConfig,
     PlyLoadingConfig,
     RenderSettings,
     UIHandles,
-    GSPlayConfig,
     VolumeFilter,
 )
+
 
 __all__ = [
     "AnimationSettings",
     "ExportSettings",
+    "GSPlayConfig",
     "PlyLoadingConfig",
     "RenderSettings",
     "UIHandles",
-    "GSPlayConfig",
     "VolumeFilter",
 ]

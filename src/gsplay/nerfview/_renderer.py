@@ -38,7 +38,7 @@ import sys
 import threading
 import time
 import traceback
-from typing import TYPE_CHECKING, Literal, Tuple, get_args
+from typing import TYPE_CHECKING, Literal, get_args
 
 import numpy as np
 import viser
@@ -47,8 +47,9 @@ from viser._messages import BackgroundImageMessage
 
 from src.gsplay.rendering.jpeg_encoder import get_cached_jpeg
 
+
 if TYPE_CHECKING:
-    from .viewer import RenderCamera, GSPlay
+    from .viewer import GSPlay, RenderCamera
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,7 @@ def _encode_depth_png(depth: np.ndarray) -> bytes | None:
         # Try OpenCV first (faster, expects BGR)
         try:
             import cv2
+
             success, encoded = cv2.imencode(".png", intdepth)
             if success:
                 return encoded.tobytes()
@@ -95,6 +97,7 @@ def _encode_depth_png(depth: np.ndarray) -> bytes | None:
         # Fallback to imageio (handles multi-channel)
         try:
             import imageio.v3 as iio
+
             return iio.imwrite("<bytes>", intdepth, extension=".png")
         except ImportError:
             pass
@@ -115,7 +118,7 @@ class RenderTask:
     """Task submitted to the renderer."""
 
     action: RenderAction
-    camera_state: "RenderCamera" | None = None
+    camera_state: RenderCamera | None = None
 
 
 @dataclasses.dataclass
@@ -154,7 +157,7 @@ class InterruptRenderException(Exception):
     pass
 
 
-class set_trace_context(object):
+class set_trace_context:
     def __init__(self, func):
         self.func = func
 
@@ -171,7 +174,7 @@ class Renderer(threading.Thread):
 
     def __init__(
         self,
-        viewer: "GSPlay",
+        viewer: GSPlay,
         client: viser.ClientHandle,
         lock: threading.Lock,
     ):
@@ -191,7 +194,7 @@ class Renderer(threading.Thread):
         self._target_fps = 30
         self._may_interrupt_render = False
         self._old_version = False
-        
+
         # Cache for last complete frame (see CachedFrame docstring)
         self._cached_frame: CachedFrame | None = None
 
@@ -199,7 +202,7 @@ class Renderer(threading.Thread):
 
     def _define_transitions(self):
         transitions: dict[RenderState, dict[RenderAction, RenderState]] = {
-            s: {a: s for a in get_args(RenderAction)} for s in get_args(RenderState)
+            s: dict.fromkeys(get_args(RenderAction), s) for s in get_args(RenderState)
         }
         transitions["low_move"]["static"] = "low_static"
         transitions["low_static"]["static"] = "high"
@@ -222,8 +225,8 @@ class Renderer(threading.Thread):
         The JPEG was already encoded by render_fn via encode_and_cache().
         """
         try:
-            from src.gsplay.streaming import get_stream_server
             from src.gsplay.rendering.jpeg_encoder import get_cached_jpeg
+            from src.gsplay.streaming import get_stream_server
 
             stream_server = get_stream_server()
             if stream_server is None:
@@ -237,14 +240,11 @@ class Renderer(threading.Thread):
         except ImportError:
             pass  # Streaming or jpeg_encoder not available
 
-    def _get_img_wh(self, aspect: float) -> Tuple[int, int]:
+    def _get_img_wh(self, aspect: float) -> tuple[int, int]:
         max_img_res = self.viewer.render_tab_state.viewer_res
 
         # If auto-quality enabled AND camera is actively moving, use adaptive resolution
-        if (
-            getattr(self.viewer, "auto_quality_enabled", False)
-            and self._state == "low_move"
-        ):
+        if getattr(self.viewer, "auto_quality_enabled", False) and self._state == "low_move":
             num_view_rays_per_sec = self.viewer.render_tab_state.num_view_rays_per_sec
             target_fps = self._target_fps
             num_viewer_rays = num_view_rays_per_sec / target_fps
@@ -254,14 +254,14 @@ class Renderer(threading.Thread):
             min_res = max(120, int(max_img_res * 0.5))
             H = max(min(max_img_res, H), min_res)
             W = int(H * aspect)
-            if W > max_img_res:
+            if max_img_res < W:
                 W = max_img_res
                 H = int(W / aspect)
         else:
             # Fixed resolution (current behavior)
             H = max_img_res
             W = int(H * aspect)
-            if W > max_img_res:
+            if max_img_res < W:
                 W = max_img_res
                 H = int(W / aspect)
         return W, H
@@ -291,9 +291,7 @@ class Renderer(threading.Thread):
             while not self.is_prepared_fn():
                 time.sleep(0.1)
             if not self._render_event.wait(0.2):
-                self.submit(
-                    RenderTask("static", self.viewer.get_camera_state(self.client))
-                )
+                self.submit(RenderTask("static", self.viewer.get_camera_state(self.client)))
             self._render_event.clear()
             task = self._task
             assert task is not None
@@ -303,10 +301,7 @@ class Renderer(threading.Thread):
             self._state = self.transitions[self._state][task.action]
             assert task.camera_state is not None
             # Determine JPEG quality BEFORE render (so render_fn can use it for encoding)
-            if (
-                getattr(self.viewer, "auto_quality_enabled", False)
-                and task.action == "move"
-            ):
+            if getattr(self.viewer, "auto_quality_enabled", False) and task.action == "move":
                 jpeg_quality = self.viewer.jpeg_quality_move
             else:
                 jpeg_quality = self.viewer.jpeg_quality_static
@@ -409,7 +404,7 @@ class SharedRenderer(threading.Thread):
 
     def __init__(
         self,
-        viewer: "GSPlay",
+        viewer: GSPlay,
         lock: threading.Lock,
     ):
         super().__init__(daemon=True)
@@ -439,7 +434,7 @@ class SharedRenderer(threading.Thread):
 
     def _define_transitions(self):
         transitions: dict[RenderState, dict[RenderAction, RenderState]] = {
-            s: {a: s for a in get_args(RenderAction)} for s in get_args(RenderState)
+            s: dict.fromkeys(get_args(RenderAction), s) for s in get_args(RenderState)
         }
         transitions["low_move"]["static"] = "low_static"
         transitions["low_static"]["static"] = "high"
@@ -456,7 +451,7 @@ class SharedRenderer(threading.Thread):
                 raise InterruptRenderException
         return self._may_interrupt_trace
 
-    def _get_render_camera(self) -> "RenderCamera | None":
+    def _get_render_camera(self) -> RenderCamera | None:
         """Get camera for rendering - from viser or headless state.
 
         Priority:
@@ -469,7 +464,7 @@ class SharedRenderer(threading.Thread):
         # Fall back to headless camera for streaming without browser
         return self._get_headless_camera()
 
-    def _get_headless_camera(self) -> "RenderCamera | None":
+    def _get_headless_camera(self) -> RenderCamera | None:
         """Build RenderCamera from headless state when no clients connected.
 
         This enables continued rendering during rotation when viser window
@@ -482,6 +477,7 @@ class SharedRenderer(threading.Thread):
             return None
 
         import viser.transforms as vt
+
         from src.gsplay.nerfview.viewer import RenderCamera
 
         wxyz = camera_ctrl._headless_wxyz
@@ -520,7 +516,6 @@ class SharedRenderer(threading.Thread):
             logger.warning("[BROADCAST] No cached JPEG - frame not sent!")
             return
 
-
         # Encode depth if present
         depth_bytes = _encode_depth_png(depth)
 
@@ -535,19 +530,17 @@ class SharedRenderer(threading.Thread):
         # Also send to stream server
         try:
             from src.gsplay.streaming import get_stream_server
+
             stream_server = get_stream_server()
             if stream_server is not None:
                 stream_server.broadcast_jpeg(jpeg_bytes)
         except ImportError:
             pass
 
-    def _get_img_wh(self, aspect: float) -> Tuple[int, int]:
+    def _get_img_wh(self, aspect: float) -> tuple[int, int]:
         max_img_res = self.viewer.render_tab_state.viewer_res
 
-        if (
-            getattr(self.viewer, "auto_quality_enabled", False)
-            and self._state == "low_move"
-        ):
+        if getattr(self.viewer, "auto_quality_enabled", False) and self._state == "low_move":
             num_view_rays_per_sec = self.viewer.render_tab_state.num_view_rays_per_sec
             target_fps = self._target_fps
             num_viewer_rays = num_view_rays_per_sec / target_fps
@@ -556,13 +549,13 @@ class SharedRenderer(threading.Thread):
             min_res = max(120, int(max_img_res * 0.5))
             H = max(min(max_img_res, H), min_res)
             W = int(H * aspect)
-            if W > max_img_res:
+            if max_img_res < W:
                 W = max_img_res
                 H = int(W / aspect)
         else:
             H = max_img_res
             W = int(H * aspect)
-            if W > max_img_res:
+            if max_img_res < W:
                 W = max_img_res
                 H = int(W / aspect)
         return W, H
@@ -584,16 +577,12 @@ class SharedRenderer(threading.Thread):
         # 2. _broadcast_frame is skipped when using cached frame
         # 3. No frame is sent to clients → visible blink
         # Auto-rotation is smooth and predictable, so interrupts aren't needed.
-        should_interrupt = (
-            self._state == "high" and self._task.action in ["move", "rerender"]
-        )
+        should_interrupt = self._state == "high" and self._task.action in ["move", "rerender"]
         if should_interrupt:
             # Check if auto-rotation is active - if so, don't interrupt
             rotation_active = False
             if self.viewer.universal_viewer is not None:
-                camera_ctrl = getattr(
-                    self.viewer.universal_viewer, "camera_controller", None
-                )
+                camera_ctrl = getattr(self.viewer.universal_viewer, "camera_controller", None)
                 if camera_ctrl is not None:
                     rotation_active = getattr(camera_ctrl, "_rotation_active", False)
 
@@ -667,9 +656,7 @@ class SharedRenderer(threading.Thread):
         # This ensures identical memory layout and dtype
         c2w = np.concatenate(
             [
-                np.concatenate(
-                    [R, position[:, None]], 1
-                ),
+                np.concatenate([R, position[:, None]], 1),
                 [[0, 0, 0, 1]],
             ],
             0,
@@ -748,9 +735,8 @@ class SharedRenderer(threading.Thread):
 
             # Check if rotation is active
             camera_ctrl = self._get_camera_controller()
-            rotation_active = (
-                camera_ctrl is not None
-                and getattr(camera_ctrl, "_rotation_active", False)
+            rotation_active = camera_ctrl is not None and getattr(
+                camera_ctrl, "_rotation_active", False
             )
 
             if rotation_active:
@@ -814,10 +800,7 @@ class SharedRenderer(threading.Thread):
                 continue
 
             # Determine JPEG quality BEFORE render (so render_fn can use it for encoding)
-            if (
-                getattr(self.viewer, "auto_quality_enabled", False)
-                and task.action == "move"
-            ):
+            if getattr(self.viewer, "auto_quality_enabled", False) and task.action == "move":
                 jpeg_quality = self.viewer.jpeg_quality_move
             else:
                 jpeg_quality = self.viewer.jpeg_quality_static
@@ -841,9 +824,7 @@ class SharedRenderer(threading.Thread):
                             )
                         except TypeError:
                             self._old_version = True
-                            logger.warning(
-                                "API deprecated - please update render_fn signature"
-                            )
+                            logger.warning("API deprecated - please update render_fn signature")
                             rendered = self.viewer.render_fn(camera_state, img_wh)
                     else:
                         rendered = self.viewer.render_fn(camera_state, img_wh)
@@ -903,4 +884,3 @@ class SharedRenderer(threading.Thread):
                 target_frame_time = 0.05  # 20 FPS
                 if elapsed < target_frame_time:
                     time.sleep(target_frame_time - elapsed)
-

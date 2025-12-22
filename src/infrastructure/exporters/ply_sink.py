@@ -8,11 +8,13 @@ Gaussian data to PLY format.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from src.domain.data import GaussianData
-from src.domain.interfaces import DataSinkProtocol, DataSinkMetadata
+from src.domain.interfaces import DataSinkMetadata, DataSinkProtocol
+
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +65,7 @@ class PlySink(DataSinkProtocol):
 
         # Convert sh0 from RGB back to SH format if needed
         # PLY format expects SH coefficients, not RGB colors
-        if hasattr(gstensor, 'is_sh0_rgb') and gstensor.is_sh0_rgb:
+        if hasattr(gstensor, "is_sh0_rgb") and gstensor.is_sh0_rgb:
             gstensor = gstensor.to_sh(inplace=False)
 
         # Use gsply's native save method

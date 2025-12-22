@@ -9,10 +9,12 @@ import functools
 import logging
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, TypeVar, ParamSpec, Any
+from typing import Any, ParamSpec, TypeVar
 
 from src.shared.exceptions import PluginError
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +47,7 @@ class RetryConfig:
     max_delay: float = 10.0
     exponential_base: float = 2.0
     jitter: bool = True
-    retryable_exceptions: tuple[type[Exception], ...] = field(
-        default_factory=lambda: (Exception,)
-    )
+    retryable_exceptions: tuple[type[Exception], ...] = field(default_factory=lambda: (Exception,))
 
     def get_delay(self, attempt: int) -> float:
         """Calculate delay for given attempt number (0-indexed).
@@ -62,7 +62,7 @@ class RetryConfig:
         float
             Delay in seconds
         """
-        delay = self.base_delay * (self.exponential_base ** attempt)
+        delay = self.base_delay * (self.exponential_base**attempt)
         delay = min(delay, self.max_delay)
 
         if self.jitter:
@@ -206,4 +206,4 @@ def retry_async(
     return decorator
 
 
-__all__ = ["retry", "retry_async", "RetryConfig"]
+__all__ = ["RetryConfig", "retry", "retry_async"]

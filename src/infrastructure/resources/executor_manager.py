@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor, Future, TimeoutError as FuturesTimeoutError
-from typing import Callable, TypeVar, ParamSpec, Any
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
+from typing import Any, ParamSpec, TypeVar
 
-from src.shared.exceptions import PluginTimeoutError, PluginResourceError
+from src.shared.exceptions import PluginResourceError, PluginTimeoutError
+
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +249,7 @@ class ManagedExecutor:
                 "executor_created": self._executor is not None,
             }
 
-    def __enter__(self) -> "ManagedExecutor":
+    def __enter__(self) -> ManagedExecutor:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:

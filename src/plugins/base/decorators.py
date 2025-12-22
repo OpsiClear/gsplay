@@ -5,9 +5,10 @@ Provides convenient decorators for defining plugin metadata.
 
 from __future__ import annotations
 
-from typing import Type, TypeVar
+from typing import TypeVar
 
 from src.domain.interfaces import SourceMetadata
+
 
 T = TypeVar("T")
 
@@ -55,7 +56,7 @@ def source_metadata(
         Plugin version string
     """
 
-    def decorator(cls: Type[T]) -> Type[T]:
+    def decorator(cls: type[T]) -> type[T]:
         # Create the metadata object
         metadata = SourceMetadata(
             name=name,

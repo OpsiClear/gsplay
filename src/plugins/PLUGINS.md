@@ -47,6 +47,7 @@ sh0: np.ndarray | torch.Tensor       # [N, 3] DC color coefficients
 ```
 
 Optional fields:
+
 - `shN`: Higher-order SH coefficients `[N, K, 3]` where K depends on SH degree
 - `format_info`: Format tracking (scales encoding, opacity encoding, etc.)
 
@@ -150,6 +151,7 @@ The export system validates all data before export:
 ### Config Examples
 
 **Basic PLY (auto frame count, no timing):**
+
 ```yaml
 module: load-ply
 config:
@@ -157,6 +159,7 @@ config:
 ```
 
 **Video-derived PLY with source FPS:**
+
 ```yaml
 module: load-ply
 config:
@@ -168,6 +171,7 @@ config:
 ```
 
 **Subset of frames:**
+
 ```yaml
 module: load-ply
 config:
@@ -178,6 +182,7 @@ config:
 ```
 
 **Limited frame count:**
+
 ```yaml
 module: load-ply
 config:
@@ -198,11 +203,13 @@ When `source_fps` is set, the UI shows dual time format:
 ### Frame Range Validation
 
 If `frame_count`, `frame_start`, or `frame_end` exceed available files:
+
 1. A warning is logged
 2. Values are clamped to valid range
 3. Playback continues with available frames
 
 Example warning:
+
 ```
 WARNING: frame_end=200 exceeds available files (150), clamping to 150
 ```
@@ -297,6 +304,7 @@ class MyDiscreteSource(BaseGaussianSource):
 ### Data I/O Specification
 
 **Input**: Configuration dict with source-specific parameters
+
 ```python
 config = {
     "path": "/data/ply_sequence/",
@@ -306,6 +314,7 @@ config = {
 ```
 
 **Output**: `GaussianData` with ALL required fields
+
 ```python
 def get_frame_at_time(self, normalized_time: float) -> GaussianData:
     # Convert normalized time [0, 1] to frame index
@@ -698,6 +707,7 @@ class MyNeuralSource(ContinuousTimeSource):
 ### Data I/O Specification
 
 **Input**: Model checkpoint + config
+
 ```python
 config = {
     "checkpoint": "/path/to/model.pth",
@@ -890,6 +900,7 @@ class MySink(DataSinkProtocol):
 **Input**: `GaussianData` (validated by export system)
 
 The export system validates ALL data before passing to sinks:
+
 - Type must be `GaussianData`, `GSData`, `GSTensor`, or Pro variants
 - All required fields must be present and non-None
 
@@ -1184,6 +1195,7 @@ def export_sequence(self, frames, output_dir, **options):
 | DataSinkProtocol | `GaussianData` | Files | `export()` |
 
 All plugins MUST:
+
 1. Return/accept standard gsply types only
 2. Include all required Gaussian fields (means, scales, quats, opacities, sh0)
 3. Specify format encoding via FormatInfo

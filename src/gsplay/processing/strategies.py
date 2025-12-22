@@ -45,9 +45,7 @@ class ProcessingStrategy(Protocol):
 class _BaseStrategy:
     """Utility mixin shared by the concrete strategies."""
 
-    def _record_total(
-        self, monitor: PerfMonitor, timings: dict[str, float]
-    ) -> dict[str, float]:
+    def _record_total(self, monitor: PerfMonitor, timings: dict[str, float]) -> dict[str, float]:
         stage_timings, total_ms = monitor.stop()
         stage_timings.update(timings)
         stage_timings["total_ms"] = total_ms
@@ -71,9 +69,7 @@ class AllGpuStrategy(_BaseStrategy, ProcessingStrategy):
 
         # FILTER FIRST - reduces data before transform
         with monitor.track("filter_ms"):
-            filtered = context.volume_filter.filter_gpu(
-                tensor, context.config, scene_bounds
-            )
+            filtered = context.volume_filter.filter_gpu(tensor, context.config, scene_bounds)
             if filtered is not None:
                 tensor = filtered
 
@@ -120,14 +116,10 @@ class AllCpuStrategy(_BaseStrategy, ProcessingStrategy):
 
         # Transform on filtered data
         with monitor.track("transform_ms"):
-            data = context.scene_transformer.apply_cpu(
-                data, context.config.transform_values
-            )
+            data = context.scene_transformer.apply_cpu(data, context.config.transform_values)
 
         with monitor.track("color_ms"):
-            data = context.color_processor.apply_cpu(
-                data, context.config.color_values
-            )
+            data = context.color_processor.apply_cpu(data, context.config.color_values)
 
         with monitor.track("opacity_ms"):
             data = context.opacity_adjuster.apply_cpu(
@@ -265,9 +257,7 @@ class ColorGpuStrategy(_BaseStrategy, ProcessingStrategy):
 
         # Transform on CPU (filtered data)
         with monitor.track("transform_ms"):
-            data = context.scene_transformer.apply_cpu(
-                data, context.config.transform_values
-            )
+            data = context.scene_transformer.apply_cpu(data, context.config.transform_values)
 
         with monitor.track("transfer_ms"):
             # Transfer directly to target device

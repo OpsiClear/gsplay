@@ -177,7 +177,6 @@ class GSPlayInstance:
             str(self.port),
             "--host",
             self.host,
-
             "--log-level",
             self.log_level,
         ]
@@ -292,10 +291,7 @@ class LauncherState:
             Reconstructed state.
         """
         data = json.loads(json_str)
-        instances = {
-            k: GSPlayInstance.from_dict(v)
-            for k, v in data.get("instances", {}).items()
-        }
+        instances = {k: GSPlayInstance.from_dict(v) for k, v in data.get("instances", {}).items()}
         return cls(
             instances=instances,
             next_port_hint=data.get("next_port_hint", 6020),

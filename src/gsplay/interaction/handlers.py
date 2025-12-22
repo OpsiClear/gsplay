@@ -13,10 +13,11 @@ from typing import TYPE_CHECKING
 
 from src.gsplay.interaction.events import EventBus, EventType
 
+
 if TYPE_CHECKING:
-    from src.gsplay.nerfview import GSPlay
     from src.gsplay.config.settings import UIHandles
     from src.gsplay.interaction.playback import PlaybackController
+    from src.gsplay.nerfview import GSPlay
 
 logger = logging.getLogger(__name__)
 
@@ -103,9 +104,7 @@ class HandlerManager:
 
         logger.debug("Triggered immediate rerender request")
 
-    def _setup_slider_group(
-        self, sliders: list, group_name: str, immediate: bool = False
-    ) -> None:
+    def _setup_slider_group(self, sliders: list, group_name: str, immediate: bool = False) -> None:
         """
         Setup callbacks for a group of sliders with identical behavior.
 
@@ -159,9 +158,7 @@ class HandlerManager:
                         self.playback_controller.set_frame(int(ui.time_slider.value))
                 else:
                     # Fallback
-                    self.event_bus.emit(
-                        EventType.RERENDER_REQUESTED, source="time_slider"
-                    )
+                    self.event_bus.emit(EventType.RERENDER_REQUESTED, source="time_slider")
 
             logger.debug("Time slider callback registered")
 
@@ -227,12 +224,14 @@ class HandlerManager:
 
         # Use Pivot checkbox triggers rerender
         if ui.use_pivot_checkbox is not None:
+
             @ui.use_pivot_checkbox.on_update
             def _on_use_pivot_change(_):
                 self.event_bus.emit(EventType.RERENDER_REQUESTED)
 
         # Bake View button - bakes camera view into model transform
         if ui.copy_center_button is not None:
+
             @ui.copy_center_button.on_click
             def _on_bake_view(_):
                 self.event_bus.emit(EventType.BAKE_VIEW_REQUESTED)
@@ -253,7 +252,9 @@ class HandlerManager:
                     # set_fps returns False if FPS is locked
                     if not self.playback_controller.set_fps(ui.play_speed.value):
                         # Reset slider to current FPS (locked value)
-                        ui.play_speed.value = self.playback_controller.config.animation.play_speed_fps
+                        ui.play_speed.value = (
+                            self.playback_controller.config.animation.play_speed_fps
+                        )
                 else:
                     self.trigger_rerender()
 
@@ -274,9 +275,7 @@ class HandlerManager:
             def update_quality(_):
                 # Sync quality slider with nerfview's viewer_res
                 if self.viewer and hasattr(self.viewer, "render_tab_state"):
-                    self.viewer.render_tab_state.viewer_res = int(
-                        ui.render_quality.value
-                    )
+                    self.viewer.render_tab_state.viewer_res = int(ui.render_quality.value)
                 self.trigger_rerender()
 
             ui.render_quality.on_update(update_quality)
@@ -328,7 +327,7 @@ class HandlerManager:
                 # Update model's source_fps if available (via playback controller)
                 if self.playback_controller is not None:
                     model = self.playback_controller._model
-                    if model is not None and hasattr(model, 'source_fps'):
+                    if model is not None and hasattr(model, "source_fps"):
                         model.source_fps = fps_value
                         logger.info(f"Source FPS updated to {fps_value}")
 
@@ -336,7 +335,7 @@ class HandlerManager:
                         self.playback_controller.refresh_time_domain()
 
                         # Re-emit MODEL_CHANGED to update time display
-                        if hasattr(model, 'time_domain'):
+                        if hasattr(model, "time_domain"):
                             self.event_bus.emit(
                                 EventType.MODEL_CHANGED,
                                 time_domain=model.time_domain,
@@ -506,10 +505,13 @@ class HandlerManager:
 
         for button, event_type, event_data in button_mappings:
             if button is not None:
+
                 def make_callback(et, ed):
                     def callback(_):
                         self.event_bus.emit(et, **ed)
+
                     return callback
+
                 button.on_click(make_callback(event_type, event_data))
 
         # Load data button (special case - needs path from input)
@@ -548,12 +550,16 @@ class HandlerManager:
         @ui.export_scope_dropdown.on_update
         def _on_scope_change(_):
             scope = ui.export_scope_dropdown.value
-            show_time_range = (scope == "Custom Time Range")
+            show_time_range = scope == "Custom Time Range"
 
             # Toggle visibility of time range controls
-            for ctrl in [ui.export_start_time_slider, ui.export_end_time_slider,
-                         ui.export_time_step_slider, ui.export_frame_preview,
-                         ui.export_snap_to_keyframe]:
+            for ctrl in [
+                ui.export_start_time_slider,
+                ui.export_end_time_slider,
+                ui.export_time_step_slider,
+                ui.export_frame_preview,
+                ui.export_snap_to_keyframe,
+            ]:
                 if ctrl:
                     ctrl.visible = show_time_range
 
@@ -569,15 +575,20 @@ class HandlerManager:
             logger.debug(f"Export scope changed to: {scope}")
 
         # Update preview when time range controls change
-        for slider in [ui.export_start_time_slider, ui.export_end_time_slider,
-                       ui.export_time_step_slider]:
+        for slider in [
+            ui.export_start_time_slider,
+            ui.export_end_time_slider,
+            ui.export_time_step_slider,
+        ]:
             if slider:
+
                 @slider.on_update
                 def _on_time_range_change(_):
                     self._update_export_frame_preview(ui)
 
         # Update preview when snap checkbox changes
         if ui.export_snap_to_keyframe:
+
             @ui.export_snap_to_keyframe.on_update
             def _on_snap_change(_):
                 self._update_export_frame_preview(ui)
@@ -595,8 +606,9 @@ class HandlerManager:
         ui : UIHandles
             UI handles
         """
-        if not all([ui.export_start_time_slider, ui.export_end_time_slider,
-                    ui.export_time_step_slider]):
+        if not all(
+            [ui.export_start_time_slider, ui.export_end_time_slider, ui.export_time_step_slider]
+        ):
             return
 
         start = ui.export_start_time_slider.value
@@ -612,22 +624,24 @@ class HandlerManager:
 
         # Calculate sample count
         import numpy as np
+
         sample_times = np.arange(start, end + step * 0.5, step)
         raw_count = len(sample_times)
 
         # Check if snap is enabled and we have playback controller with time_domain
-        snap_enabled = (ui.export_snap_to_keyframe and
-                        ui.export_snap_to_keyframe.value)
+        snap_enabled = ui.export_snap_to_keyframe and ui.export_snap_to_keyframe.value
 
         if snap_enabled and self.playback_controller:
             time_domain = self.playback_controller.time_domain
-            if (time_domain and time_domain.keyframe_times is not None
-                    and len(time_domain.keyframe_times) > 0):
+            if (
+                time_domain
+                and time_domain.keyframe_times is not None
+                and len(time_domain.keyframe_times) > 0
+            ):
                 # Calculate actual count after snap + dedup
                 # Use same algorithm as export_source_time_range for consistency
                 keyframe_indices = [
-                    time_domain.source_time_to_nearest_keyframe(float(t))[0]
-                    for t in sample_times
+                    time_domain.source_time_to_nearest_keyframe(float(t))[0] for t in sample_times
                 ]
                 # Deduplicate consecutive (same algorithm as export)
                 unique_count = 0
@@ -638,7 +652,9 @@ class HandlerManager:
                         prev_idx = idx
 
                 if ui.export_frame_preview:
-                    ui.export_frame_preview.value = f"~{unique_count} keyframes (from {raw_count} samples)"
+                    ui.export_frame_preview.value = (
+                        f"~{unique_count} keyframes (from {raw_count} samples)"
+                    )
                 if ui.export_ply_button:
                     ui.export_ply_button.content = f"Export {unique_count} Keyframes"
                 return
@@ -649,9 +665,7 @@ class HandlerManager:
         if ui.export_ply_button:
             ui.export_ply_button.content = f"Export {raw_count} Frames"
 
-    def setup_all_callbacks(
-        self, ui: UIHandles, initial_scene_bounds: dict | None = None
-    ) -> None:
+    def setup_all_callbacks(self, ui: UIHandles, initial_scene_bounds: dict | None = None) -> None:
         """
         Setup all UI callbacks.
 

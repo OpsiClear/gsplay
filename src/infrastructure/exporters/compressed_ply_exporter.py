@@ -29,6 +29,7 @@ from src.domain.entities import GSTensor
 from src.domain.interfaces import ModelInterface
 from src.infrastructure.io.path_io import UniversalPath
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,10 +62,7 @@ class CompressedPlyExporter:
         return ".compressed.ply"
 
     def export_frame(
-        self,
-        gaussian_data: GSTensor,
-        output_path: str | Path | UniversalPath,
-        **options: Any
+        self, gaussian_data: GSTensor, output_path: str | Path | UniversalPath, **options: Any
     ) -> None:
         """
         Export single frame of Gaussian data to compressed PLY file.
@@ -100,15 +98,15 @@ class CompressedPlyExporter:
 
         # Convert sh0 from RGB back to SH format if needed
         # PLY format expects SH coefficients, not RGB colors
-        if hasattr(export_data, 'is_sh0_rgb') and export_data.is_sh0_rgb:
+        if hasattr(export_data, "is_sh0_rgb") and export_data.is_sh0_rgb:
             export_data = export_data.to_sh(inplace=False)
 
         # Use native gsply save() method with compressed=True
         # GSTensor.save() respects the device: GPU compression if on GPU, CPU if on CPU
         # For remote paths, save to temp file first then upload
         if output_path.is_remote:
-            import tempfile
             import os
+            import tempfile
 
             with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as tmp:
                 tmp_path = tmp.name
@@ -129,7 +127,7 @@ class CompressedPlyExporter:
         output_dir: str | Path | UniversalPath,
         apply_edits_fn: Any = None,
         progress_callback: Any = None,
-        **options: Any
+        **options: Any,
     ) -> int:
         """
         Export all frames from model to compressed PLY files.
@@ -180,7 +178,9 @@ class CompressedPlyExporter:
                 normalized_time = model.get_frame_time(frame_idx)
 
                 # Get Gaussian data
-                gaussian_data = model.get_gaussians_at_normalized_time(normalized_time=normalized_time)
+                gaussian_data = model.get_gaussians_at_normalized_time(
+                    normalized_time=normalized_time
+                )
 
                 if gaussian_data is None or len(gaussian_data) == 0:
                     tqdm.write(f"Frame {frame_idx}: No gaussian data, skipping")
@@ -214,5 +214,3 @@ class CompressedPlyExporter:
         logger.info(f"Compressed PLY export complete: {exported_count}/{total_frames} frames")
 
         return exported_count
-
-

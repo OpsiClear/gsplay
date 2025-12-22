@@ -10,13 +10,14 @@ Now integrates with DataSinkRegistry for unified sink discovery.
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
-from enum import Enum, auto
 from dataclasses import dataclass
+from enum import Enum, auto
+from typing import TYPE_CHECKING, Any
 
 from src.domain.interfaces import ExporterInterface
-from src.infrastructure.exporters.ply_exporter import PlyExporter
 from src.infrastructure.exporters.compressed_ply_exporter import CompressedPlyExporter
+from src.infrastructure.exporters.ply_exporter import PlyExporter
+
 
 if TYPE_CHECKING:
     from src.domain.interfaces import DataSinkProtocol
@@ -27,11 +28,13 @@ logger = logging.getLogger(__name__)
 def _ensure_registry_initialized() -> None:
     """Ensure the data sink registry is initialized with defaults."""
     from src.infrastructure.registry import register_defaults
+
     register_defaults()
 
 
 class ExportCapability(Enum):
     """Capabilities that exporters can support."""
+
     COMPRESSION = auto()
     STREAMING = auto()
     CLOUD_STORAGE = auto()
@@ -42,6 +45,7 @@ class ExportCapability(Enum):
 
 class ExportFormat(Enum):
     """Standard export formats."""
+
     PLY = "ply"
     COMPRESSED_PLY = "compressed-ply"
     # Future formats can be added here
@@ -57,6 +61,7 @@ class ExportScope(Enum):
     - ALL_KEYFRAMES: All keyframes from the source (existing behavior, default)
     - TIME_RANGE: Custom time range with specified step size
     """
+
     CURRENT_FRAME = auto()
     ALL_KEYFRAMES = auto()
     TIME_RANGE = auto()
@@ -65,6 +70,7 @@ class ExportScope(Enum):
 @dataclass
 class ExporterInfo:
     """Information about a registered exporter."""
+
     format: str
     exporter_class: type[ExporterInterface]
     capabilities: set[ExportCapability]
@@ -92,7 +98,7 @@ class ExporterFactory:
                 PlyExporter,
                 capabilities={ExportCapability.CLOUD_STORAGE, ExportCapability.SH_COEFFICIENTS},
                 description="Standard PLY format",
-                file_extension=".ply"
+                file_extension=".ply",
             )
             cls.register(
                 "compressed-ply",
@@ -100,10 +106,10 @@ class ExporterFactory:
                 capabilities={
                     ExportCapability.COMPRESSION,
                     ExportCapability.CLOUD_STORAGE,
-                    ExportCapability.SH_COEFFICIENTS
+                    ExportCapability.SH_COEFFICIENTS,
                 },
                 description="Compressed PLY format (16 bytes/splat)",
-                file_extension=".compressed.ply"
+                file_extension=".compressed.ply",
             )
 
     @classmethod
@@ -143,10 +149,7 @@ class ExporterFactory:
 
         if format_lower not in cls._exporters:
             available = ", ".join(cls._exporters.keys())
-            raise ValueError(
-                f"Unknown export format: '{format}'. "
-                f"Available formats: {available}"
-            )
+            raise ValueError(f"Unknown export format: '{format}'. Available formats: {available}")
 
         exporter_info = cls._exporters[format_lower]
         exporter_class = exporter_info.exporter_class
@@ -161,7 +164,7 @@ class ExporterFactory:
         exporter_class: type[ExporterInterface],
         capabilities: set[ExportCapability] | None = None,
         description: str = "",
-        file_extension: str = ""
+        file_extension: str = "",
     ) -> None:
         """
         Register custom exporter for a format.
@@ -197,7 +200,7 @@ class ExporterFactory:
             exporter_class=exporter_class,
             capabilities=capabilities or set(),
             description=description or f"{format_lower.upper()} exporter",
-            file_extension=file_extension or f".{format_lower}"
+            file_extension=file_extension or f".{format_lower}",
         )
 
         cls._exporters[format_lower] = exporter_info
@@ -260,11 +263,7 @@ class ExporterFactory:
         """
         cls._register_builtin_exporters()
 
-        return [
-            fmt
-            for fmt, info in cls._exporters.items()
-            if capability in info.capabilities
-        ]
+        return [fmt for fmt, info in cls._exporters.items() if capability in info.capabilities]
 
     @classmethod
     def get_exporter_info(cls, format: str | ExportFormat) -> ExporterInfo | None:
@@ -289,11 +288,7 @@ class ExporterFactory:
         return cls._exporters.get(format.lower())
 
     @classmethod
-    def has_capability(
-        cls,
-        format: str | ExportFormat,
-        capability: ExportCapability
-    ) -> bool:
+    def has_capability(cls, format: str | ExportFormat, capability: ExportCapability) -> bool:
         """
         Check if a format supports a specific capability.
 
@@ -359,13 +354,13 @@ class ExporterFactory:
         _ensure_registry_initialized()
 
         from src.infrastructure.registry import DataSinkRegistry
+
         sink_class = DataSinkRegistry.get(format_name)
 
         if sink_class is None:
             available = DataSinkRegistry.names()
             raise ValueError(
-                f"Unknown sink format: '{format_name}'. "
-                f"Available: {', '.join(available)}"
+                f"Unknown sink format: '{format_name}'. Available: {', '.join(available)}"
             )
 
         return sink_class()
@@ -382,6 +377,7 @@ class ExporterFactory:
         _ensure_registry_initialized()
 
         from src.infrastructure.registry import DataSinkRegistry
+
         return DataSinkRegistry.names()
 
     @classmethod
@@ -396,4 +392,5 @@ class ExporterFactory:
         _ensure_registry_initialized()
 
         from src.infrastructure.registry import DataSinkRegistry
+
         return DataSinkRegistry.list_all()

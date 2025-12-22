@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import logging
 from importlib.metadata import entry_points
-from typing import Type, Any
+from typing import Any
 
 from src.domain.interfaces import BaseGaussianSource, SourceMetadata
 from src.infrastructure.validation.config_validator import ConfigValidator
-from src.shared.exceptions import PluginInitError, ConfigValidationError
+from src.shared.exceptions import ConfigValidationError, PluginInitError
+
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +48,14 @@ class SourceRegistry:
     >>> source_class = SourceRegistry.find_for_path("/data/scene.ply")
     """
 
-    _sources: dict[str, Type[BaseGaussianSource]] = {}
+    _sources: dict[str, type[BaseGaussianSource]] = {}
     _entry_points_loaded: bool = False
 
     @classmethod
     def register(
         cls,
         name: str,
-        source_class: Type[BaseGaussianSource],
+        source_class: type[BaseGaussianSource],
         *,
         validate: bool = True,
     ) -> None:
@@ -106,7 +107,7 @@ class SourceRegistry:
             )
 
     @classmethod
-    def get(cls, name: str) -> Type[BaseGaussianSource] | None:
+    def get(cls, name: str) -> type[BaseGaussianSource] | None:
         """Get a registered source by name.
 
         Parameters
@@ -161,10 +162,7 @@ class SourceRegistry:
         source_class = cls.get(name)
         if source_class is None:
             available = cls.names()
-            raise ValueError(
-                f"Unknown source type: '{name}'. "
-                f"Available: {', '.join(available)}"
-            )
+            raise ValueError(f"Unknown source type: '{name}'. Available: {', '.join(available)}")
 
         # Validate config against schema if available
         try:
@@ -198,6 +196,7 @@ class SourceRegistry:
         if hasattr(source, "on_init") and hasattr(source, "state"):
             try:
                 from src.domain.interfaces import PluginState
+
                 if source.state == PluginState.CREATED:
                     source.on_init()
             except Exception as e:
@@ -210,7 +209,7 @@ class SourceRegistry:
         return source
 
     @classmethod
-    def find_for_path(cls, path: str) -> Type[BaseGaussianSource] | None:
+    def find_for_path(cls, path: str) -> type[BaseGaussianSource] | None:
         """Find a source that can load the given path.
 
         Checks each registered source's can_load() method.

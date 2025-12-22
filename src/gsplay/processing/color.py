@@ -7,6 +7,7 @@ brightness/saturation adjustments when available.
 from __future__ import annotations
 
 from gsmod import ColorValues
+
 from src.domain.entities import GSData, GSDataPro, GSTensor, GSTensorPro
 
 from .protocols import ColorProcessor

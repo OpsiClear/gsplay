@@ -18,16 +18,15 @@ import viser
 from src.gsplay.ui.panels.info_panel import create_info_panel
 from src.infrastructure.processing_mode import ProcessingMode
 
+
 if TYPE_CHECKING:
-    from src.gsplay.config.settings import UIHandles, GSPlayConfig
     from src.domain.time import TimeDomain
+    from src.gsplay.config.settings import GSPlayConfig, UIHandles
 
 logger = logging.getLogger(__name__)
 
 
-def create_transform_controls(
-    server: viser.ViserServer, config: GSPlayConfig
-) -> dict:
+def create_transform_controls(server: viser.ViserServer, config: GSPlayConfig) -> dict:
     """
     Create scene transform controls (translation, scale, rotation, pivot).
 
@@ -72,12 +71,15 @@ def create_transform_controls(
     REL_MIN, REL_MAX = 0.5, 2.0
     MAIN_MIN, MAIN_MAX = 0.1, 5.0
 
-    def decompose_scale(sx: float, sy: float, sz: float) -> tuple[float, tuple[float, float, float]]:
+    def decompose_scale(
+        sx: float, sy: float, sz: float
+    ) -> tuple[float, tuple[float, float, float]]:
         """Decompose (sx, sy, sz) into main_scale and (rel_x, rel_y, rel_z).
 
         Finds main_scale such that all relative values fit within [REL_MIN, REL_MAX].
         """
         import numpy as np
+
         scales = np.array([sx, sy, sz])
 
         # Check if uniform (using tolerance for floating point)
@@ -279,9 +281,7 @@ def create_transform_controls(
         controls["pivot_z"].visible = visible
 
     # === Action Buttons ===
-    controls["center_button"] = server.gui.add_button(
-        "Center", hint="Center scene at origin"
-    )
+    controls["center_button"] = server.gui.add_button("Center", hint="Center scene at origin")
     controls["reset_button"] = server.gui.add_button("Reset")
 
     logger.debug("Created transform controls with per-axis scale and pivot support")
@@ -501,9 +501,7 @@ def create_data_loader_controls(
     """
     data_path_input = server.gui.add_text(
         "Data Path",
-        initial_value=str(config.model_config_path)
-        if config.model_config_path
-        else "./",
+        initial_value=str(config.model_config_path) if config.model_config_path else "./",
         hint="Path to PLY sequence folder or JSON config",
     )
 
@@ -552,7 +550,7 @@ def create_data_loader_controls(
 def create_export_menu(
     server: viser.ViserServer,
     config: GSPlayConfig,
-    time_domain: "TimeDomain | None" = None,
+    time_domain: TimeDomain | None = None,
 ) -> dict:
     """
     Create export controls with optional continuous time support.
@@ -574,9 +572,6 @@ def create_export_menu(
         - export_scope_dropdown, export_start_time, export_end_time,
           export_time_step, export_frame_preview (for continuous sources)
     """
-    from typing import TYPE_CHECKING
-    if TYPE_CHECKING:
-        from src.domain.time import TimeDomain
 
     controls: dict = {}
 
@@ -585,7 +580,8 @@ def create_export_menu(
     )
 
     # Get available export formats from registry
-    from src.infrastructure.registry import register_defaults, DataSinkRegistry
+    from src.infrastructure.registry import DataSinkRegistry, register_defaults
+
     register_defaults()
 
     sink_metadata = DataSinkRegistry.list_all()
@@ -607,9 +603,7 @@ def create_export_menu(
     if torch.cuda.is_available():
         export_device_options.append("GPU")
 
-    initial_device = (
-        "GPU" if config.export_settings.export_device.startswith("cuda") else "CPU"
-    )
+    initial_device = "GPU" if config.export_settings.export_device.startswith("cuda") else "CPU"
     controls["export_device"] = server.gui.add_dropdown(
         "Device",
         options=export_device_options,
@@ -644,7 +638,9 @@ def create_export_menu(
             "Snapshot: export exactly what you see now\n"
             "Original: export all keyframes\n"
             "Custom: export resampled at custom intervals"
-        ) if is_continuous else "Export all frames",
+        )
+        if is_continuous
+        else "Export all frames",
     )
 
     # Time range controls (only for continuous sources, hidden by default)
@@ -694,7 +690,7 @@ def create_export_menu(
                 initial_value=False,
                 visible=False,  # Only visible when "Custom Time Range" selected
                 hint="Export keyframe data only, no interpolation.\n"
-                     "Samples mapping to the same keyframe will be deduplicated.",
+                "Samples mapping to the same keyframe will be deduplicated.",
             )
         else:
             controls["export_snap_to_keyframe"] = None
@@ -705,17 +701,13 @@ def create_export_menu(
         controls["export_frame_preview"] = None
         controls["export_snap_to_keyframe"] = None
 
-    controls["export_ply_button"] = server.gui.add_button(
-        "Export All Frames"
-    )
+    controls["export_ply_button"] = server.gui.add_button("Export All Frames")
 
     logger.debug("Created export menu (continuous time support: %s)", is_continuous)
     return controls
 
 
-def create_volume_filter_controls(
-    server: viser.ViserServer, config: GSPlayConfig
-) -> dict:
+def create_volume_filter_controls(server: viser.ViserServer, config: GSPlayConfig) -> dict:
     """
     Create volume filtering controls with full gsmod FilterValues support.
 
@@ -795,73 +787,129 @@ def create_volume_filter_controls(
     sphere_radius = fv.sphere_radius if fv and fv.sphere_radius != float("inf") else 10.0
 
     controls["sphere_center_x"] = server.gui.add_slider(
-        "Center X", min=-20.0, max=20.0, step=0.1,
-        initial_value=sphere_center[0], visible=False,
+        "Center X",
+        min=-20.0,
+        max=20.0,
+        step=0.1,
+        initial_value=sphere_center[0],
+        visible=False,
     )
     controls["sphere_center_y"] = server.gui.add_slider(
-        "Center Y", min=-20.0, max=20.0, step=0.1,
-        initial_value=sphere_center[1], visible=False,
+        "Center Y",
+        min=-20.0,
+        max=20.0,
+        step=0.1,
+        initial_value=sphere_center[1],
+        visible=False,
     )
     controls["sphere_center_z"] = server.gui.add_slider(
-        "Center Z", min=-20.0, max=20.0, step=0.1,
-        initial_value=sphere_center[2], visible=False,
+        "Center Z",
+        min=-20.0,
+        max=20.0,
+        step=0.1,
+        initial_value=sphere_center[2],
+        visible=False,
     )
     controls["sphere_radius"] = server.gui.add_slider(
-        "Radius", min=0.01, max=50.0, step=0.1,
-        initial_value=sphere_radius, visible=False,
+        "Radius",
+        min=0.01,
+        max=50.0,
+        step=0.1,
+        initial_value=sphere_radius,
+        visible=False,
     )
 
     # === Box Filter (using center + size for intuitive behavior with rotation) ===
     # Compute center and size from min/max if available
     box_min = fv.box_min if fv and fv.box_min else (-5.0, -5.0, -5.0)
     box_max = fv.box_max if fv and fv.box_max else (5.0, 5.0, 5.0)
-    box_center = ((box_min[0] + box_max[0]) / 2, (box_min[1] + box_max[1]) / 2, (box_min[2] + box_max[2]) / 2)
+    box_center = (
+        (box_min[0] + box_max[0]) / 2,
+        (box_min[1] + box_max[1]) / 2,
+        (box_min[2] + box_max[2]) / 2,
+    )
     box_size = (box_max[0] - box_min[0], box_max[1] - box_min[1], box_max[2] - box_min[2])
 
     controls["box_center_x"] = server.gui.add_slider(
-        "Center X", min=-20.0, max=20.0, step=0.1,
-        initial_value=box_center[0], visible=False,
+        "Center X",
+        min=-20.0,
+        max=20.0,
+        step=0.1,
+        initial_value=box_center[0],
+        visible=False,
         hint="Box center X (rotation pivot)",
     )
     controls["box_center_y"] = server.gui.add_slider(
-        "Center Y", min=-20.0, max=20.0, step=0.1,
-        initial_value=box_center[1], visible=False,
+        "Center Y",
+        min=-20.0,
+        max=20.0,
+        step=0.1,
+        initial_value=box_center[1],
+        visible=False,
         hint="Box center Y (rotation pivot)",
     )
     controls["box_center_z"] = server.gui.add_slider(
-        "Center Z", min=-20.0, max=20.0, step=0.1,
-        initial_value=box_center[2], visible=False,
+        "Center Z",
+        min=-20.0,
+        max=20.0,
+        step=0.1,
+        initial_value=box_center[2],
+        visible=False,
         hint="Box center Z (rotation pivot)",
     )
     controls["box_size_x"] = server.gui.add_slider(
-        "Size X", min=0.1, max=50.0, step=0.1,
-        initial_value=box_size[0], visible=False,
+        "Size X",
+        min=0.1,
+        max=50.0,
+        step=0.1,
+        initial_value=box_size[0],
+        visible=False,
         hint="Box extent along local X axis",
     )
     controls["box_size_y"] = server.gui.add_slider(
-        "Size Y", min=0.1, max=50.0, step=0.1,
-        initial_value=box_size[1], visible=False,
+        "Size Y",
+        min=0.1,
+        max=50.0,
+        step=0.1,
+        initial_value=box_size[1],
+        visible=False,
         hint="Box extent along local Y axis",
     )
     controls["box_size_z"] = server.gui.add_slider(
-        "Size Z", min=0.1, max=50.0, step=0.1,
-        initial_value=box_size[2], visible=False,
+        "Size Z",
+        min=0.1,
+        max=50.0,
+        step=0.1,
+        initial_value=box_size[2],
+        visible=False,
         hint="Box extent along local Z axis",
     )
 
     # Box rotation (degrees in UI, converted to radians internally)
     box_rot = fv.box_rot if fv and fv.box_rot else (0.0, 0.0, 0.0)
     controls["box_rot_x"] = server.gui.add_slider(
-        "Rot X", min=-180.0, max=180.0, step=1.0,
-        initial_value=math.degrees(box_rot[0]) if box_rot else 0.0, visible=False,
+        "Rot X",
+        min=-180.0,
+        max=180.0,
+        step=1.0,
+        initial_value=math.degrees(box_rot[0]) if box_rot else 0.0,
+        visible=False,
     )
     controls["box_rot_y"] = server.gui.add_slider(
-        "Rot Y", min=-180.0, max=180.0, step=1.0,
-        initial_value=math.degrees(box_rot[1]) if box_rot else 0.0, visible=False,
+        "Rot Y",
+        min=-180.0,
+        max=180.0,
+        step=1.0,
+        initial_value=math.degrees(box_rot[1]) if box_rot else 0.0,
+        visible=False,
     )
     controls["box_rot_z"] = server.gui.add_slider(
-        "Rot Z", min=-180.0, max=180.0, step=1.0,
-        initial_value=math.degrees(box_rot[2]) if box_rot else 0.0, visible=False,
+        "Rot Z",
+        min=-180.0,
+        max=180.0,
+        step=1.0,
+        initial_value=math.degrees(box_rot[2]) if box_rot else 0.0,
+        visible=False,
     )
 
     # === Ellipsoid Filter ===
@@ -869,96 +917,173 @@ def create_volume_filter_controls(
     ellipsoid_radii = fv.ellipsoid_radii if fv and fv.ellipsoid_radii else (5.0, 5.0, 5.0)
 
     controls["ellipsoid_center_x"] = server.gui.add_slider(
-        "Center X", min=-20.0, max=20.0, step=0.1,
-        initial_value=ellipsoid_center[0], visible=False,
+        "Center X",
+        min=-20.0,
+        max=20.0,
+        step=0.1,
+        initial_value=ellipsoid_center[0],
+        visible=False,
     )
     controls["ellipsoid_center_y"] = server.gui.add_slider(
-        "Center Y", min=-20.0, max=20.0, step=0.1,
-        initial_value=ellipsoid_center[1], visible=False,
+        "Center Y",
+        min=-20.0,
+        max=20.0,
+        step=0.1,
+        initial_value=ellipsoid_center[1],
+        visible=False,
     )
     controls["ellipsoid_center_z"] = server.gui.add_slider(
-        "Center Z", min=-20.0, max=20.0, step=0.1,
-        initial_value=ellipsoid_center[2], visible=False,
+        "Center Z",
+        min=-20.0,
+        max=20.0,
+        step=0.1,
+        initial_value=ellipsoid_center[2],
+        visible=False,
     )
     controls["ellipsoid_radius_x"] = server.gui.add_slider(
-        "Radius X", min=0.01, max=50.0, step=0.1,
-        initial_value=ellipsoid_radii[0], visible=False,
+        "Radius X",
+        min=0.01,
+        max=50.0,
+        step=0.1,
+        initial_value=ellipsoid_radii[0],
+        visible=False,
     )
     controls["ellipsoid_radius_y"] = server.gui.add_slider(
-        "Radius Y", min=0.01, max=50.0, step=0.1,
-        initial_value=ellipsoid_radii[1], visible=False,
+        "Radius Y",
+        min=0.01,
+        max=50.0,
+        step=0.1,
+        initial_value=ellipsoid_radii[1],
+        visible=False,
     )
     controls["ellipsoid_radius_z"] = server.gui.add_slider(
-        "Radius Z", min=0.01, max=50.0, step=0.1,
-        initial_value=ellipsoid_radii[2], visible=False,
+        "Radius Z",
+        min=0.01,
+        max=50.0,
+        step=0.1,
+        initial_value=ellipsoid_radii[2],
+        visible=False,
     )
     # Ellipsoid rotation (degrees in UI, converted to radians internally)
     ellipsoid_rot = fv.ellipsoid_rot if fv and fv.ellipsoid_rot else (0.0, 0.0, 0.0)
     controls["ellipsoid_rot_x"] = server.gui.add_slider(
-        "Rot X", min=-180.0, max=180.0, step=1.0,
-        initial_value=math.degrees(ellipsoid_rot[0]) if ellipsoid_rot else 0.0, visible=False,
+        "Rot X",
+        min=-180.0,
+        max=180.0,
+        step=1.0,
+        initial_value=math.degrees(ellipsoid_rot[0]) if ellipsoid_rot else 0.0,
+        visible=False,
     )
     controls["ellipsoid_rot_y"] = server.gui.add_slider(
-        "Rot Y", min=-180.0, max=180.0, step=1.0,
-        initial_value=math.degrees(ellipsoid_rot[1]) if ellipsoid_rot else 0.0, visible=False,
+        "Rot Y",
+        min=-180.0,
+        max=180.0,
+        step=1.0,
+        initial_value=math.degrees(ellipsoid_rot[1]) if ellipsoid_rot else 0.0,
+        visible=False,
     )
     controls["ellipsoid_rot_z"] = server.gui.add_slider(
-        "Rot Z", min=-180.0, max=180.0, step=1.0,
-        initial_value=math.degrees(ellipsoid_rot[2]) if ellipsoid_rot else 0.0, visible=False,
+        "Rot Z",
+        min=-180.0,
+        max=180.0,
+        step=1.0,
+        initial_value=math.degrees(ellipsoid_rot[2]) if ellipsoid_rot else 0.0,
+        visible=False,
     )
 
     # === Frustum Filter ===
     frustum_fov_deg = (fv.frustum_fov if fv else 1.047) * 180.0 / 3.14159
 
     controls["frustum_fov"] = server.gui.add_slider(
-        "FOV", min=10.0, max=120.0, step=1.0,
-        initial_value=frustum_fov_deg, visible=False,
+        "FOV",
+        min=10.0,
+        max=120.0,
+        step=1.0,
+        initial_value=frustum_fov_deg,
+        visible=False,
         hint="Field of view in degrees",
     )
     controls["frustum_aspect"] = server.gui.add_slider(
-        "Aspect", min=0.5, max=3.0, step=0.1,
-        initial_value=fv.frustum_aspect if fv else 1.0, visible=False,
+        "Aspect",
+        min=0.5,
+        max=3.0,
+        step=0.1,
+        initial_value=fv.frustum_aspect if fv else 1.0,
+        visible=False,
         hint="Width/height ratio",
     )
     controls["frustum_near"] = server.gui.add_slider(
-        "Near", min=0.01, max=10.0, step=0.01,
-        initial_value=fv.frustum_near if fv else 0.1, visible=False,
+        "Near",
+        min=0.01,
+        max=10.0,
+        step=0.01,
+        initial_value=fv.frustum_near if fv else 0.1,
+        visible=False,
     )
     controls["frustum_far"] = server.gui.add_slider(
-        "Far", min=1.0, max=500.0, step=1.0,
-        initial_value=fv.frustum_far if fv else 100.0, visible=False,
+        "Far",
+        min=1.0,
+        max=500.0,
+        step=1.0,
+        initial_value=fv.frustum_far if fv else 100.0,
+        visible=False,
     )
     # Frustum position (camera position)
     frustum_pos = fv.frustum_pos if fv and fv.frustum_pos else (0.0, 0.0, 0.0)
     controls["frustum_pos_x"] = server.gui.add_slider(
-        "Pos X", min=-50.0, max=50.0, step=0.1,
-        initial_value=frustum_pos[0] if frustum_pos else 0.0, visible=False,
+        "Pos X",
+        min=-50.0,
+        max=50.0,
+        step=0.1,
+        initial_value=frustum_pos[0] if frustum_pos else 0.0,
+        visible=False,
     )
     controls["frustum_pos_y"] = server.gui.add_slider(
-        "Pos Y", min=-50.0, max=50.0, step=0.1,
-        initial_value=frustum_pos[1] if frustum_pos else 0.0, visible=False,
+        "Pos Y",
+        min=-50.0,
+        max=50.0,
+        step=0.1,
+        initial_value=frustum_pos[1] if frustum_pos else 0.0,
+        visible=False,
     )
     controls["frustum_pos_z"] = server.gui.add_slider(
-        "Pos Z", min=-50.0, max=50.0, step=0.1,
-        initial_value=frustum_pos[2] if frustum_pos else 0.0, visible=False,
+        "Pos Z",
+        min=-50.0,
+        max=50.0,
+        step=0.1,
+        initial_value=frustum_pos[2] if frustum_pos else 0.0,
+        visible=False,
     )
     # Frustum rotation (camera rotation as Euler angles in degrees)
     frustum_rot = fv.frustum_rot if fv and fv.frustum_rot else (0.0, 0.0, 0.0)
     controls["frustum_rot_x"] = server.gui.add_slider(
-        "Rot X", min=-180.0, max=180.0, step=1.0,
-        initial_value=math.degrees(frustum_rot[0]) if frustum_rot else 0.0, visible=False,
+        "Rot X",
+        min=-180.0,
+        max=180.0,
+        step=1.0,
+        initial_value=math.degrees(frustum_rot[0]) if frustum_rot else 0.0,
+        visible=False,
     )
     controls["frustum_rot_y"] = server.gui.add_slider(
-        "Rot Y", min=-180.0, max=180.0, step=1.0,
-        initial_value=math.degrees(frustum_rot[1]) if frustum_rot else 0.0, visible=False,
+        "Rot Y",
+        min=-180.0,
+        max=180.0,
+        step=1.0,
+        initial_value=math.degrees(frustum_rot[1]) if frustum_rot else 0.0,
+        visible=False,
     )
     controls["frustum_rot_z"] = server.gui.add_slider(
-        "Rot Z", min=-180.0, max=180.0, step=1.0,
-        initial_value=math.degrees(frustum_rot[2]) if frustum_rot else 0.0, visible=False,
+        "Rot Z",
+        min=-180.0,
+        max=180.0,
+        step=1.0,
+        initial_value=math.degrees(frustum_rot[2]) if frustum_rot else 0.0,
+        visible=False,
     )
     # Button to copy current camera state
     controls["frustum_use_camera"] = server.gui.add_button(
-        "Use Current Camera", visible=False,
+        "Use Current Camera",
+        visible=False,
         hint="Copy current camera position and rotation to frustum filter",
     )
 
@@ -971,13 +1096,15 @@ def create_volume_filter_controls(
 
     # Button to compute scene center from Gaussian mean
     controls["use_scene_center"] = server.gui.add_button(
-        "Use Scene Center", visible=False,
+        "Use Scene Center",
+        visible=False,
         hint="Set filter center to mean of Gaussian positions",
     )
 
     # Button to align filter rotation to camera up direction
     controls["align_to_camera_up"] = server.gui.add_button(
-        "Align to Camera Up", visible=False,
+        "Align to Camera Up",
+        visible=False,
         hint="Rotate filter so Z-axis aligns with camera up direction",
     )
 
@@ -1045,9 +1172,7 @@ def create_volume_filter_controls(
     return controls
 
 
-def create_color_controls(
-    server: viser.ViserServer, config: GSPlayConfig
-) -> dict:
+def create_color_controls(server: viser.ViserServer, config: GSPlayConfig) -> dict:
     """
     Create basic color enhancement controls.
 
@@ -1135,9 +1260,7 @@ def create_color_controls(
     return controls
 
 
-def create_color_advanced_controls(
-    server: viser.ViserServer, config: GSPlayConfig
-) -> dict:
+def create_color_advanced_controls(server: viser.ViserServer, config: GSPlayConfig) -> dict:
     """
     Create advanced color enhancement controls.
 
@@ -1245,7 +1368,7 @@ def setup_ui_layout(
     config: GSPlayConfig,
     camera_controller=None,
     viewer_app=None,
-    time_domain: "TimeDomain | None" = None,
+    time_domain: TimeDomain | None = None,
 ) -> UIHandles:
     """
     Create complete UI layout for the viewer.
@@ -1304,8 +1427,8 @@ def setup_ui_layout(
     if camera_controller is not None:
         from src.gsplay.rendering.camera import (
             create_fps_control,
-            create_quality_controls,
             create_playback_controls,
+            create_quality_controls,
             create_view_controls,
         )
 
@@ -1363,15 +1486,9 @@ def setup_ui_layout(
                         viewer_app.config.color_values,
                         alpha_scaler=viewer_app.config.alpha_scaler,
                     )
-                    viewer_app.ui.set_transform_values(
-                        viewer_app.config.transform_values
-                    )
-                    viewer_app.ui.set_volume_filter(
-                        viewer_app.config.volume_filter
-                    )
-                    viewer_app.ui.set_filter_values(
-                        viewer_app.config.filter_values
-                    )
+                    viewer_app.ui.set_transform_values(viewer_app.config.transform_values)
+                    viewer_app.ui.set_volume_filter(viewer_app.config.volume_filter)
+                    viewer_app.ui.set_filter_values(viewer_app.config.filter_values)
                     # Lock/unlock filter gizmo based on transform state
                     if viewer_app.filter_visualizer:
                         if viewer_app.ui.is_transform_active():
@@ -1423,7 +1540,13 @@ def setup_ui_layout(
             if camera_controller is not None:
                 with main_tabs.add_tab("View", icon=None):
                     view_controls = create_view_controls(server, camera_controller)
-                    zoom_slider, azimuth_slider, elevation_slider, roll_slider, setup_camera_sync = view_controls
+                    (
+                        zoom_slider,
+                        azimuth_slider,
+                        elevation_slider,
+                        roll_slider,
+                        setup_camera_sync,
+                    ) = view_controls
 
                 # Set up camera sync after all controls are created
                 if setup_camera_sync:
@@ -1433,8 +1556,8 @@ def setup_ui_layout(
             with main_tabs.add_tab("Config", icon=None):
                 # Quality controls (Quality, JPEG, Auto Quality)
                 if camera_controller is not None:
-                    render_quality, jpeg_quality_slider, auto_quality_checkbox = create_quality_controls(
-                        server, config
+                    render_quality, jpeg_quality_slider, auto_quality_checkbox = (
+                        create_quality_controls(server, config)
                     )
 
                 # Config menu (processing mode, grid, axis, save/load)
@@ -1511,7 +1634,9 @@ def setup_ui_layout(
         if camera_controller is not None:
             with main_tabs.add_tab("View", icon=None):
                 view_controls = create_view_controls(server, camera_controller)
-                zoom_slider, azimuth_slider, elevation_slider, roll_slider, setup_camera_sync = view_controls
+                zoom_slider, azimuth_slider, elevation_slider, roll_slider, setup_camera_sync = (
+                    view_controls
+                )
 
             # Set up camera sync after all controls are created
             if setup_camera_sync:
@@ -1521,8 +1646,8 @@ def setup_ui_layout(
         with main_tabs.add_tab("Config", icon=None):
             # Quality controls (Quality, JPEG, Auto Quality)
             if camera_controller is not None:
-                render_quality, jpeg_quality_slider, auto_quality_checkbox = create_quality_controls(
-                    server, config
+                render_quality, jpeg_quality_slider, auto_quality_checkbox = (
+                    create_quality_controls(server, config)
                 )
 
             # Config menu (processing mode, grid, axis, save/load)
@@ -1530,8 +1655,8 @@ def setup_ui_layout(
                 processing_mode_dropdown,
                 cfg_path_input,
                 cfg_buttons,
-                grid_buttons,
-                world_axis_buttons,
+                _grid_buttons,
+                _world_axis_buttons,
                 reference_sphere_slider,
             ) = create_config_menu(server, config, camera_controller, viewer_app=viewer_app)
             # Only expose config save controls if not view-only
@@ -1732,4 +1857,3 @@ def setup_ui_layout(
 
     logger.debug("UI layout created successfully")
     return ui
-

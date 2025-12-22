@@ -32,4 +32,3 @@ def discover_and_sort_ply_files(ply_folder: str | Path | UniversalPath) -> list[
         raise FileNotFoundError(f"No .ply files found in: {ply_folder_path}")
 
     return sorted(ply_files, key=lambda p: natural_sort_key(p.name))
-

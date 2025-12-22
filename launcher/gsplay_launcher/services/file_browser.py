@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,9 @@ class FileBrowserService:
         try:
             ply_files = list(directory.glob("*.ply"))
             # Count immediate subdirectories
-            subfolder_count = sum(1 for item in directory.iterdir() if item.is_dir() and not item.name.startswith("."))
+            subfolder_count = sum(
+                1 for item in directory.iterdir() if item.is_dir() and not item.name.startswith(".")
+            )
 
             if not ply_files:
                 return False, 0, 0.0, subfolder_count
@@ -169,7 +172,7 @@ class FileBrowserService:
         """Get ISO formatted modified time."""
         try:
             mtime = path.stat().st_mtime
-            dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
+            dt = datetime.fromtimestamp(mtime, tz=UTC)
             return dt.isoformat()
         except Exception:
             return None

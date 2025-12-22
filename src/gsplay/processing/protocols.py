@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from gsmod import ColorValues, TransformValues
+
 from src.domain.entities import GSData, GSTensor
 
 

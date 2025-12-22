@@ -6,6 +6,7 @@ This is the CLI entry point that uses tyro for argument parsing.
 
 from __future__ import annotations
 
+
 # --- Monkeypatch for viser on Windows with uv/pip entry points ---
 try:
     import viser._tunnel
@@ -30,12 +31,14 @@ from pathlib import Path
 from typing import Annotated, Union
 
 import torch
+
 # Pre-import torchvision to avoid circular import issues when imported from threads
 import torchvision  # noqa: F401
 import tyro
 
-from src.gsplay.core.app import UniversalGSPlay
 from src.gsplay.config.settings import GSPlayConfig
+from src.gsplay.core.app import UniversalGSPlay
+
 
 logger = logging.getLogger(__name__)
 
@@ -135,11 +138,10 @@ def run_view(cmd: ViewCmd) -> None:
     # Convert GPU number to device string
     if cmd.gpu is not None:
         device = f"cuda:{cmd.gpu}"
+    elif torch.cuda.is_available():
+        device = "cuda:0"
     else:
-        if torch.cuda.is_available():
-            device = "cuda:0"
-        else:
-            device = "cpu"
+        device = "cpu"
 
     logger.info("=== GSPlay ===")
     logger.info(f"Config: {cmd.config}")
@@ -179,7 +181,7 @@ def run_view(cmd: ViewCmd) -> None:
     elif cmd.config.is_file() and cmd.config.suffix == ".json":
         # JSON config
         logger.info(f"Loading configuration from: {cmd.config}")
-        with open(cmd.config, "r") as f:
+        with open(cmd.config) as f:
             config_dict = json.load(f)
         viewer.load_model_from_config(config_dict, config_file=str(cmd.config))
 
@@ -244,7 +246,7 @@ def run_plugin_info(cmd: PluginInfoCmd) -> None:
     if hasattr(cls, "metadata"):
         try:
             meta = cls.metadata()
-            print(f"\nMetadata:")
+            print("\nMetadata:")
             print(f"  Display Name: {meta.name}")
             print(f"  Description: {meta.description}")
             print(f"  File Extensions: {meta.file_extensions}")
@@ -255,7 +257,7 @@ def run_plugin_info(cmd: PluginInfoCmd) -> None:
             print(f"\nMetadata error: {e}")
 
     # Show required methods
-    print(f"\nProtocol compliance:")
+    print("\nProtocol compliance:")
     for method in ["metadata", "can_load", "total_frames", "get_frame_at_time"]:
         has_method = hasattr(cls, method)
         status = "+" if has_method else "-"

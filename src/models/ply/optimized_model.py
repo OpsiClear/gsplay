@@ -17,41 +17,41 @@ Features:
 from __future__ import annotations
 
 import logging
-import time
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import torch
-import numpy as np
 import gsply
+import numpy as np
+import torch
 
+from src.domain.data import GaussianData
+from src.domain.entities import GSData, GSTensor
 from src.domain.interfaces import (
-    BaseGaussianSource,
-    SourceMetadata,
     DataLoaderInterface,
-    PluginState,
-    HealthStatus,
     HealthCheckResult,
+    HealthStatus,
+    PluginState,
+    SourceMetadata,
 )
 from src.domain.lifecycle import LifecycleMixin
-from src.domain.entities import GSData, GSTensor
-from src.domain.data import GaussianData
-from src.infrastructure.io.path_io import UniversalPath
 from src.infrastructure.io.discovery import discover_and_sort_ply_files
+from src.infrastructure.io.path_io import UniversalPath
 from src.infrastructure.processing.ply.format_loader import (
     FormatAwarePlyLoader,
     PlyFrameEncoding,
 )
 from src.infrastructure.resources.executor_manager import ManagedExecutor
-from src.shared.perf import PerfMonitor
 from src.shared.perf import (
     FrameLoadEvent,
     FrameLoadObserver,
     FrameProfilingBroadcaster,
     FrameThroughputObserver,
+    PerfMonitor,
 )
+
 
 logger = logging.getLogger(__name__)
 # --- End of Imports ---
@@ -103,6 +103,7 @@ class OptimizedPlyConfig:
 
 
 # --- Model Implementation ---
+
 
 class OptimizedPlyModel(LifecycleMixin):
     """
@@ -272,11 +273,15 @@ class OptimizedPlyModel(LifecycleMixin):
                 raise ValueError("Config must contain 'ply_folder'")
             ply_files = discover_and_sort_ply_files(ply_folder)
             device = config.get("device", device)
-            enable_concurrent_prefetch = config.get("enable_concurrent_prefetch", enable_concurrent_prefetch)
+            enable_concurrent_prefetch = config.get(
+                "enable_concurrent_prefetch", enable_concurrent_prefetch
+            )
             processing_mode = config.get("processing_mode", processing_mode)
             opacity_threshold = config.get("opacity_threshold", opacity_threshold)
             scale_threshold = config.get("scale_threshold", scale_threshold)
-            enable_quality_filtering = config.get("enable_quality_filtering", enable_quality_filtering)
+            enable_quality_filtering = config.get(
+                "enable_quality_filtering", enable_quality_filtering
+            )
             self.ply_folder = UniversalPath(ply_folder)
 
             # Parse time configuration
@@ -355,7 +360,9 @@ class OptimizedPlyModel(LifecycleMixin):
                 name="PlyPrefetch",
                 thread_name_prefix="ply_prefetch",
             )
-            logger.debug("[OptimizedPlyModel] Concurrent prefetching enabled (2 background threads)")
+            logger.debug(
+                "[OptimizedPlyModel] Concurrent prefetching enabled (2 background threads)"
+            )
 
         logger.debug(f"[OptimizedPlyModel] Initialized with {self._total_frames} PLY files.")
         logger.debug(
@@ -380,7 +387,6 @@ class OptimizedPlyModel(LifecycleMixin):
         """Total number of frames available."""
         return self._total_frames
 
-
     def get_total_frames(self) -> int:
         return self.total_frames
 
@@ -402,6 +408,7 @@ class OptimizedPlyModel(LifecycleMixin):
             Discrete frame-based time domain
         """
         from src.domain.time import TimeDomain
+
         return TimeDomain.discrete(
             self._total_frames,
             source_fps=self._source_fps,
@@ -450,7 +457,7 @@ class OptimizedPlyModel(LifecycleMixin):
             Frame data at the nearest frame
         """
         # Round to nearest frame index
-        frame_idx = int(round(source_time))
+        frame_idx = round(source_time)
         frame_idx = max(0, min(frame_idx, self._total_frames - 1))
 
         # Convert to normalized time and use existing implementation
@@ -478,7 +485,7 @@ class OptimizedPlyModel(LifecycleMixin):
         self._cached_frame_idx = None
         self._cached_frame_data = None
 
-    def _clone_frame_data(self, data: 'GSData | GSTensor') -> 'GSData | GSTensor':
+    def _clone_frame_data(self, data: GSData | GSTensor) -> GSData | GSTensor:
         """Clone frame data to prevent in-place modifications from corrupting cache.
 
         Parameters
@@ -491,10 +498,10 @@ class OptimizedPlyModel(LifecycleMixin):
         GSData | GSTensor
             Cloned frame data
         """
-        if hasattr(data, 'clone'):
+        if hasattr(data, "clone"):
             # GSTensor has clone() method
             return data.clone()
-        elif hasattr(data, 'copy'):
+        elif hasattr(data, "copy"):
             # GSData might have copy()
             return data.copy()
         else:
@@ -563,21 +570,18 @@ class OptimizedPlyModel(LifecycleMixin):
                 folder,
             )
 
-    def _process_frame_gpu(
-        self,
-        gstensor_cpu: 'GSTensor',
-        frame_idx: int
-    ) -> 'GSTensor':
+    def _process_frame_gpu(self, gstensor_cpu: GSTensor, frame_idx: int) -> GSTensor:
         """
         Process GPU frame using gsply v0.2.5 native methods.
-        
+
         PLY files are always in PLY format (log/logit), so we always denormalize.
         """
         import torch.nn.functional as F
+
         from src.infrastructure.processing.gaussian_constants import GaussianConstants as GC
-        
+
         monitor = PerfMonitor(label=f"gpu_frame_{frame_idx}")
-        
+
         # CPU -> GPU transfer
         with monitor.track("transfer_ms"):
             gstensor_gpu = gstensor_cpu.to(self.device)
@@ -585,17 +589,17 @@ class OptimizedPlyModel(LifecycleMixin):
         with monitor.track("activations_ms"):
             # PLY files are always in PLY format, so always denormalize to linear
             gstensor_gpu = gstensor_gpu.denormalize(inplace=True)
-            
+
             # Clamp scales and opacities to valid ranges (in-place)
             gstensor_gpu.scales = gstensor_gpu.scales.clamp(
                 min=GC.Numerical.MIN_SCALE,
                 max=GC.Numerical.MAX_SCALE,
             )
             gstensor_gpu.opacities = gstensor_gpu.opacities.squeeze().clamp(0.0, 1.0)
-            
+
             # Normalize quaternions (in-place)
             gstensor_gpu.quats = F.normalize(gstensor_gpu.quats, p=2, dim=-1)
-            
+
             # Calculate percentile for first frame
             if self._calculated_max_scale_percentile is None:
                 with monitor.track("percentile_ms"):
@@ -604,7 +608,9 @@ class OptimizedPlyModel(LifecycleMixin):
                     max_quantile_size = 16_000_000
                     if scales_flat.numel() > max_quantile_size:
                         # Random sampling for large tensors
-                        indices = torch.randperm(scales_flat.numel(), device=scales_flat.device)[:max_quantile_size]
+                        indices = torch.randperm(scales_flat.numel(), device=scales_flat.device)[
+                            :max_quantile_size
+                        ]
                         scales_sample = scales_flat[indices]
                         self._calculated_max_scale_percentile = torch.quantile(
                             scales_sample,
@@ -626,35 +632,36 @@ class OptimizedPlyModel(LifecycleMixin):
                 gstensor_gpu.sh0 = torch.clamp(gstensor_gpu.sh0, 0.0, 1.0)
             # else: Keep sh0 in SH format for gsplat SH evaluation
 
-        stage_timings, total_ms = monitor.stop()
+        stage_timings, _total_ms = monitor.stop()
         self._last_process_breakdown = stage_timings.copy()
         return gstensor_gpu
 
     def _process_frame_cpu_from_gsdata(
         self,
-        gsdata: 'GSData',
+        gsdata: GSData,
         frame_idx: int,
-    ) -> 'GSData':
+    ) -> GSData:
         """
         Process CPU frame using gsply v0.2.5 native methods.
-        
+
         PLY files are always in PLY format (log/logit), so we always denormalize.
-        
+
         Parameters
         ----------
         gsdata : GSData
             Input GSData in PLY format
         frame_idx : int
             Frame index for performance monitoring
-        
+
         Returns
         -------
         GSData
             Processed GSData in linear format with RGB colors
         """
         import numpy as np
+
         from src.infrastructure.processing.gaussian_constants import GaussianConstants as GC
-        
+
         monitor = PerfMonitor(label=f"cpu_frame_{frame_idx}")
 
         with monitor.track("activations_ms"):
@@ -678,9 +685,7 @@ class OptimizedPlyModel(LifecycleMixin):
 
             # Clamp scales after denormalization
             processed.scales = np.clip(
-                processed.scales,
-                GC.Numerical.MIN_SCALE,
-                GC.Numerical.MAX_SCALE
+                processed.scales, GC.Numerical.MIN_SCALE, GC.Numerical.MAX_SCALE
             )
 
             # Clamp opacities to valid range [0, 1] (matches GPU path)
@@ -706,7 +711,7 @@ class OptimizedPlyModel(LifecycleMixin):
             if processed.shN is None or processed.shN.size == 0:
                 # No higher-order SH - convert to RGB for direct color blending
                 processed = processed.to_rgb(inplace=True)
-                
+
                 # Validate after to_rgb
                 n_after_rgb = processed.means.shape[0]
                 if n_after_rgb == 0:
@@ -715,11 +720,11 @@ class OptimizedPlyModel(LifecycleMixin):
                         f"(had {n_after_denorm} gaussians before to_rgb)"
                     )
                     return processed
-                
+
                 processed.sh0 = np.clip(processed.sh0, 0.0, 1.0)
             # else: Keep sh0 in SH format for gsplat SH evaluation
 
-        stage_timings, total_ms = monitor.stop()
+        stage_timings, _total_ms = monitor.stop()
         self._last_process_breakdown = stage_timings.copy()
         return processed
 
@@ -727,7 +732,7 @@ class OptimizedPlyModel(LifecycleMixin):
     def get_gaussians_at_normalized_time(
         self,
         normalized_time: float,
-    ) -> 'GSData | GSTensor | None':
+    ) -> GSData | GSTensor | None:
         """
         Load and process Gaussian data at given time.
 
@@ -743,7 +748,7 @@ class OptimizedPlyModel(LifecycleMixin):
         Returns:
             Processed GSTensor (GSTensor) on GPU, ready for rendering
         """
-        frame_idx = int(round(normalized_time * (self.total_frames - 1)))
+        frame_idx = round(normalized_time * (self.total_frames - 1))
         frame_idx = max(0, min(frame_idx, self.total_frames - 1))
 
         # Fast path: return cloned cached frame if same frame is requested
@@ -772,7 +777,7 @@ class OptimizedPlyModel(LifecycleMixin):
 
         # Comprehensive diagnostic logging for frame loading
         logger.debug(
-            f"[Frame Load] time={normalized_time:.4f} -> idx={frame_idx}/{self.total_frames-1} -> file={filename} "
+            f"[Frame Load] time={normalized_time:.4f} -> idx={frame_idx}/{self.total_frames - 1} -> file={filename} "
             f"(mode={self.processing_mode}, format={encoding_label}, {sh_info})"
         )
 
@@ -780,14 +785,17 @@ class OptimizedPlyModel(LifecycleMixin):
         if frame_idx % 30 == 0:
             first_5 = [f.name for f in self.ply_files[:5]]
             last_5 = [f.name for f in self.ply_files[-5:]]
-            logger.debug(
-                f"[File Order Check] First 5: {first_5}, Last 5: {last_5}"
-            )
+            logger.debug(f"[File Order Check] First 5: {first_5}, Last 5: {last_5}")
 
         try:
             # Determine processing mode early
             current_mode = self.processing_mode
-            is_cpu_mode = current_mode in ("all_cpu", "color_transform_gpu", "transform_gpu", "color_gpu")
+            is_cpu_mode = current_mode in (
+                "all_cpu",
+                "color_transform_gpu",
+                "transform_gpu",
+                "color_gpu",
+            )
 
             prefetched_data = self._pop_cpu_prefetch(frame_idx) if is_cpu_mode else None
 
@@ -817,7 +825,9 @@ class OptimizedPlyModel(LifecycleMixin):
                 if gstensor_raw is None:
                     gsdata_source = gsdata_raw or load_ply_as_gsdata(ply_path)
                     if gsdata_source is None:
-                        logger.error(f"[OptimizedPlyModel] No data source for GPU processing frame {frame_idx}")
+                        logger.error(
+                            f"[OptimizedPlyModel] No data source for GPU processing frame {frame_idx}"
+                        )
                         return None
                     gstensor_raw = gsply.GSTensor.from_gsdata(gsdata_source, device="cuda")
                 processed_data = self._process_frame_gpu(gstensor_raw, frame_idx)
@@ -848,7 +858,9 @@ class OptimizedPlyModel(LifecycleMixin):
                 )
                 return None
 
-            process_ms = sum(self._last_process_breakdown.values()) if self._last_process_breakdown else 0.0
+            process_ms = (
+                sum(self._last_process_breakdown.values()) if self._last_process_breakdown else 0.0
+            )
             total_ms = (time.perf_counter() - load_start) * 1000
             io_ms = max(io_ms - process_ms, 0.0) if process_ms else io_ms
             logger.debug(
@@ -898,6 +910,7 @@ class OptimizedPlyModel(LifecycleMixin):
 
             logger.error(f"Error loading PLY file {ply_path}: {e}")
             import traceback
+
             traceback.print_exc()
             return None
 
@@ -915,7 +928,10 @@ class OptimizedPlyModel(LifecycleMixin):
                 continue
 
             with self._cpu_prefetch_lock:
-                if next_frame in self._cpu_prefetch_results or next_frame in self._cpu_prefetch_inflight:
+                if (
+                    next_frame in self._cpu_prefetch_results
+                    or next_frame in self._cpu_prefetch_inflight
+                ):
                     continue
                 self._cpu_prefetch_inflight.add(next_frame)
 
@@ -1075,7 +1091,9 @@ class OptimizedPlyModel(LifecycleMixin):
                 # GSData (NumPy)
                 return GaussianData.from_gsdata(result)
         else:
-            logger.error("Unexpected result type from get_gaussians_at_normalized_time: %s", type(result))
+            logger.error(
+                "Unexpected result type from get_gaussians_at_normalized_time: %s", type(result)
+            )
             return GaussianData(
                 means=np.zeros((0, 3), dtype=np.float32),
                 scales=np.zeros((0, 3), dtype=np.float32),
@@ -1084,11 +1102,11 @@ class OptimizedPlyModel(LifecycleMixin):
                 sh0=np.zeros((0, 3), dtype=np.float32),
             )
 
-    def _pop_cpu_prefetch(self, frame_idx: int) -> 'GSData | None':
+    def _pop_cpu_prefetch(self, frame_idx: int) -> GSData | None:
         with self._cpu_prefetch_lock:
             return self._cpu_prefetch_results.pop(frame_idx, None)
 
-    def _store_cpu_prefetch(self, frame_idx: int, processed_data: 'GSData') -> None:
+    def _store_cpu_prefetch(self, frame_idx: int, processed_data: GSData) -> None:
         with self._cpu_prefetch_lock:
             self._cpu_prefetch_results[frame_idx] = processed_data
             if len(self._cpu_prefetch_results) > 4:
@@ -1103,6 +1121,7 @@ class OptimizedPlyModel(LifecycleMixin):
             return self._throughput_observer.latest_fps
         return 0.0
 
+
 # --- DataLoader Implementation ---
 class OptimizedPlyDataLoader(DataLoaderInterface):
     """
@@ -1110,6 +1129,7 @@ class OptimizedPlyDataLoader(DataLoaderInterface):
     Loads the first frame's means for initialization.
     Supports local filesystem and cloud storage.
     """
+
     def __init__(self, ply_files: list[str | Path | UniversalPath]) -> None:
         # Convert all paths to UniversalPath for cloud storage support
         self.ply_files = [UniversalPath(f) for f in ply_files]
@@ -1117,7 +1137,6 @@ class OptimizedPlyDataLoader(DataLoaderInterface):
         if not self.ply_files:
             raise ValueError("No .ply files provided.")
         logger.debug(f"[OptimizedPlyDataLoader] Initialized with {len(self.ply_files)} PLY files.")
-
 
     def get_camera_data(self) -> dict[str, any] | None:
         return None
@@ -1131,17 +1150,25 @@ class OptimizedPlyDataLoader(DataLoaderInterface):
 
         try:
             first_ply_path = self.ply_files[0]
-            logger.info(f"[OptimizedPlyDataLoader] Loading initial points from: {first_ply_path.name}")
+            logger.info(
+                f"[OptimizedPlyDataLoader] Loading initial points from: {first_ply_path.name}"
+            )
             # Use load_ply_as_gsdata to get GSData (NumPy), then extract means
             from src.infrastructure.processing.ply.loader import load_ply_as_gsdata
+
             gsdata = load_ply_as_gsdata(first_ply_path)
             self.initial_points = gsdata.means  # Already NumPy
-            logger.info(f"[OptimizedPlyDataLoader] Successfully loaded {self.initial_points.shape[0]} initial points.")
+            logger.info(
+                f"[OptimizedPlyDataLoader] Successfully loaded {self.initial_points.shape[0]} initial points."
+            )
             return self.initial_points
         except Exception as e:
-            logger.warning(f"Error loading first PLY for initialization ({self.ply_files[0].name}): {e}")
-            self.initial_points = np.zeros((1, 3)) # Cache fallback
+            logger.warning(
+                f"Error loading first PLY for initialization ({self.ply_files[0].name}): {e}"
+            )
+            self.initial_points = np.zeros((1, 3))  # Cache fallback
             return self.initial_points
+
 
 # --- Factory Functions ---
 def create_optimized_ply_model_from_folder(
@@ -1173,7 +1200,10 @@ def create_optimized_ply_model_from_folder(
         enable_quality_filtering=enable_quality_filtering,
     )
 
-def create_optimized_ply_data_loader_from_folder(ply_folder: str | Path | UniversalPath) -> OptimizedPlyDataLoader:
+
+def create_optimized_ply_data_loader_from_folder(
+    ply_folder: str | Path | UniversalPath,
+) -> OptimizedPlyDataLoader:
     # Use SINGLE authoritative function for file discovery and sorting
     # discover_and_sort_ply_files now returns UniversalPath objects
     ply_files = discover_and_sort_ply_files(ply_folder)

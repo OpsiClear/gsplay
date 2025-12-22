@@ -3,11 +3,13 @@
 ## Changes Made - 2025-11-25
 
 ### Project Renaming
+
 Updated all references from "Universal 4D Viewer" to "gsplay" across the codebase:
 
 ### Files Updated
 
 #### Core Documentation
+
 1. **README.md** (root)
    - Updated project title to "gsplay"
    - Updated Python requirements: 3.12+ (was 3.10+)
@@ -23,6 +25,7 @@ Updated all references from "Universal 4D Viewer" to "gsplay" across the codebas
    - Updated GitHub issues URL to new repository
 
 ### Installation Scripts
+
 3. **install.ps1** (Windows)
    - Removed redundant PyTorch installation step (now handled by `uv sync`)
    - Updated step numbers from `[1/5]` to `[1/4]`
@@ -35,6 +38,7 @@ Updated all references from "Universal 4D Viewer" to "gsplay" across the codebas
    - Updated final run command to `uv run gsplay`
 
 ### Configuration
+
 5. **pyproject.toml**
    - Project name: `gsplay`
    - Python requirement: `>=3.12,<3.13`
@@ -47,6 +51,7 @@ Updated all references from "Universal 4D Viewer" to "gsplay" across the codebas
    - Added `data/` and `.claude/` to ignore list
 
 ### Git Configuration
+
 7. **Git Repository**
    - Reset upstream to `https://github.com/opsiclear/gsplay.git`
    - Cleared git history with fresh "Initial commit"
@@ -55,6 +60,7 @@ Updated all references from "Universal 4D Viewer" to "gsplay" across the codebas
 ## Key Technical Changes
 
 ### Installation Process
+
 - **Before**: Manual steps for PyTorch, gsplat, and dependencies
 - **After**: Streamlined with `install.ps1` / `install.sh` scripts
   1. `uv sync` installs all dependencies (including PyTorch 2.9.1+cu128)
@@ -62,11 +68,13 @@ Updated all references from "Universal 4D Viewer" to "gsplay" across the codebas
   3. JIT compilation and verification
 
 ### Dependency Management
+
 - **PyTorch**: Now sourced from `pytorch-cu128` index via `pyproject.toml`
 - **gsplat**: Removed from `pyproject.toml`, installed via scripts for JIT compilation
 - **gsmod**: Changed from local path to PyPI package
 
 ### CLI Usage
+
 - **Before**: `viewer --config <path>` or `uv run src/viewer/main.py`
 - **After**: `uv run gsplay --config <path>` or `uv run python -m gsplay.core.main`
 

@@ -17,17 +17,19 @@ from __future__ import annotations
 import dataclasses
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Literal, Tuple
+from typing import Literal
 
 import numpy as np
-from numpy.typing import NDArray
 import viser
 import viser.transforms as vt
+from numpy.typing import NDArray
 
-from ._renderer import SharedRenderer, RenderTask
+from ._renderer import RenderTask, SharedRenderer
 from .render_panel import RenderTabState
+
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ class RenderCamera:
     aspect: float
     c2w: NDArray[np.float32]
 
-    def get_K(self, img_wh: Tuple[int, int]) -> NDArray[np.float32]:
+    def get_K(self, img_wh: tuple[int, int]) -> NDArray[np.float32]:
         W, H = img_wh
         focal_length = H / 2.0 / np.tan(self.fov / 2.0)
         K = np.array(
@@ -72,7 +74,7 @@ def with_viewer_lock(fn: Callable) -> Callable:
     return wrapper
 
 
-class GSPlay(object):
+class GSPlay:
     """Main viewer class with synchronized multi-client support.
 
     All connected clients share the same view - when any client moves the
@@ -231,9 +233,7 @@ class GSPlay(object):
         camera = client.camera
         c2w = np.concatenate(
             [
-                np.concatenate(
-                    [vt.SO3(camera.wxyz).as_matrix(), camera.position[:, None]], 1
-                ),
+                np.concatenate([vt.SO3(camera.wxyz).as_matrix(), camera.position[:, None]], 1),
                 [[0, 0, 0, 1]],
             ],
             0,
@@ -260,10 +260,7 @@ class GSPlay(object):
         while time.perf_counter() - self._last_move_time < 0.1:
             time.sleep(0.05)
 
-        if (
-            self.state == "training"
-            and self._training_tab_handles["train_util_slider"].value != 1
-        ):
+        if self.state == "training" and self._training_tab_handles["train_util_slider"].value != 1:
             assert (
                 self.render_tab_state.num_train_rays_per_sec is not None
             ), "User must keep track of `num_train_rays_per_sec` to use `update`."
@@ -274,9 +271,7 @@ class GSPlay(object):
             train_n = num_train_rays_per_step
             train_time = train_n / train_s
             view_time = view_n / view_s
-            update_every = (
-                train_util * view_time / (train_time - train_util * train_time)
-            )
+            update_every = train_util * view_time / (train_time - train_util * train_time)
             if step > self._last_update_step + update_every:
                 self._last_update_step = step
                 camera_state = self._renderer._get_render_camera()

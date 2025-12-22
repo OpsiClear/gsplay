@@ -28,8 +28,9 @@ In 3D Gaussian Splatting, each Gaussian stores color as spherical harmonics coef
 | `shN` (f_rest) | `[N, K, 3]` | Higher-order coefficients (degrees 1-3) |
 
 Where `K` depends on SH degree:
+
 - Degree 1: K = 3 coefficients
-- Degree 2: K = 8 coefficients  
+- Degree 2: K = 8 coefficients
 - Degree 3: K = 15 coefficients
 
 ### How Color is Computed During Rendering
@@ -41,6 +42,7 @@ color(d) = C₀ · sh0 + Σ(Cₗ · shN[l] · Yₗₘ(d))
 ```
 
 Where:
+
 - `C₀ = 0.28209479177387814` is the DC normalization constant
 - `Cₗ` are band normalization constants
 - `Yₗₘ(d)` are spherical harmonic basis functions
@@ -53,6 +55,7 @@ Where:
 - **Band 3**: Cubic directional variation (7 coefficients)
 
 The DC term represents the integral of color over the sphere:
+
 ```
 sh0 = (1/4π) ∫ color(d) dΩ
 ```
@@ -68,7 +71,7 @@ sh0 = (1/4π) ∫ color(d) dΩ
 def adjust_saturation(self, factor, inplace=True):
     if not self.is_sh0_rgb:
         self.to_rgb(inplace=True)  # Converts sh0 only!
-    
+
     gray = compute_luminance(self.sh0)
     self.sh0 = gray + (self.sh0 - gray) * factor
     self.sh0.clamp_(0, 1)
@@ -100,9 +103,10 @@ print(f"After: shN unchanged = {(t.shN == original_shN).all()}")  # True - BUG!
 
 ## Mathematical Foundation
 
-### Key Revelation: Saturation is a Linear Operation!
+### Key Revelation: Saturation is a Linear Operation
 
 The saturation formula appears nonlinear:
+
 ```
 c' = L + s·(c - L)
 ```
@@ -110,6 +114,7 @@ c' = L + s·(c - L)
 Where `L = 0.299·R + 0.587·G + 0.114·B` is luminance.
 
 But expanding for each channel:
+
 ```
 R' = s·R + (1-s)·(0.299·R + 0.587·G + 0.114·B)
    = R·(s + (1-s)·0.299) + G·(1-s)·0.587 + B·(1-s)·0.114
@@ -128,11 +133,13 @@ Where `w = [0.299, 0.587, 0.114]` are luminance weights.
 ### Why Linear Operations Work on SH
 
 Because SH is a linear representation:
+
 ```
 color(d) = Σ coefficients · basis_functions(d)
 ```
 
 Any linear operation `f(x) = M·x + b` can be applied to the coefficients:
+
 ```
 f(color(d)) = M · color(d) + b
             = M · Σ(c_i · Y_i(d)) + b
@@ -140,6 +147,7 @@ f(color(d)) = M · color(d) + b
 ```
 
 For the offset `b`:
+
 - **DC term**: Add `b/C₀` to sh0
 - **Higher-order terms**: Add nothing (they represent variation, not absolute value)
 
@@ -157,6 +165,7 @@ Operations of the form `c' = k · c`
 | Exposure | `sh0 *= 2^ev` | `shN *= 2^ev` |
 
 **Implementation**:
+
 ```python
 def adjust_brightness(self, factor):
     self.sh0 *= factor
@@ -179,6 +188,7 @@ Operations of the form `c' = c + b`
 **Why shN is unchanged**: The offset only affects the average color, not the directional variation.
 
 **Implementation**:
+
 ```python
 def adjust_fade(self, amount):
     if self.is_sh0_rgb:
@@ -201,6 +211,7 @@ Operations of the form `c' = M · c`
 | Hue Shift | `sh0 = sh0 @ M.T` | `shN = shN @ M.T` |
 
 **Implementation**:
+
 ```python
 def adjust_saturation(self, factor):
     M = build_saturation_matrix(factor)
@@ -220,6 +231,7 @@ Operations of the form `c' = k · c + b`
 | Contrast | `sh0 = sh0 * k + offset` | `shN *= k` (no offset) |
 
 **Implementation**:
+
 ```python
 def adjust_contrast(self, factor):
     if self.is_sh0_rgb:
@@ -228,7 +240,7 @@ def adjust_contrast(self, factor):
     else:
         offset = 0.5 * (1 - factor) / SH_C0
         self.sh0 = self.sh0 * factor + offset
-    
+
     if self.shN is not None:
         self.shN *= factor  # Scale only, no offset
 ```
@@ -244,6 +256,7 @@ These cannot be exactly applied in SH space.
 | Shadows/Highlights | Approximate: per-Gaussian scale based on luminance |
 
 **Implementation Strategy**:
+
 ```python
 def adjust_gamma(self, gamma):
     if not self.has_high_order_sh:
@@ -254,12 +267,12 @@ def adjust_gamma(self, gamma):
         # Has shN: approximate by scaling
         sh0_rgb = sh_to_rgb(self.sh0)
         lum_before = compute_luminance(sh0_rgb)
-        
+
         sh0_rgb_gamma = sh0_rgb.clamp(1e-6, 1).pow(gamma)
         lum_after = compute_luminance(sh0_rgb_gamma)
-        
+
         scale = lum_after / (lum_before + 1e-8)
-        
+
         self.sh0 = rgb_to_sh(sh0_rgb_gamma)
         self.shN = self.shN * scale.unsqueeze(1)
 ```
@@ -301,9 +314,9 @@ def rgb_to_sh(rgb: Tensor) -> Tensor:
 def build_saturation_matrix(factor: float, device) -> Tensor:
     """
     Build 3x3 saturation matrix.
-    
+
     M = (1-s) * outer([1,1,1], [w_r, w_g, w_b]) + s * I
-    
+
     Example for s=1.3:
     [[1.2103, -0.1761, -0.0342],
      [-0.0897, 1.1239, -0.0342],
@@ -322,7 +335,7 @@ def build_saturation_matrix(factor: float, device) -> Tensor:
 def build_temperature_matrix(temp: float, device) -> Tensor:
     """
     Build temperature adjustment matrix.
-    
+
     Positive = warmer (boost red, reduce blue)
     Negative = cooler (reduce red, boost blue)
     """
@@ -339,7 +352,7 @@ def build_temperature_matrix(temp: float, device) -> Tensor:
 def build_tint_matrix(tint: float, device) -> Tensor:
     """
     Build tint adjustment matrix.
-    
+
     Positive = magenta (reduce green)
     Negative = green (boost green)
     """
@@ -360,7 +373,7 @@ def build_hue_matrix(degrees: float, device) -> Tensor:
     theta = math.radians(degrees)
     cos_t = math.cos(theta)
     sin_t = math.sin(theta)
-    
+
     return torch.tensor([
         [0.213 + 0.787*cos_t - 0.213*sin_t,
          0.715 - 0.715*cos_t - 0.715*sin_t,
@@ -466,6 +479,7 @@ def color(self, values: ColorValues, inplace: bool = True) -> Self:
 ### Unit Tests
 
 #### 1. Format Preservation
+
 ```python
 def test_brightness_preserves_sh_format():
     t = create_sh_tensor()  # sh0 in SH format
@@ -481,69 +495,73 @@ def test_saturation_preserves_sh_format():
 ```
 
 #### 2. All Bands Modified
+
 ```python
 def test_saturation_modifies_all_bands():
     t = create_sh_tensor()
     sh0_before = t.sh0.clone()
     shN_before = t.shN.clone()
-    
+
     t.adjust_saturation(1.3, inplace=True)
-    
+
     assert not torch.allclose(t.sh0, sh0_before)
     assert not torch.allclose(t.shN, shN_before)
 
 def test_brightness_modifies_all_bands():
     t = create_sh_tensor()
     shN_before = t.shN.clone()
-    
+
     t.adjust_brightness(1.5, inplace=True)
-    
+
     assert torch.allclose(t.shN, shN_before * 1.5)
 ```
 
 #### 3. Offset Only Affects DC
+
 ```python
 def test_contrast_offset_only_affects_dc():
     t = create_sh_tensor()
     # Set shN to zeros
     t.shN = torch.zeros_like(t.shN)
-    
+
     t.adjust_contrast(0.5, inplace=True)
-    
+
     # shN should still be zeros (offset doesn't affect it)
     assert torch.allclose(t.shN, torch.zeros_like(t.shN))
 
 def test_fade_only_affects_dc():
     t = create_sh_tensor()
     shN_before = t.shN.clone()
-    
+
     t.adjust_fade(0.1, inplace=True)
-    
+
     # shN should be unchanged
     assert torch.allclose(t.shN, shN_before)
 ```
 
 #### 4. No Clamping for SH Format
+
 ```python
 def test_no_clamping_for_sh_format():
     t = create_sh_tensor()
     t.sh0 = torch.randn(10, 3) * 5  # Values outside [0,1]
-    
+
     t.adjust_saturation(1.3, inplace=True)
-    
+
     # Should not be clamped
     assert t.sh0.min() < 0 or t.sh0.max() > 1
 ```
 
 #### 5. Clamping for RGB Format
+
 ```python
 def test_clamping_for_rgb_format():
     t = create_sh_tensor()
     t.to_rgb(inplace=True)
     t.sh0 = torch.rand(10, 3) * 0.5 + 0.25  # Valid RGB
-    
+
     t.adjust_brightness(3.0, inplace=True)  # Would exceed 1
-    
+
     assert t.sh0.max() <= 1.0
     assert t.sh0.min() >= 0.0
 ```
@@ -551,23 +569,24 @@ def test_clamping_for_rgb_format():
 ### Integration Tests
 
 #### Roundtrip: Edit → Save → Load
+
 ```python
 def test_edit_save_load_roundtrip():
     # Load original
     t1 = load_ply("test_scene.ply")
     sh0_orig = t1.sh0.clone()
     shN_orig = t1.shN.clone()
-    
+
     # Apply edits
     t1.adjust_saturation(1.3, inplace=True)
     t1.adjust_brightness(0.9, inplace=True)
-    
+
     # Save
     save_ply(t1, "test_edited.ply")
-    
+
     # Reload
     t2 = load_ply("test_edited.ply")
-    
+
     # Verify edits persisted
     assert not torch.allclose(t2.sh0, sh0_orig)
     assert not torch.allclose(t2.shN, shN_orig)
@@ -576,22 +595,23 @@ def test_edit_save_load_roundtrip():
 ```
 
 #### Render Comparison
+
 ```python
 def test_render_before_after():
     t = load_ply("test_scene.ply")
-    
+
     # Render before
     img_before = render(t, camera)
-    
+
     # Apply saturation boost
     t.adjust_saturation(1.5, inplace=True)
-    
+
     # Render after
     img_after = render(t, camera)
-    
+
     # Images should differ (edit had effect)
     assert not torch.allclose(img_before, img_after)
-    
+
     # Average saturation should increase
     sat_before = compute_image_saturation(img_before)
     sat_after = compute_image_saturation(img_after)
@@ -628,6 +648,7 @@ for (let d = 0; d < shCoeffs; ++d) {
 ```
 
 Key observations:
+
 1. Same linear transform applied to all bands
 2. Offset only applied to DC
 3. No conversion to RGB
@@ -646,6 +667,7 @@ Key observations:
 7. **Preserve shN** - never discard or zero out higher-order coefficients
 
 Following these rules ensures:
+
 - View-dependent effects are preserved
 - Edited data can be saved and reloaded correctly
 - Rendering produces expected results

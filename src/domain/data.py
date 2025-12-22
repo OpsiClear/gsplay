@@ -19,8 +19,8 @@ import numpy as np
 
 from src.domain.entities import SH_DEGREE_MAP
 
+
 if TYPE_CHECKING:
-    import torch
     from gsply import GSData
     from gsply.torch import GSTensor
 
@@ -147,9 +147,7 @@ class GaussianData:
         )
 
     @classmethod
-    def from_gstensor(
-        cls, gstensor: GSTensor, source_path: str | None = None
-    ) -> GaussianData:
+    def from_gstensor(cls, gstensor: GSTensor, source_path: str | None = None) -> GaussianData:
         """Create GaussianData from gsply.torch.GSTensor.
 
         Parameters

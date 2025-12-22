@@ -12,10 +12,11 @@ from typing import TYPE_CHECKING
 
 import viser
 
+
 if TYPE_CHECKING:
     from src.domain.interfaces import CompositeModelInterface
-    from src.models.composite.composite_model import CompositeModel
     from src.gsplay.config.settings import GSPlayConfig
+    from src.models.composite.composite_model import CompositeModel
 
 logger = logging.getLogger(__name__)
 
@@ -164,9 +165,7 @@ def _create_layer_transform_controls(
     from gsmod.transform.api import euler_to_quaternion
 
     trans = layer_config.transform_values
-    translate = getattr(
-        trans, "translate", getattr(trans, "translation", (0.0, 0.0, 0.0))
-    )
+    translate = getattr(trans, "translate", getattr(trans, "translation", (0.0, 0.0, 0.0)))
     controls = {}
 
     # Initialize Euler angles to identity (0,0,0)
@@ -229,9 +228,7 @@ def _create_layer_transform_controls(
     # Handle scalar vs vector scale
     scale_value = getattr(trans, "scale", 1.0)
     init_scale = (
-        float(scale_value)
-        if isinstance(scale_value, (float, int))
-        else float(scale_value[0])
+        float(scale_value) if isinstance(scale_value, (float, int)) else float(scale_value[0])
     )
     controls["global_scale"] = server.gui.add_slider(
         "Scale",
@@ -282,9 +279,7 @@ def _create_layer_transform_controls(
                     rotation=quat,
                 )
             model.update_layer_edits(layer_id, transform_values=new_trans)
-            logger.debug(
-                f"Layer '{layer_id}' transform.{param_name}: {event.target.value}"
-            )
+            logger.debug(f"Layer '{layer_id}' transform.{param_name}: {event.target.value}")
 
         return _callback
 
@@ -331,9 +326,7 @@ def _create_layer_filter_controls(
     controls["filter_type"] = server.gui.add_dropdown(
         "Filter Type",
         ["None", "Sphere", "Cuboid"],
-        initial_value=filt.filter_type.capitalize()
-        if filt.filter_type != "none"
-        else "None",
+        initial_value=filt.filter_type.capitalize() if filt.filter_type != "none" else "None",
     )
 
     controls["opacity_threshold"] = server.gui.add_slider(

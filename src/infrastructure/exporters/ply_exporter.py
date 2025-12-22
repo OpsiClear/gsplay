@@ -19,6 +19,7 @@ from src.domain.entities import GSTensor
 from src.domain.interfaces import ModelInterface
 from src.infrastructure.io.path_io import UniversalPath
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,10 +52,7 @@ class PlyExporter:
         return ".ply"
 
     def export_frame(
-        self,
-        gaussian_data: GSTensor,
-        output_path: str | Path | UniversalPath,
-        **options: Any
+        self, gaussian_data: GSTensor, output_path: str | Path | UniversalPath, **options: Any
     ) -> None:
         """
         Export single frame of Gaussian data to PLY file.
@@ -90,14 +88,14 @@ class PlyExporter:
 
         # Convert sh0 from RGB back to SH format if needed
         # PLY format expects SH coefficients, not RGB colors
-        if hasattr(export_data, 'is_sh0_rgb') and export_data.is_sh0_rgb:
+        if hasattr(export_data, "is_sh0_rgb") and export_data.is_sh0_rgb:
             export_data = export_data.to_sh(inplace=False)
 
         # Use native gsply save() method
         # For remote paths, save to temp file first then upload
         if output_path.is_remote:
-            import tempfile
             import os
+            import tempfile
 
             with tempfile.NamedTemporaryFile(suffix=".ply", delete=False) as tmp:
                 tmp_path = tmp.name
@@ -118,7 +116,7 @@ class PlyExporter:
         output_dir: str | Path | UniversalPath,
         apply_edits_fn: Any = None,
         progress_callback: Any = None,
-        **options: Any
+        **options: Any,
     ) -> int:
         """
         Export all frames from model to PLY files.
@@ -169,7 +167,9 @@ class PlyExporter:
                 normalized_time = model.get_frame_time(frame_idx)
 
                 # Get Gaussian data
-                gaussian_data = model.get_gaussians_at_normalized_time(normalized_time=normalized_time)
+                gaussian_data = model.get_gaussians_at_normalized_time(
+                    normalized_time=normalized_time
+                )
 
                 if gaussian_data is None or len(gaussian_data) == 0:
                     tqdm.write(f"Frame {frame_idx}: No gaussian data, skipping")
@@ -202,5 +202,3 @@ class PlyExporter:
         logger.info(f"PLY export complete: {exported_count}/{total_frames} frames")
 
         return exported_count
-
-

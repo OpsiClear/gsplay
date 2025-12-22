@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,9 @@ class LogService:
 
         except Exception as e:
             logger.error("Failed to read log file %s: %s", log_path, e)
-            return LogChunk(lines=[f"Error reading log: {e}"], total_lines=0, offset=0, has_more=False)
+            return LogChunk(
+                lines=[f"Error reading log: {e}"], total_lines=0, offset=0, has_more=False
+            )
 
     async def stream_logs(
         self,
@@ -125,14 +127,13 @@ class LogService:
         """
         log_path = self.get_log_path(port)
         last_position = 0
-        last_line_count = 0
 
         # If file exists, start from current end
         if log_path.exists():
             try:
                 content = log_path.read_text(encoding="utf-8", errors="replace")
                 last_position = len(content)
-                last_line_count = content.count("\n")
+                content.count("\n")
             except Exception:
                 pass
 
@@ -149,7 +150,6 @@ class LogService:
                 # Check if file was truncated (reset)
                 if current_length < last_position:
                     last_position = 0
-                    last_line_count = 0
 
                 # Get new content
                 if current_length > last_position:

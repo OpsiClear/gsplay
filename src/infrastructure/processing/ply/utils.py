@@ -4,8 +4,8 @@ Utility functions for PLY file operations.
 Spherical harmonics conversion utilities for Gaussian color handling.
 """
 
-import torch
 import numpy as np
+import torch
 
 
 # Spherical Harmonics conversion constant

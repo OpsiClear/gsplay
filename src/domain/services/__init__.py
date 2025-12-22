@@ -7,5 +7,5 @@ Color and transform processing is delegated to gsmod.
 
 from .transform import TransformService
 
-__all__ = ["TransformService"]
 
+__all__ = ["TransformService"]

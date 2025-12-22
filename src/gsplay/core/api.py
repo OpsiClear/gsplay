@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from gsmod import ColorValues, TransformValues
+
 from src.gsplay.config.settings import VolumeFilter
+
 
 if TYPE_CHECKING:
     from src.gsplay.core.app import UniversalGSPlay
@@ -275,9 +277,7 @@ class GSPlayAPI:
             )
         logger.debug("Color values applied via API")
 
-    def set_color_adjustments(
-        self, values: ColorValues, alpha_scaler: float | None = None
-    ) -> None:
+    def set_color_adjustments(self, values: ColorValues, alpha_scaler: float | None = None) -> None:
         """Alias for set_color_values for backward compatibility."""
         self.set_color_values(values, alpha_scaler)
 
@@ -310,9 +310,7 @@ class GSPlayAPI:
                 self._viewer.ui.translation_z_slider.value = z
             logger.debug(f"Translation set to ({x}, {y}, {z})")
 
-    def set_rotation(
-        self, x: float = 0.0, y: float = 0.0, z: float = 0.0
-    ) -> None:
+    def set_rotation(self, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> None:
         """
         Set scene rotation using world-axis angles (truly gimbal-lock free).
 
@@ -480,9 +478,7 @@ class GSPlayAPI:
 
         return GSPlayState(
             current_frame=int(ui.time_slider.value) if ui.time_slider else 0,
-            total_frames=self._viewer.model.get_total_frames()
-            if self._viewer.model
-            else 0,
+            total_frames=self._viewer.model.get_total_frames() if self._viewer.model else 0,
             is_playing=ui.auto_play.value.strip() == "Play" if ui.auto_play else False,
             playback_fps=float(ui.play_speed.value)
             if ui.play_speed

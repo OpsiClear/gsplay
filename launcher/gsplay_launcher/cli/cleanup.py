@@ -126,6 +126,7 @@ def stop_process(pid: int, force: bool = False, timeout: float = 10.0) -> bool:
         True if process was stopped successfully.
     """
     import sys
+
     from gsplay_launcher.services.process_manager import stop_process as _stop_process
 
     action = "Force killing" if force else "Terminating"

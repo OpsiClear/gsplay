@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+
 if TYPE_CHECKING:
     from gsmod.config.values import FilterValues, TransformValues
 
@@ -31,9 +32,9 @@ logger = logging.getLogger(__name__)
 
 
 def inverse_transform_filter_values(
-    filter_values: "FilterValues",
-    transform_values: "TransformValues | None",
-) -> "FilterValues":
+    filter_values: FilterValues,
+    transform_values: TransformValues | None,
+) -> FilterValues:
     """Transform filter parameters from WORLD to LOCAL space.
 
     The visualization shows filters in WORLD space (after scene transforms).
@@ -126,9 +127,7 @@ def inverse_transform_filter_values(
             kwargs["sphere_radius"] = sphere_radius_local
         else:
             # Non-uniform scale: sphere becomes ellipsoid
-            logger.debug(
-                "Non-uniform scale detected: converting sphere filter to ellipsoid"
-            )
+            logger.debug("Non-uniform scale detected: converting sphere filter to ellipsoid")
             kwargs["sphere_center"] = filter_values.sphere_center  # Keep original
             kwargs["sphere_radius"] = float("inf")  # Disable sphere
 
@@ -193,9 +192,7 @@ def inverse_transform_filter_values(
 
             # Compose ellipsoid rotation with inverse scene rotation
             if filter_values.ellipsoid_rot is not None:
-                kwargs["ellipsoid_rot"] = _compose_inverse_rotation(
-                    filter_values.ellipsoid_rot, R
-                )
+                kwargs["ellipsoid_rot"] = _compose_inverse_rotation(filter_values.ellipsoid_rot, R)
             elif has_scene_rotation:
                 kwargs["ellipsoid_rot"] = _matrix_to_axis_angle(R_inv)
             else:
@@ -223,9 +220,7 @@ def inverse_transform_filter_values(
 
         # Compose frustum rotation with inverse scene rotation
         if filter_values.frustum_rot is not None:
-            kwargs["frustum_rot"] = _compose_inverse_rotation(
-                filter_values.frustum_rot, R
-            )
+            kwargs["frustum_rot"] = _compose_inverse_rotation(filter_values.frustum_rot, R)
         elif has_scene_rotation:
             kwargs["frustum_rot"] = _matrix_to_axis_angle(R_inv)
         else:
@@ -400,7 +395,12 @@ def _compose_inverse_rotation(
 def _is_identity_quaternion(q: tuple, tolerance: float = 1e-6) -> bool:
     """Check if quaternion is identity (no rotation)."""
     w, x, y, z = q
-    return abs(w - 1.0) < tolerance and abs(x) < tolerance and abs(y) < tolerance and abs(z) < tolerance
+    return (
+        abs(w - 1.0) < tolerance
+        and abs(x) < tolerance
+        and abs(y) < tolerance
+        and abs(z) < tolerance
+    )
 
 
 def _is_uniform_scale(scale: np.ndarray, tolerance: float = 1e-6) -> bool:

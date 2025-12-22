@@ -16,34 +16,39 @@ import torch
 import viser
 from gsmod import ColorValues, TransformValues
 
+
 if TYPE_CHECKING:
     import numpy as np
+
     from src.gsplay.ui.filter_visualizer import FilterVisualizer
 
 from src.domain.entities import GSTensor
 from src.domain.interfaces import (
-    ModelInterface,
     DataLoaderInterface,
     DataSourceProtocol,
+    ModelInterface,
 )
-from src.infrastructure.processing_mode import ProcessingMode
-from src.infrastructure.io.path_io import UniversalPath
 from src.gsplay.config.settings import GSPlayConfig, UIHandles, VolumeFilter
-from src.gsplay.core.container import create_edit_manager
-from src.gsplay.interaction.handlers import HandlerManager
-from src.gsplay.state.scene_bounds_manager import SceneBoundsManager
-from src.gsplay.initialization.ui_setup import UISetup
-from src.gsplay.rendering.camera import create_supersplat_camera_controls
-from src.gsplay.ui.layout import setup_ui_layout
 from src.gsplay.core.api import GSPlayAPI
-from src.gsplay.core.components import ModelComponent, RenderComponent, ExportComponent
-from src.gsplay.interaction.events import EventBus, Event, EventType
-from src.gsplay.ui.controller import UIController
+from src.gsplay.core.components import ExportComponent, ModelComponent, RenderComponent
+from src.gsplay.core.container import create_edit_manager
+from src.gsplay.initialization.ui_setup import UISetup
+from src.gsplay.interaction.events import Event, EventBus, EventType
+from src.gsplay.interaction.handlers import HandlerManager
 from src.gsplay.interaction.playback import PlaybackController
+from src.gsplay.rendering.camera import create_supersplat_camera_controls
+from src.gsplay.state.scene_bounds_manager import SceneBoundsManager
 from src.gsplay.streaming import (
     WebSocketStreamServer as StreamServer,
+)
+from src.gsplay.streaming import (
     set_websocket_server as set_stream_server,
 )
+from src.gsplay.ui.controller import UIController
+from src.gsplay.ui.layout import setup_ui_layout
+from src.infrastructure.io.path_io import UniversalPath
+from src.infrastructure.processing_mode import ProcessingMode
+
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +97,7 @@ class UniversalGSPlay:
         self.event_bus = EventBus(name="viewer")
 
         # Initialize components
-        self.model_component = ModelComponent(
-            device=self.device, event_bus=self.event_bus
-        )
+        self.model_component = ModelComponent(device=self.device, event_bus=self.event_bus)
         self.render_component = RenderComponent(
             server=self.server,
             device=self.device,
@@ -185,7 +188,9 @@ class UniversalGSPlay:
         else:
             # Normalize device string - handle "cuda:0", "cuda", "gpu", "CPU", etc.
             device_lower = export_device.lower()
-            export_device = "gpu" if device_lower.startswith("cuda") or device_lower == "gpu" else "cpu"
+            export_device = (
+                "gpu" if device_lower.startswith("cuda") or device_lower == "gpu" else "cpu"
+            )
 
         # Normalize format string (remove dashes, use underscore)
         format_str = export_format.replace("-", "_")
@@ -194,9 +199,7 @@ class UniversalGSPlay:
         folder_name = f"{source_name}_export_{export_device}_{format_str}"
         return base_dir / folder_name
 
-    def _set_export_path(
-        self, export_path: UniversalPath | str, *, is_auto: bool = False
-    ) -> None:
+    def _set_export_path(self, export_path: UniversalPath | str, *, is_auto: bool = False) -> None:
         """Store export path on config and sync UI control if it exists.
 
         Parameters
@@ -361,12 +364,8 @@ class UniversalGSPlay:
                 extra_config["enable_concurrent_prefetch"] = (
                     self.config.ply_loading.enable_concurrent_prefetch
                 )
-                extra_config["opacity_threshold"] = (
-                    self.config.ply_loading.opacity_threshold
-                )
-                extra_config["scale_threshold"] = (
-                    self.config.ply_loading.scale_threshold
-                )
+                extra_config["opacity_threshold"] = self.config.ply_loading.opacity_threshold
+                extra_config["scale_threshold"] = self.config.ply_loading.scale_threshold
                 extra_config["enable_quality_filtering"] = (
                     self.config.ply_loading.enable_quality_filtering
                 )
@@ -383,15 +382,13 @@ class UniversalGSPlay:
                     extra_config["processing_mode"] = ProcessingMode.ALL_GPU.value
 
         # Use ModelComponent to load model
-        model, data_loader, metadata = self.model_component.load_from_config(
+        model, _data_loader, _metadata = self.model_component.load_from_config(
             config_dict, config_file=config_file, **extra_config
         )
 
         # Update export component with source path
         if self.model_component.get_source_path():
-            self.export_component.set_default_output_dir(
-                self.model_component.get_source_path()
-            )
+            self.export_component.set_default_output_dir(self.model_component.get_source_path())
         self._initialize_export_path()
 
         # Process recommended max_scale
@@ -404,11 +401,7 @@ class UniversalGSPlay:
             )
 
             # Update UI slider if already created
-            if (
-                self.ui
-                and hasattr(self.ui, "max_scale_slider")
-                and self.ui.max_scale_slider
-            ):
+            if self.ui and hasattr(self.ui, "max_scale_slider") and self.ui.max_scale_slider:
                 self.ui.max_scale_slider.value = recommended_max_scale
                 # Optionally adjust slider max to be 2x the calculated value
                 slider_max = max(10.0, recommended_max_scale * 2.0)
@@ -555,9 +548,7 @@ class UniversalGSPlay:
         # it only updates camera state, not rendering.
 
         # Create UI (includes camera UI right after Info panel)
-        self.ui = setup_ui_layout(
-            self.server, self.config, self.camera_controller, viewer_app=self
-        )
+        self.ui = setup_ui_layout(self.server, self.config, self.camera_controller, viewer_app=self)
         logger.debug("UI layout created")
 
         # Initialize UI Controller
@@ -568,31 +559,17 @@ class UniversalGSPlay:
         self.event_bus.subscribe(EventType.FRAME_CHANGED, self._on_frame_changed)
 
         # Subscribe to command events
-        self.event_bus.subscribe(
-            EventType.LOAD_DATA_REQUESTED, self._on_load_data_requested
-        )
+        self.event_bus.subscribe(EventType.LOAD_DATA_REQUESTED, self._on_load_data_requested)
         self.event_bus.subscribe(EventType.EXPORT_REQUESTED, self._on_export_requested)
-        self.event_bus.subscribe(
-            EventType.RESET_COLORS_REQUESTED, self._on_reset_colors_requested
-        )
+        self.event_bus.subscribe(EventType.RESET_COLORS_REQUESTED, self._on_reset_colors_requested)
         self.event_bus.subscribe(
             EventType.RESET_TRANSFORM_REQUESTED, self._on_reset_transform_requested
         )
-        self.event_bus.subscribe(
-            EventType.RESET_FILTER_REQUESTED, self._on_reset_filter_requested
-        )
-        self.event_bus.subscribe(
-            EventType.CENTER_REQUESTED, self._on_center_requested
-        )
-        self.event_bus.subscribe(
-            EventType.BAKE_VIEW_REQUESTED, self._on_bake_view_requested
-        )
-        self.event_bus.subscribe(
-            EventType.RERENDER_REQUESTED, self._on_rerender_requested
-        )
-        self.event_bus.subscribe(
-            EventType.TERMINATE_REQUESTED, self._on_terminate_requested
-        )
+        self.event_bus.subscribe(EventType.RESET_FILTER_REQUESTED, self._on_reset_filter_requested)
+        self.event_bus.subscribe(EventType.CENTER_REQUESTED, self._on_center_requested)
+        self.event_bus.subscribe(EventType.BAKE_VIEW_REQUESTED, self._on_bake_view_requested)
+        self.event_bus.subscribe(EventType.RERENDER_REQUESTED, self._on_rerender_requested)
+        self.event_bus.subscribe(EventType.TERMINATE_REQUESTED, self._on_terminate_requested)
 
         # Update time slider if model already loaded
         if self.model:
@@ -606,18 +583,14 @@ class UniversalGSPlay:
                 # Update info panel with total frames
                 if self.ui.info_panel:
                     self.ui.info_panel.set_frame_index(0, total_frames)
-                logger.debug(
-                    f"Updated time slider: 0-{total_frames - 1} ({total_frames} frames)"
-                )
+                logger.debug(f"Updated time slider: 0-{total_frames - 1} ({total_frames} frames)")
 
         # Create handlers
         self.handlers = HandlerManager(self.event_bus)
         self.handlers.set_playback_controller(self.playback_controller)
 
         # Setup all UI callbacks
-        self.handlers.setup_all_callbacks(
-            self.ui, self.scene_bounds_manager.get_bounds()
-        )
+        self.handlers.setup_all_callbacks(self.ui, self.scene_bounds_manager.get_bounds())
         logger.debug("Event handlers registered")
 
         # Create render function with edit wrapper
@@ -696,9 +669,7 @@ class UniversalGSPlay:
             # Register globally so renderer can find it
             set_stream_server(self.stream_server)
 
-            logger.info(
-                f"Stream server: http://{self.config.host}:{actual_port}/"
-            )
+            logger.info(f"Stream server: http://{self.config.host}:{actual_port}/")
         except Exception as e:
             logger.warning(f"Failed to start stream server: {e}")
             self.stream_server = None
@@ -717,9 +688,7 @@ class UniversalGSPlay:
             self.control_server = ControlServer(control_port, self)
             actual_port = self.control_server.start()
 
-            logger.info(
-                f"Control server: http://{self.config.host}:{actual_port}/"
-            )
+            logger.info(f"Control server: http://{self.config.host}:{actual_port}/")
         except Exception as e:
             logger.warning(f"Failed to start control server: {e}")
             self.control_server = None
@@ -742,9 +711,7 @@ class UniversalGSPlay:
 
         # Update camera controller
         if self.camera_controller:
-            self.camera_controller.update_scene_bounds(
-                self.scene_bounds_manager.get_bounds()
-            )
+            self.camera_controller.update_scene_bounds(self.scene_bounds_manager.get_bounds())
 
         # Refresh render pipeline
         self._refresh_render_pipeline(model)
@@ -817,6 +784,7 @@ class UniversalGSPlay:
 
         try:
             from gsmod import ColorValues
+
             from src.gsplay.core.handlers.color_presets import (
                 get_adjustment_type,
                 get_preset_values,
@@ -879,22 +847,18 @@ class UniversalGSPlay:
         except Exception as e:
             logger.error(f"Failed to apply color adjustment: {e}", exc_info=True)
 
-    def _get_current_frame_gaussians(self) -> "GSTensor | None":
+    def _get_current_frame_gaussians(self) -> GSTensor | None:
         """Get GSTensor for current frame."""
         frame_idx = 0
         if self.ui and self.ui.time_slider:
             frame_idx = int(self.ui.time_slider.value)
 
         total_frames = self.model.get_total_frames()
-        normalized_time = (
-            frame_idx / max(1, total_frames - 1) if total_frames > 1 else 0.0
-        )
+        normalized_time = frame_idx / max(1, total_frames - 1) if total_frames > 1 else 0.0
 
         return self.model.get_gaussians_at_normalized_time(normalized_time)
 
-    def _get_colors_from_gaussians(
-        self, gaussians: "GSTensor | None"
-    ) -> "torch.Tensor | None":
+    def _get_colors_from_gaussians(self, gaussians: GSTensor | None) -> torch.Tensor | None:
         """Extract SH0 colors from gaussians as GPU tensor."""
         import torch
 
@@ -932,7 +896,7 @@ class UniversalGSPlay:
         ),
     }
 
-    def _histogram_learn(self, colors: "torch.Tensor", level: str) -> "ColorValues":
+    def _histogram_learn(self, colors: torch.Tensor, level: str) -> ColorValues:
         """Legacy histogram learning.
 
         Parameters
@@ -947,8 +911,8 @@ class UniversalGSPlay:
         ColorValues
             Learned normalization parameters
         """
-        from gsmod.histogram.result import HistogramResult
         import numpy as np
+        from gsmod.histogram.result import HistogramResult
 
         # Get config for level (default to standard)
         norm_params, n_epochs, lr = self._HISTOGRAM_LEARN_CONFIG.get(
@@ -985,9 +949,7 @@ class UniversalGSPlay:
             return
 
         # Get current filter type
-        filter_type = (
-            self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
-        )
+        filter_type = self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
 
         # Get current filter values from UI
         filter_values = self.ui.get_filter_values()
@@ -1050,9 +1012,7 @@ class UniversalGSPlay:
             return
 
         # Get current filter type
-        filter_type = (
-            self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
-        )
+        filter_type = self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
         if filter_type not in ("Sphere", "Box", "Ellipsoid"):
             logger.debug(f"Filter type {filter_type} doesn't support scene center")
             return
@@ -1065,7 +1025,7 @@ class UniversalGSPlay:
 
         # Compute mean position (centroid)
         means = gaussians.means
-        if hasattr(means, 'cpu'):
+        if hasattr(means, "cpu"):
             # PyTorch tensor
             center = means.mean(dim=0).cpu().numpy()
         else:
@@ -1082,7 +1042,9 @@ class UniversalGSPlay:
                 self.ui.sphere_center_y.value = center_y
             if self.ui.sphere_center_z:
                 self.ui.sphere_center_z.value = center_z
-            logger.debug(f"Set sphere center to scene centroid: ({center_x:.3f}, {center_y:.3f}, {center_z:.3f})")
+            logger.debug(
+                f"Set sphere center to scene centroid: ({center_x:.3f}, {center_y:.3f}, {center_z:.3f})"
+            )
 
         elif filter_type == "Box":
             # Box now uses center/size controls - just set center directly
@@ -1092,7 +1054,9 @@ class UniversalGSPlay:
                 self.ui.box_center_y.value = center_y
             if self.ui.box_center_z:
                 self.ui.box_center_z.value = center_z
-            logger.debug(f"Set box center to scene centroid: ({center_x:.3f}, {center_y:.3f}, {center_z:.3f})")
+            logger.debug(
+                f"Set box center to scene centroid: ({center_x:.3f}, {center_y:.3f}, {center_z:.3f})"
+            )
 
         elif filter_type == "Ellipsoid":
             if self.ui.ellipsoid_center_x:
@@ -1101,7 +1065,9 @@ class UniversalGSPlay:
                 self.ui.ellipsoid_center_y.value = center_y
             if self.ui.ellipsoid_center_z:
                 self.ui.ellipsoid_center_z.value = center_z
-            logger.debug(f"Set ellipsoid center to scene centroid: ({center_x:.3f}, {center_y:.3f}, {center_z:.3f})")
+            logger.debug(
+                f"Set ellipsoid center to scene centroid: ({center_x:.3f}, {center_y:.3f}, {center_z:.3f})"
+            )
 
         # Trigger visualization update
         self._update_filter_visualization()
@@ -1114,15 +1080,14 @@ class UniversalGSPlay:
         """
         import numpy as np
         import viser.transforms as vt
+
         from src.gsplay.config.rotation_conversions import matrix_to_euler_deg
 
         if not self.ui:
             return
 
         # Get current filter type
-        filter_type = (
-            self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
-        )
+        filter_type = self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
         if filter_type not in ("Box", "Ellipsoid"):
             logger.debug(f"Filter type {filter_type} doesn't support rotation")
             return
@@ -1174,9 +1139,7 @@ class UniversalGSPlay:
                     self.ui.box_rot_y.value = ry
                 if self.ui.box_rot_z:
                     self.ui.box_rot_z.value = rz
-                logger.debug(
-                    f"Aligned box rotation to camera up: ({rx:.1f}, {ry:.1f}, {rz:.1f})"
-                )
+                logger.debug(f"Aligned box rotation to camera up: ({rx:.1f}, {ry:.1f}, {rz:.1f})")
 
             elif filter_type == "Ellipsoid":
                 if self.ui.ellipsoid_rot_x:
@@ -1207,6 +1170,7 @@ class UniversalGSPlay:
         So the inverse is: inverse_translate -> inverse_rotate -> inverse_scale
         """
         import numpy as np
+
         from src.gsplay.config.rotation_conversions import camera_to_frustum_euler_deg
 
         pos = np.array(camera_pos, dtype=np.float64)
@@ -1232,22 +1196,28 @@ class UniversalGSPlay:
 
         # Build scene rotation matrix from quaternion
         w, x, y, z = scene_rot_quat
-        R_scene = np.array([
-            [1 - 2*(y*y + z*z), 2*(x*y - w*z), 2*(x*z + w*y)],
-            [2*(x*y + w*z), 1 - 2*(x*x + z*z), 2*(y*z - w*x)],
-            [2*(x*z - w*y), 2*(y*z + w*x), 1 - 2*(x*x + y*y)],
-        ], dtype=np.float64)
+        R_scene = np.array(
+            [
+                [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+                [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+                [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+            ],
+            dtype=np.float64,
+        )
 
         # Inverse transform position: pos_world = ((pos_viewer - trans) @ R_scene) / scale
         pos_world = ((pos - translation) @ R_scene) / scale
 
         # Build camera rotation matrix from quaternion
         cw, cx, cy, cz = camera_rot
-        R_cam = np.array([
-            [1 - 2*(cy*cy + cz*cz), 2*(cx*cy - cw*cz), 2*(cx*cz + cw*cy)],
-            [2*(cx*cy + cw*cz), 1 - 2*(cx*cx + cz*cz), 2*(cy*cz - cw*cx)],
-            [2*(cx*cz - cw*cy), 2*(cy*cz + cw*cx), 1 - 2*(cx*cx + cy*cy)],
-        ], dtype=np.float64)
+        R_cam = np.array(
+            [
+                [1 - 2 * (cy * cy + cz * cz), 2 * (cx * cy - cw * cz), 2 * (cx * cz + cw * cy)],
+                [2 * (cx * cy + cw * cz), 1 - 2 * (cx * cx + cz * cz), 2 * (cy * cz - cw * cx)],
+                [2 * (cx * cz - cw * cy), 2 * (cy * cz + cw * cx), 1 - 2 * (cx * cx + cy * cy)],
+            ],
+            dtype=np.float64,
+        )
 
         # Compose: R_world = R_scene @ R_cam
         R_world = R_scene @ R_cam
@@ -1272,8 +1242,8 @@ class UniversalGSPlay:
             qy, qz = (R_world[1, 2] + R_world[2, 1]) / s, 0.25 * s
 
         # Normalize and convert to frustum frame
-        norm = np.sqrt(qw*qw + qx*qx + qy*qy + qz*qz)
-        world_rot_quat = (qw/norm, qx/norm, qy/norm, qz/norm)
+        norm = np.sqrt(qw * qw + qx * qx + qy * qy + qz * qz)
+        world_rot_quat = (qw / norm, qx / norm, qy / norm, qz / norm)
         euler_deg = camera_to_frustum_euler_deg(world_rot_quat)
 
         return tuple(float(x) for x in pos_world), euler_deg
@@ -1327,18 +1297,14 @@ class UniversalGSPlay:
             from src.infrastructure.processing_mode import ProcessingMode
 
             try:
-                mode = ProcessingMode.from_string(
-                    self.ui.processing_mode_dropdown.value
-                )
+                mode = ProcessingMode.from_string(self.ui.processing_mode_dropdown.value)
                 self.config.processing_mode = mode.value
                 self.config.volume_filter.processing_mode = mode.value
             except (ValueError, AttributeError) as e:
                 logger.warning(f"Invalid processing mode in UI: {e}")
 
         if self.ui.use_cpu_filtering_checkbox:
-            self.config.volume_filter.use_cpu_filtering = (
-                self.ui.use_cpu_filtering_checkbox.value
-            )
+            self.config.volume_filter.use_cpu_filtering = self.ui.use_cpu_filtering_checkbox.value
 
         # Check if any edits are active (use filter_values, not volume_filter)
         from src.gsplay.processing.volume_filter import is_filter_active
@@ -1390,12 +1356,10 @@ class UniversalGSPlay:
         if self.config.animation.auto_play:
             self.config.animation.auto_play = False
         if self.ui and self.ui.auto_play:
-            self.ui.auto_play.value = (
-                "Pause"  # "Pause" when paused, " Play" when playing
-            )
+            self.ui.auto_play.value = "Pause"  # "Pause" when paused, " Play" when playing
 
         # Build format map from registry (display name -> registry key)
-        from src.infrastructure.registry import register_defaults, DataSinkRegistry
+        from src.infrastructure.registry import DataSinkRegistry, register_defaults
 
         register_defaults()
 
@@ -1427,9 +1391,7 @@ class UniversalGSPlay:
                 if torch.cuda.is_available():
                     export_device = "cuda:0"  # Use first GPU
                 else:
-                    logger.warning(
-                        "GPU requested but not available, falling back to CPU"
-                    )
+                    logger.warning("GPU requested but not available, falling back to CPU")
                     export_device = "cpu"
             else:
                 export_device = "cpu"
@@ -1499,8 +1461,13 @@ class UniversalGSPlay:
             return
 
         # Validate time range controls exist
-        if not all([self.ui.export_start_time_slider, self.ui.export_end_time_slider,
-                    self.ui.export_time_step_slider]):
+        if not all(
+            [
+                self.ui.export_start_time_slider,
+                self.ui.export_end_time_slider,
+                self.ui.export_time_step_slider,
+            ]
+        ):
             logger.error("Time range controls not available")
             return
 
@@ -1520,7 +1487,8 @@ class UniversalGSPlay:
             # Get export format from UI or config
             export_format = "compressed-ply"
             if self.ui and self.ui.export_format:
-                from src.infrastructure.registry import register_defaults, DataSinkRegistry
+                from src.infrastructure.registry import DataSinkRegistry, register_defaults
+
                 register_defaults()
                 format_map = {}
                 for key in DataSinkRegistry.names():
@@ -1540,6 +1508,7 @@ class UniversalGSPlay:
                 device_value = self.ui.export_device.value.upper()
                 if device_value == "GPU":
                     import torch
+
                     if torch.cuda.is_available():
                         export_device = "cuda:0"
 
@@ -1564,6 +1533,7 @@ class UniversalGSPlay:
 
             # Create edit applier for this export
             from src.gsplay.core.container import create_edit_manager
+
             export_edit_manager = create_edit_manager(self.config, export_device)
 
             def apply_edits_for_export(gaussians: GSTensor) -> GSTensor:
@@ -1623,12 +1593,13 @@ class UniversalGSPlay:
                 time_str = f"t{source_time:.4f}".replace(".", "_")
             else:
                 # Discrete source: use frame index
-                time_str = f"{int(round(source_time)):05d}"
+                time_str = f"{round(source_time):05d}"
 
             # Get export format from UI or config
             export_format = "compressed-ply"
             if self.ui and self.ui.export_format:
-                from src.infrastructure.registry import register_defaults, DataSinkRegistry
+                from src.infrastructure.registry import DataSinkRegistry, register_defaults
+
                 register_defaults()
                 format_map = {}
                 for key in DataSinkRegistry.names():
@@ -1648,6 +1619,7 @@ class UniversalGSPlay:
                 device_value = self.ui.export_device.value.upper()
                 if device_value == "GPU":
                     import torch
+
                     if torch.cuda.is_available():
                         export_device = "cuda:0"
 
@@ -1661,6 +1633,7 @@ class UniversalGSPlay:
 
             # Get file extension from exporter
             from src.infrastructure.exporters.factory import ExporterFactory
+
             exporter_info = ExporterFactory.get_exporter_info(export_format)
             ext = exporter_info.file_extension if exporter_info else ".ply"
 
@@ -1670,6 +1643,7 @@ class UniversalGSPlay:
 
             # Create edit applier for this export
             from src.gsplay.core.container import create_edit_manager
+
             export_edit_manager = create_edit_manager(self.config, export_device)
 
             def apply_edits_for_export(gaussians: GSTensor) -> GSTensor:
@@ -1803,7 +1777,7 @@ class UniversalGSPlay:
 
                 logger.info(
                     f"Centering on {len(means)}/{total_count} filtered gaussians "
-                    f"({len(means)/total_count*100:.1f}%)"
+                    f"({len(means) / total_count * 100:.1f}%)"
                 )
             except ImportError:
                 logger.warning("gsmod filter module unavailable, centering on all gaussians")
@@ -1866,6 +1840,7 @@ class UniversalGSPlay:
         """
         import numpy as np
         import viser.transforms as vt
+
         from src.gsplay.rendering.quaternion_utils import (
             quat_multiply,
             rotation_matrix_to_quat,
@@ -1894,9 +1869,15 @@ class UniversalGSPlay:
             viser_wxyz = np.array(client.camera.wxyz, dtype=np.float64)
 
             # Also read internal state for comparison
-            internal_az = self.camera_controller.state.azimuth if self.camera_controller.state else 0.0
-            internal_el = self.camera_controller.state.elevation if self.camera_controller.state else 0.0
-            internal_roll = self.camera_controller.state.roll if self.camera_controller.state else 0.0
+            internal_az = (
+                self.camera_controller.state.azimuth if self.camera_controller.state else 0.0
+            )
+            internal_el = (
+                self.camera_controller.state.elevation if self.camera_controller.state else 0.0
+            )
+            internal_roll = (
+                self.camera_controller.state.roll if self.camera_controller.state else 0.0
+            )
 
             logger.debug(
                 f"[BakeView] Viser state: pos={pos_original}, look_at={look_at_original}, "
@@ -1996,8 +1977,10 @@ class UniversalGSPlay:
 
             # For comparison, compute what our viser_look_at_matrix would give
             R_current_formula = viser_look_at_matrix(pos_original, look_at_original)
-            formula_vs_viser = float(np.linalg.norm(R_current - R_current_formula, 'fro'))
-            logger.debug(f"[BakeView] R_current (viser wxyz) vs R_current (viser_look_at formula): diff={formula_vs_viser:.6f}")
+            formula_vs_viser = float(np.linalg.norm(R_current - R_current_formula, "fro"))
+            logger.debug(
+                f"[BakeView] R_current (viser wxyz) vs R_current (viser_look_at formula): diff={formula_vs_viser:.6f}"
+            )
 
             # Default iso view: az=45°, el=30°
             az_default, el_default = 45.0, 30.0
@@ -2005,11 +1988,13 @@ class UniversalGSPlay:
             el_rad = np.radians(el_default)
 
             # Default camera position at iso view around ORIGIN
-            pos_default = distance * np.array([
-                np.sin(az_rad) * np.cos(el_rad),  # X
-                np.sin(el_rad),                    # Y (up)
-                np.cos(az_rad) * np.cos(el_rad),  # Z
-            ])
+            pos_default = distance * np.array(
+                [
+                    np.sin(az_rad) * np.cos(el_rad),  # X
+                    np.sin(el_rad),  # Y (up)
+                    np.cos(az_rad) * np.cos(el_rad),  # Z
+                ]
+            )
 
             # R_default using viser's look-at convention (matches what viser will produce)
             R_default = viser_look_at_matrix(pos_default, np.zeros(3))
@@ -2027,11 +2012,15 @@ class UniversalGSPlay:
             el_diff_from_default = abs(el_current - 30.0)
             roll_diff_from_default = abs(roll_current)  # default roll is 0
             look_at_at_origin = float(np.linalg.norm(look_at_original)) < 0.01
-            near_default = (az_diff_from_default < 5.0 and el_diff_from_default < 5.0 and
-                           roll_diff_from_default < 5.0 and look_at_at_origin)
+            near_default = (
+                az_diff_from_default < 5.0
+                and el_diff_from_default < 5.0
+                and roll_diff_from_default < 5.0
+                and look_at_at_origin
+            )
 
             if near_default:
-                R_diff = float(np.linalg.norm(R_current - R_default, 'fro'))
+                R_diff = float(np.linalg.norm(R_current - R_default, "fro"))
                 logger.debug(
                     f"[BakeView] Camera near default (az={az_current:.1f}, el={el_current:.1f}, roll={roll_current:.1f})! "
                     f"R_current vs R_default diff: {R_diff:.6f}"
@@ -2100,7 +2089,9 @@ class UniversalGSPlay:
             #
             R_new = R_delta @ vt.SO3(q_model).as_matrix()
             old_center_correction = R_delta @ c_old - c_old  # = (R_delta - I) @ c_old
-            pivot_change_correction = (c_old - c_new) - R_new @ (c_old - c_new)  # = (I - R_new) @ (c_old - c_new)
+            pivot_change_correction = (c_old - c_new) - R_new @ (
+                c_old - c_new
+            )  # = (I - R_new) @ (c_old - c_new)
             t_new = R_delta @ t_model + t_delta + old_center_correction + pivot_change_correction
 
             logger.debug(
@@ -2115,6 +2106,7 @@ class UniversalGSPlay:
 
             # Verify round-trip: compose back and check matrix difference
             from src.gsplay.rendering.quaternion_utils import quat_from_axis_angle
+
             qx_verify = quat_from_axis_angle(np.array([1, 0, 0]), rx)
             qy_verify = quat_from_axis_angle(np.array([0, 1, 0]), ry)
             qz_verify = quat_from_axis_angle(np.array([0, 0, 1]), rz)
@@ -2186,9 +2178,11 @@ class UniversalGSPlay:
                 # Diagnostic: verify R_default matches viser's wxyz after setting
                 wxyz_after = np.array(client.camera.wxyz, dtype=np.float64)
                 R_after = vt.SO3(wxyz_after).as_matrix()
-                formula_vs_viser = float(np.linalg.norm(R_default - R_after, 'fro'))
+                formula_vs_viser = float(np.linalg.norm(R_default - R_after, "fro"))
                 logger.debug(f"[BakeView] Viser wxyz after set: {wxyz_after}")
-                logger.debug(f"[BakeView] R_default (formula) vs R_after (viser): diff={formula_vs_viser:.6f}")
+                logger.debug(
+                    f"[BakeView] R_default (formula) vs R_after (viser): diff={formula_vs_viser:.6f}"
+                )
                 if formula_vs_viser > 0.01:
                     logger.warning(
                         f"[BakeView] FORMULA MISMATCH! R_default vs viser wxyz: {formula_vs_viser:.6f}\n"
@@ -2242,7 +2236,7 @@ class UniversalGSPlay:
         except Exception as e:
             logger.error(f"Failed to bake camera view: {e}", exc_info=True)
 
-    def _decompose_rotation_xyz(self, R: "np.ndarray") -> tuple[float, float, float]:
+    def _decompose_rotation_xyz(self, R: np.ndarray) -> tuple[float, float, float]:
         """Decompose rotation matrix to extrinsic XYZ Euler angles.
 
         This matches the composition order in get_transform_values():
@@ -2281,7 +2275,9 @@ class UniversalGSPlay:
 
         if self.ui:
             # Get current filter type (keep it)
-            current_type = self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
+            current_type = (
+                self.ui.spatial_filter_type.value if self.ui.spatial_filter_type else "None"
+            )
 
             # Reset opacity/scale sliders
             if self.ui.min_opacity_slider:
@@ -2413,9 +2409,7 @@ class UniversalGSPlay:
 
         # Fall back to legacy API
         total_frames = self.model.get_total_frames()
-        normalized_time = (
-            frame_idx / max(1, total_frames - 1) if total_frames > 1 else 0.0
-        )
+        normalized_time = frame_idx / max(1, total_frames - 1) if total_frames > 1 else 0.0
         gaussians = self.model.get_gaussians_at_normalized_time(normalized_time)
 
         if gaussians is None:
@@ -2481,9 +2475,7 @@ class UniversalGSPlay:
             data = bridge.gstensor_pro_to_gaussian_data(tensor_pro)
 
         # Export using ExportComponent
-        return self.export_component.export_gaussian_data(
-            data, output_path, sink_format, **options
-        )
+        return self.export_component.export_gaussian_data(data, output_path, sink_format, **options)
 
     def get_data_source(self) -> DataSourceProtocol | None:
         """Get the model as a DataSourceProtocol if it supports the interface.
@@ -2517,16 +2509,14 @@ class UniversalGSPlay:
             # Use ModelComponent to load from path
             # This will emit MODEL_LOADED event, which triggers _on_model_loaded
             # and UIController._on_model_loaded
-            model, data_loader, metadata = self.model_component.load_from_path(path)
+            _model, _data_loader, _metadata = self.model_component.load_from_path(path)
 
             # Track current config/model path for future sessions
             self.config.model_config_path = UniversalPath(path)
 
             # Update export component with source path
             if self.model_component.get_source_path():
-                self.export_component.set_default_output_dir(
-                    self.model_component.get_source_path()
-                )
+                self.export_component.set_default_output_dir(self.model_component.get_source_path())
             self._initialize_export_path(force=True)
 
             logger.info(f"Successfully loaded data from: {path}")

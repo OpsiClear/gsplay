@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from src.gsplay.interaction.events import Event, EventBus, EventType
 
+
 if TYPE_CHECKING:
     from src.gsplay.config.settings import UIHandles
 
@@ -129,9 +130,7 @@ class UIController:
     def _on_play_pause_toggled(self, event: Event) -> None:
         """Handle play/pause toggled event."""
         playing = event.data.get("playing", False)
-        self._update_ui_control(
-            self.ui.auto_play, value=" Play" if playing else "Pause"
-        )
+        self._update_ui_control(self.ui.auto_play, value=" Play" if playing else "Pause")
 
     def _on_fps_changed(self, event: Event) -> None:
         """Handle FPS changed event."""

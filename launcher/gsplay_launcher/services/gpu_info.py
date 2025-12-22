@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 import psutil
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -160,6 +161,7 @@ class GpuInfoService:
         try:
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+                check=False,
                 capture_output=True,
                 text=True,
                 timeout=self._timeout,
@@ -175,6 +177,7 @@ class GpuInfoService:
         try:
             result = subprocess.run(
                 ["nvidia-smi"],
+                check=False,
                 capture_output=True,
                 text=True,
                 timeout=self._timeout,

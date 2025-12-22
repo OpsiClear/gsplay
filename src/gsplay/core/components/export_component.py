@@ -41,9 +41,10 @@ from tqdm import tqdm
 from src.domain.entities import GSTensor
 from src.domain.interfaces import ModelInterface
 from src.gsplay.config.settings import ExportSettings
+from src.gsplay.interaction.events import EventBus, EventType
 from src.infrastructure.exporters import ExporterFactory
 from src.infrastructure.io.path_io import UniversalPath
-from src.gsplay.interaction.events import EventBus, EventType
+
 
 if TYPE_CHECKING:
     from src.domain.data import GaussianData
@@ -175,9 +176,7 @@ class ExportComponent:
             Default directory for exports
         """
         self.event_bus = event_bus
-        self.default_output_dir = (
-            UniversalPath(default_output_dir) if default_output_dir else None
-        )
+        self.default_output_dir = UniversalPath(default_output_dir) if default_output_dir else None
         logger.debug("ExportComponent initialized")
 
     def export_frame_sequence(
@@ -239,8 +238,9 @@ class ExportComponent:
             # Export each frame with tqdm progress bar
             # Suppress excessive logging during export to keep console clean
             use_tqdm = sys.stderr.isatty()
-            with suppress_excessive_logging():
-                with tqdm(
+            with (
+                suppress_excessive_logging(),
+                tqdm(
                     total=num_frames,
                     desc="Exporting frames",
                     unit="frame",
@@ -249,57 +249,56 @@ class ExportComponent:
                     dynamic_ncols=True,
                     miniters=1,
                     mininterval=0.1,
-                ) as pbar:
-                    for idx, frame_idx in enumerate(frames_to_export):
-                        # Get gaussians for this frame
-                        frame_time = model.get_frame_time(frame_idx)
-                        gaussian_data = model.get_gaussians_at_normalized_time(
-                            frame_time
+                ) as pbar,
+            ):
+                for idx, frame_idx in enumerate(frames_to_export):
+                    # Get gaussians for this frame
+                    frame_time = model.get_frame_time(frame_idx)
+                    gaussian_data = model.get_gaussians_at_normalized_time(frame_time)
+
+                    if gaussian_data is None:
+                        # Use tqdm.write() for logging during progress bar to avoid breaking the bar
+                        tqdm.write(
+                            f"Warning: No data for frame {frame_idx}, skipping",
+                            file=sys.stderr,
                         )
-
-                        if gaussian_data is None:
-                            # Use tqdm.write() for logging during progress bar to avoid breaking the bar
-                            tqdm.write(
-                                f"Warning: No data for frame {frame_idx}, skipping",
-                                file=sys.stderr,
-                            )
-                            pbar.update(1)
-                            continue
-
-                        # Apply edits if provided
-                        # edit_applier uses export device, so data will be on correct device after this
-                        if edit_applier:
-                            gaussian_data = edit_applier(gaussian_data)
-                        else:
-                            # No edits - still need to ensure data is on export device
-                            export_device = export_settings.export_device
-                            if export_device:
-                                from src.gsplay.processing.gs_bridge import (
-                                    DefaultGSBridge,
-                                )
-
-                                bridge = DefaultGSBridge()
-                                gaussian_data, _ = bridge.ensure_tensor_on_device(
-                                    gaussian_data, export_device
-                                )
-
-                        # Determine output path using exporter's extension
-                        ext = exporter.get_file_extension()
-                        output_path = output_dir / f"frame_{frame_idx:05d}{ext}"
-
-                        # Export frame
-                        exporter.export_frame(
-                            gaussian_data,
-                            output_path,
-                            **export_settings.exporter_options,
-                        )
-
-                        # Update progress bar
                         pbar.update(1)
+                        continue
 
-                        # Also call progress callback if provided (for backward compatibility)
-                        if progress_callback:
-                            progress_callback(idx + 1, num_frames)
+                    # Apply edits if provided
+                    # edit_applier uses export device, so data will be on correct device after this
+                    if edit_applier:
+                        gaussian_data = edit_applier(gaussian_data)
+                    else:
+                        # No edits - still need to ensure data is on export device
+                        export_device = export_settings.export_device
+                        if export_device:
+                            from src.gsplay.processing.gs_bridge import (
+                                DefaultGSBridge,
+                            )
+
+                            bridge = DefaultGSBridge()
+                            gaussian_data, _ = bridge.ensure_tensor_on_device(
+                                gaussian_data, export_device
+                            )
+
+                    # Determine output path using exporter's extension
+                    ext = exporter.get_file_extension()
+                    output_path = output_dir / f"frame_{frame_idx:05d}{ext}"
+
+                    # Export frame
+                    exporter.export_frame(
+                        gaussian_data,
+                        output_path,
+                        **export_settings.exporter_options,
+                    )
+
+                    # Update progress bar
+                    pbar.update(1)
+
+                    # Also call progress callback if provided (for backward compatibility)
+                    if progress_callback:
+                        progress_callback(idx + 1, num_frames)
 
             # Emit export completed event
             if self.event_bus:
@@ -310,9 +309,7 @@ class ExportComponent:
                     output_dir=str(output_dir),
                 )
 
-            logger.info(
-                f"Export completed: {num_frames} frames written to {output_dir}"
-            )
+            logger.info(f"Export completed: {num_frames} frames written to {output_dir}")
             return True
 
         except Exception as e:
@@ -406,12 +403,11 @@ class ExportComponent:
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Get data at source time (supports interpolation for continuous sources)
-            if hasattr(model, 'get_frame_at_source_time'):
+            if hasattr(model, "get_frame_at_source_time"):
                 gaussian_data = model.get_frame_at_source_time(source_time)
             else:
                 # Fallback for legacy models without source time support
-                from src.domain.time import TimeDomain
-                time_domain = getattr(model, 'time_domain', None)
+                time_domain = getattr(model, "time_domain", None)
                 if time_domain:
                     normalized = time_domain.to_normalized(source_time)
                 else:
@@ -425,7 +421,9 @@ class ExportComponent:
 
             # Validate data type (enforces standard gsply types only)
             try:
-                _validate_gaussian_data(gaussian_data, context=f"export_at_source_time(t={source_time})")
+                _validate_gaussian_data(
+                    gaussian_data, context=f"export_at_source_time(t={source_time})"
+                )
             except (TypeError, ValueError) as e:
                 logger.error(str(e))
                 return False
@@ -522,7 +520,9 @@ class ExportComponent:
 
         # Calculate export times
         # Add small epsilon to ensure end is included when it's an exact multiple
-        export_times = np.arange(source_time_start, source_time_end + source_time_step * 0.5, source_time_step)
+        export_times = np.arange(
+            source_time_start, source_time_end + source_time_step * 0.5, source_time_step
+        )
 
         if len(export_times) == 0:
             logger.error("No frames to export (empty time range)")
@@ -541,21 +541,23 @@ class ExportComponent:
         ext = exporter_info.file_extension if exporter_info else ".ply"
 
         # Get time_domain for snap logic
-        time_domain = getattr(model, 'time_domain', None)
+        time_domain = getattr(model, "time_domain", None)
 
         try:
             exported_count = 0
 
             # SNAP MODE: Convert sample times to keyframe indices, then dedup
             # Only use snap mode if time_domain has keyframe_times (consistent with UI preview)
-            use_snap = (snap_to_keyframe and time_domain is not None
-                        and time_domain.keyframe_times is not None
-                        and len(time_domain.keyframe_times) > 0)
+            use_snap = (
+                snap_to_keyframe
+                and time_domain is not None
+                and time_domain.keyframe_times is not None
+                and len(time_domain.keyframe_times) > 0
+            )
             if use_snap:
                 # Convert sample times to keyframe indices
                 keyframe_data = [
-                    time_domain.source_time_to_nearest_keyframe(float(t))
-                    for t in export_times
+                    time_domain.source_time_to_nearest_keyframe(float(t)) for t in export_times
                 ]
 
                 # Deduplicate consecutive indices
@@ -577,7 +579,7 @@ class ExportComponent:
                 for out_idx, kf_idx, kf_time in export_keyframes:
                     # Prefer get_keyframe() (InterpolatableSource) for direct access
                     # Fall back to get_frame_at_source_time() for discrete sources
-                    if hasattr(model, 'get_keyframe'):
+                    if hasattr(model, "get_keyframe"):
                         gaussian_data = model.get_keyframe(kf_idx)
                     else:
                         gaussian_data = model.get_frame_at_source_time(float(kf_idx))
@@ -588,7 +590,9 @@ class ExportComponent:
 
                     # Validate data type (enforces standard gsply types only)
                     try:
-                        _validate_gaussian_data(gaussian_data, context=f"snap_export(keyframe={kf_idx})")
+                        _validate_gaussian_data(
+                            gaussian_data, context=f"snap_export(keyframe={kf_idx})"
+                        )
                     except (TypeError, ValueError) as e:
                         logger.error(str(e))
                         continue
@@ -624,12 +628,11 @@ class ExportComponent:
                     t_float = float(t)
 
                     # Get data at this time
-                    if hasattr(model, 'get_frame_at_source_time'):
+                    if hasattr(model, "get_frame_at_source_time"):
                         gaussian_data = model.get_frame_at_source_time(t_float)
                     else:
                         # Fallback for legacy models
-                        from src.domain.time import TimeDomain as TD
-                        td = getattr(model, 'time_domain', None)
+                        td = getattr(model, "time_domain", None)
                         if td:
                             normalized = td.to_normalized(t_float)
                         else:
@@ -643,7 +646,9 @@ class ExportComponent:
 
                     # Validate data type (enforces standard gsply types only)
                     try:
-                        _validate_gaussian_data(gaussian_data, context=f"interpolated_export(t={t_float:.4f})")
+                        _validate_gaussian_data(
+                            gaussian_data, context=f"interpolated_export(t={t_float:.4f})"
+                        )
                     except (TypeError, ValueError) as e:
                         logger.error(str(e))
                         continue
@@ -775,8 +780,7 @@ class ExportComponent:
             if sink_class is None:
                 available = DataSinkRegistry.names()
                 raise ValueError(
-                    f"Unknown sink format: '{sink_format}'. "
-                    f"Available: {', '.join(available)}"
+                    f"Unknown sink format: '{sink_format}'. Available: {', '.join(available)}"
                 )
 
             sink = sink_class()
@@ -844,8 +848,7 @@ class ExportComponent:
             if sink_class is None:
                 available = DataSinkRegistry.names()
                 raise ValueError(
-                    f"Unknown sink format: '{sink_format}'. "
-                    f"Available: {', '.join(available)}"
+                    f"Unknown sink format: '{sink_format}'. Available: {', '.join(available)}"
                 )
 
             sink = sink_class()
@@ -873,8 +876,9 @@ class ExportComponent:
 
             # Export each frame
             use_tqdm = sys.stderr.isatty()
-            with suppress_excessive_logging():
-                with tqdm(
+            with (
+                suppress_excessive_logging(),
+                tqdm(
                     total=num_frames,
                     desc="Exporting frames",
                     unit="frame",
@@ -883,31 +887,32 @@ class ExportComponent:
                     dynamic_ncols=True,
                     miniters=1,
                     mininterval=0.1,
-                ) as pbar:
-                    for idx, frame_idx in enumerate(frames_to_export):
-                        # Get frame as GaussianData
-                        frame_data = data_source.get_frame(frame_idx)
+                ) as pbar,
+            ):
+                for idx, frame_idx in enumerate(frames_to_export):
+                    # Get frame as GaussianData
+                    frame_data = data_source.get_frame(frame_idx)
 
-                        if frame_data is None:
-                            tqdm.write(
-                                f"Warning: No data for frame {frame_idx}, skipping",
-                                file=sys.stderr,
-                            )
-                            pbar.update(1)
-                            continue
-
-                        # Apply edits if provided
-                        if edit_applier:
-                            frame_data = edit_applier(frame_data)
-
-                        # Export frame
-                        output_path = output_dir / f"frame_{frame_idx:05d}{sink_meta.file_extension}"
-                        sink.export(frame_data, str(output_path), **options)
-
+                    if frame_data is None:
+                        tqdm.write(
+                            f"Warning: No data for frame {frame_idx}, skipping",
+                            file=sys.stderr,
+                        )
                         pbar.update(1)
+                        continue
 
-                        if progress_callback:
-                            progress_callback(idx + 1, num_frames)
+                    # Apply edits if provided
+                    if edit_applier:
+                        frame_data = edit_applier(frame_data)
+
+                    # Export frame
+                    output_path = output_dir / f"frame_{frame_idx:05d}{sink_meta.file_extension}"
+                    sink.export(frame_data, str(output_path), **options)
+
+                    pbar.update(1)
+
+                    if progress_callback:
+                        progress_callback(idx + 1, num_frames)
 
             # Emit export completed event
             if self.event_bus:
@@ -918,9 +923,7 @@ class ExportComponent:
                     output_dir=str(output_dir),
                 )
 
-            logger.info(
-                f"Export completed: {num_frames} frames written to {output_dir}"
-            )
+            logger.info(f"Export completed: {num_frames} frames written to {output_dir}")
             return True
 
         except Exception as e:

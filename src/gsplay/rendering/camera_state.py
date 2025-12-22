@@ -21,12 +21,10 @@ RENDERING:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Tuple
 
 import numpy as np
-from numpy.typing import NDArray
-
 import viser.transforms as vt
+from numpy.typing import NDArray
 
 from .quaternion_utils import quat_from_euler_deg
 
@@ -339,9 +337,7 @@ class CameraState:
 
         self._invalidate_c2w()
 
-    def set_from_euler(
-        self, azimuth: float, elevation: float, roll: float = 0.0
-    ) -> None:
+    def set_from_euler(self, azimuth: float, elevation: float, roll: float = 0.0) -> None:
         """Set orientation from Euler angles (keeps distance/look_at)."""
         self.set_from_orbit(azimuth, elevation, roll, self._distance, self.look_at)
 
@@ -364,7 +360,7 @@ class CameraState:
             "up_direction": tuple(float(x) for x in self.up),
         }
 
-    def get_K(self, img_wh: Tuple[int, int]) -> NDArray[np.float32]:
+    def get_K(self, img_wh: tuple[int, int]) -> NDArray[np.float32]:
         """
         Get camera intrinsic matrix for given image size.
 
@@ -390,7 +386,7 @@ class CameraState:
         )
         return K
 
-    def copy(self) -> "CameraState":
+    def copy(self) -> CameraState:
         """Create a deep copy of this state."""
         return CameraState(
             _azimuth=self._azimuth,
@@ -436,7 +432,7 @@ class CameraState:
         roll: float,
         distance: float,
         look_at: np.ndarray,
-    ) -> "CameraState":
+    ) -> CameraState:
         """Create CameraState from Euler angles."""
         return cls(
             _azimuth=azimuth,

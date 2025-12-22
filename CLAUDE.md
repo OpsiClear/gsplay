@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 This is a real-time gsplay for rendering dynamic 4D Gaussian Splatting scenes. The system supports:
+
 1. **Local PLY Mode**: Loads sequences of .ply files directly from disk
 2. **Composite Mode**: Combines multiple PLY sources with layer management
 3. **Plugin System**: Extensible architecture for custom data sources and sinks
@@ -26,6 +27,7 @@ uv pip install -e .
 ```
 
 If you encounter issues with `gsplat` or other dependencies, use:
+
 ```bash
 uv sync --no-build-isolation
 ```
@@ -33,6 +35,7 @@ uv sync --no-build-isolation
 ## Running the Application
 
 ### Quick Start (Local PLY Files)
+
 ```bash
 # Direct folder path (simplest method)
 uv run gsplay --config ./path/to/ply/folder
@@ -44,6 +47,7 @@ gsplay --config ./path/to/ply/folder
 ### Configuration Files
 
 Create a JSON config for more options:
+
 ```json
 {
     "module": "load-ply",
@@ -54,6 +58,7 @@ Create a JSON config for more options:
 ```
 
 For composite/multi-layer scenes:
+
 ```json
 {
     "module": "composite",
@@ -222,6 +227,7 @@ infrastructure/registry/
 ### Key Components
 
 **Domain Layer** (`src/domain/`):
+
 - `entities.py`: GSTensor, GSData type re-exports from gsply
 - `data.py`: GaussianData wrapper (unified CPU/GPU container)
 - `interfaces.py`: ModelInterface, BaseGaussianSource, InterpolatableSource, ContinuousTimeSource, DataSinkProtocol
@@ -230,6 +236,7 @@ infrastructure/registry/
 - `services/transform.py`: Pure transform logic
 
 **Infrastructure Layer** (`src/infrastructure/`):
+
 - `processing/ply/`: PLY file loading, format detection, writing
 - `exporters/`: Export format implementations (PlySink, CompressedPlySink)
 - `registry/`: Plugin registry for sources and sinks
@@ -238,16 +245,19 @@ infrastructure/registry/
 - `model_factory.py`: Model instantiation factory
 
 **Models Layer** (`src/models/`):
+
 - `ply/optimized_model.py`: OptimizedPlyModel (main PLY implementation)
 - `ply/interpolated_model.py`: Interpolated PLY model
 - `composite/composite_model.py`: CompositeModel (multi-layer scenes)
 
 **Plugin System** (`src/plugins/`):
+
 - See `src/plugins/PLUGINS.md` for comprehensive plugin development guide
 - Supports: BaseGaussianSource, InterpolatableSource, ContinuousTimeSource, DataSinkProtocol
 - Auto-discovery via entry points in pyproject.toml
 
 **Presentation Layer** (`src/gsplay/`):
+
 - `core/main.py`: Main CLI entry point
 - `core/app.py`: UniversalGSPlay orchestration, bake view logic
 - `core/components/`: Component-based architecture (model, render, export)
@@ -259,6 +269,7 @@ infrastructure/registry/
 - `interaction/events.py`: Event bus system
 
 **Shared Utilities** (`src/shared/`):
+
 - `math.py`: knn, set_random_seed
 - `exceptions.py`: Custom exceptions (PluginLoadError, etc.)
 - `perf.py`: Performance monitoring utilities
@@ -291,6 +302,7 @@ The gsplay supports these module types in JSON configs:
 - **"composite"**: Multi-layer composite scenes
 
 Custom plugins can be registered via entry points:
+
 ```toml
 [project.entry-points."gsplay.plugins"]
 my-source = "my_package.source:MySource"
@@ -310,7 +322,38 @@ pytest tests/ -v
 
 # Run with coverage
 pytest tests/ -v --cov=src --cov-report=html
+
+# Pre-commit hooks
+uv pip install pre-commit          # Install pre-commit
+pre-commit install                  # Install git hooks
+pre-commit run --all-files          # Run all hooks manually
+pre-commit autoupdate               # Update hook versions
+
+# Linting & Formatting (manual)
+ruff check src/ --fix               # Lint with auto-fix
+ruff format src/                    # Format code
 ```
+
+## Pre-commit Hooks
+
+This project uses pre-commit for automated code quality checks. Hooks include:
+
+- **ruff**: Linting + formatting (replaces black, isort, flake8)
+- **ty**: Type checking (Astral's fast type checker, 60x faster than mypy)
+- **codespell**: Typo detection
+- **bandit**: Security scanning
+- **markdownlint**: Markdown linting
+- **shellcheck**: Shell script linting
+- **commitizen**: Conventional commit messages
+
+Install hooks after cloning:
+
+```bash
+uv pip install -e ".[dev]"
+pre-commit install
+```
+
+**Note**: ty is configured with lenient settings for gradual type adoption. See `[tool.ty]` in pyproject.toml to adjust strictness as the codebase improves.
 
 ## Important Conventions
 
@@ -327,6 +370,7 @@ pytest tests/ -v --cov=src --cov-report=html
 ## Dependencies
 
 Core dependencies (defined in pyproject.toml):
+
 - **torch/torchvision**: Deep learning framework, GPU JPEG encoding (nvJPEG)
 - **viser**: Web-based 3D gsplay UI
 - **gsplat**: Gaussian splatting rasterization
@@ -342,12 +386,14 @@ Core dependencies (defined in pyproject.toml):
 Viser uses a **different look-at convention** than standard OpenGL:
 
 **Viser convention:**
+
 - `forward = normalize(look_at - position)` [toward target]
 - `right = normalize(cross(forward, up_hint))`
 - `up = cross(forward, right)` [NOTE: `forward x right`, not `right x forward`!]
 - `R = [right, up, forward]` [camera looks down **+Z** toward target]
 
 **OpenGL convention (DO NOT USE with viser):**
+
 - `up = cross(right, forward)`
 - `R = [right, up, -forward]` [camera looks down **-Z**]
 
@@ -356,6 +402,7 @@ Viser uses a **different look-at convention** than standard OpenGL:
 The "Bake View" feature rotates/translates the model to preserve the current view when camera resets to default isometric position (az=45 deg, el=30 deg).
 
 **Key files:**
+
 - `src/gsplay/core/app.py`: `_bake_camera_view()` - main bake logic
 - `src/gsplay/rendering/camera.py`: `apply_to_viser()` - camera state application
 
@@ -364,6 +411,7 @@ The "Bake View" feature rotates/translates the model to preserve the current vie
 1. **Use viser's wxyz directly for R_current**: Read `camera.wxyz` from viser (what rendering uses)
 
 2. **Use `viser_look_at_matrix()` for R_default**: Matches viser's internal computation
+
    ```python
    def viser_look_at_matrix(position, target):
        forward = normalize(target - position)
@@ -377,6 +425,7 @@ The "Bake View" feature rotates/translates the model to preserve the current vie
    - `_bake_camera_view()` sets only `position`, `look_at`, `up_direction`
 
 4. **View preservation formula:**
+
    ```
    R_delta = R_default @ R_current.T
    R_new_model = R_delta @ R_old_model

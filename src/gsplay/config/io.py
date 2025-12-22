@@ -8,11 +8,12 @@ to/from YAML files per-dataset.
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
-from dataclasses import asdict
+
 
 if TYPE_CHECKING:
     from src.gsplay.config.settings import GSPlayConfig
@@ -44,9 +45,7 @@ def _flatten_tuples(obj: Any) -> Any:
     if isinstance(obj, dict):
         result = {}
         for key, value in obj.items():
-            if key in ("sphere_center", "cuboid_center") and isinstance(
-                value, (tuple, list)
-            ):
+            if key in ("sphere_center", "cuboid_center") and isinstance(value, (tuple, list)):
                 # Flatten 3D tuple to x, y, z fields
                 if len(value) == 3:
                     result[f"{key}_x"] = float(value[0])
@@ -119,7 +118,7 @@ def _unflatten_tuples(obj: Any) -> Any:
                     z_key = f"{base_key}_z"
                     if y_key in obj and z_key in obj:
                         result[base_key] = (
-                            float(obj[key]),
+                            float(value),
                             float(obj[y_key]),
                             float(obj[z_key]),
                         )
@@ -348,14 +347,14 @@ def import_viewer_config(
 
     # Try safe_load first (handles standard YAML)
     try:
-        with open(input_path, "r") as f:
+        with open(input_path) as f:
             import_data = yaml.safe_load(f)
     except yaml.constructor.ConstructorError:
         # Fallback: file may contain Python-specific tags (e.g., !!python/tuple)
         # Use unsafe loader
         logger.warning("Config file contains Python-specific tags, using unsafe loader")
-        with open(input_path, "r") as f:
-            import_data = yaml.load(f, Loader=yaml.Loader)
+        with open(input_path) as f:
+            import_data = yaml.load(f, Loader=yaml.Loader)  # nosec B506
 
     if not import_data:
         logger.error(f"Empty or invalid config file: {input_path}")
@@ -377,7 +376,9 @@ def import_viewer_config(
             logger.warning("camera_controller.state is None, cannot import camera pose")
 
         if camera_controller.scene_bounds is None:
-            logger.warning("camera_controller.scene_bounds is None, camera may not be applied correctly")
+            logger.warning(
+                "camera_controller.scene_bounds is None, camera may not be applied correctly"
+            )
 
         if camera_controller.state is not None:
             import numpy as np
@@ -411,9 +412,7 @@ def import_viewer_config(
                 if "look_at" in camera_data:
                     look_at = camera_data["look_at"]
                     if isinstance(look_at, (list, tuple)):
-                        camera_controller.state.look_at = np.array(
-                            look_at, dtype=np.float64
-                        )
+                        camera_controller.state.look_at = np.array(look_at, dtype=np.float64)
                 # Apply distance via set_from_orbit (distance is read-only property)
                 if new_distance is not None:
                     camera_controller.state.set_from_orbit(
@@ -451,8 +450,8 @@ def import_viewer_config(
 
     # Import transform values (with migration from old scene_transform)
     if "transform_values" in import_data:
-        from gsmod import TransformValues
         import numpy as np
+        from gsmod import TransformValues
 
         tv_data = import_data["transform_values"]
         translate = np.array(tv_data.get("translate", [0.0, 0.0, 0.0]), dtype=np.float32)
@@ -494,9 +493,9 @@ def import_viewer_config(
         logger.info("Imported transform values from config")
     elif "scene_transform" in import_data:
         # Migration: Convert old SceneTransform to TransformValues
+        import numpy as np
         from gsmod import TransformValues
         from gsmod.transform.api import euler_to_quaternion
-        import numpy as np
 
         st_data = import_data["scene_transform"]
         # Convert Euler (degrees) to quaternion
@@ -609,6 +608,7 @@ def import_viewer_config(
     # Import spatial filter values
     if "filter_values" in import_data:
         from gsmod import FilterValues
+
         fv_data = import_data["filter_values"] or {}
 
         # Normalize list fields to tuples where appropriate

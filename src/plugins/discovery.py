@@ -10,14 +10,14 @@ from __future__ import annotations
 import logging
 from importlib.metadata import entry_points
 from pathlib import Path
-from typing import Type
 
 from src.domain.interfaces import BaseGaussianSource
+
 
 logger = logging.getLogger(__name__)
 
 
-def discover_plugins(group: str = "gsplay.plugins") -> dict[str, Type[BaseGaussianSource]]:
+def discover_plugins(group: str = "gsplay.plugins") -> dict[str, type[BaseGaussianSource]]:
     """Discover plugins from entry_points.
 
     Parameters
@@ -43,7 +43,7 @@ def discover_plugins(group: str = "gsplay.plugins") -> dict[str, Type[BaseGaussi
     >>> print(plugins.keys())
     dict_keys(['load-ply', 'my-format'])
     """
-    discovered: dict[str, Type[BaseGaussianSource]] = {}
+    discovered: dict[str, type[BaseGaussianSource]] = {}
 
     try:
         eps = entry_points(group=group)
@@ -125,7 +125,6 @@ def discover_from_directory(
     for file in directory.glob(pattern):
         if file.name.startswith("_"):
             continue
-        module_name = file.stem
         modules.append(str(file))
         logger.debug("Found potential plugin module: %s", file)
 
@@ -170,8 +169,8 @@ def get_plugin_info() -> dict[str, dict]:
 
 
 __all__ = [
+    "discover_from_directory",
     "discover_plugins",
     "discover_sinks",
-    "discover_from_directory",
     "get_plugin_info",
 ]

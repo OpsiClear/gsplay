@@ -41,7 +41,7 @@ import threading
 import time
 from contextlib import suppress
 from http import HTTPStatus
-from typing import Set
+
 
 logger = logging.getLogger(__name__)
 
@@ -96,12 +96,14 @@ class FrameBuffer:
         self._new_frame_event.clear()
         return result
 
+
 # Check for websockets availability
 _WEBSOCKETS_AVAILABLE = False
 try:
     import websockets
-    from websockets.asyncio.server import serve, ServerConnection
+    from websockets.asyncio.server import ServerConnection, serve
     from websockets.http11 import Request, Response
+
     _WEBSOCKETS_AVAILABLE = True
 except ImportError:
     logger.debug("websockets not available - WebSocket streaming disabled")
@@ -124,7 +126,7 @@ class WebSocketStreamServer:
         self,
         port: int = 0,
         target_fps: int = 30,
-        frame_buffer: "FrameBuffer | None" = None,
+        frame_buffer: FrameBuffer | None = None,
     ):
         """Initialize the WebSocket stream server.
 
@@ -138,9 +140,7 @@ class WebSocketStreamServer:
             Shared frame buffer. If None, creates a new one.
         """
         if not _WEBSOCKETS_AVAILABLE:
-            raise RuntimeError(
-                "websockets not installed. Run: pip install websockets"
-            )
+            raise RuntimeError("websockets not installed. Run: pip install websockets")
 
         self.port = port
         self.target_fps = target_fps
@@ -152,7 +152,7 @@ class WebSocketStreamServer:
         else:
             self.frame_buffer = frame_buffer
 
-        self._clients: Set[ServerConnection] = set()
+        self._clients: set[ServerConnection] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._running = False
@@ -218,9 +218,7 @@ class WebSocketStreamServer:
         # Start broadcast task
         self._broadcast_task = asyncio.create_task(self._broadcast_loop())
 
-    async def _handle_http(
-        self, connection: ServerConnection, request: Request
-    ) -> Response | None:
+    async def _handle_http(self, connection: ServerConnection, request: Request) -> Response | None:
         """Handle HTTP requests (serve HTML page).
 
         Returns None for WebSocket upgrade requests to allow the upgrade to proceed.
@@ -238,30 +236,37 @@ class WebSocketStreamServer:
             return Response(
                 HTTPStatus.OK,
                 "OK",
-                websockets.Headers([
-                    ("Content-Type", "text/html; charset=utf-8"),
-                    ("Content-Length", str(len(html))),
-                ]),
+                websockets.Headers(
+                    [
+                        ("Content-Type", "text/html; charset=utf-8"),
+                        ("Content-Length", str(len(html))),
+                    ]
+                ),
                 html.encode(),
             )
 
         # Status endpoint
         if path == "/status":
             import json
+
             frame_data, frame_id = self.frame_buffer.get_frame()
-            status = json.dumps({
-                "ok": True,
-                "clients": len(self._clients),
-                "has_frame": frame_data is not None,
-                "frame_id": frame_id,
-            })
+            status = json.dumps(
+                {
+                    "ok": True,
+                    "clients": len(self._clients),
+                    "has_frame": frame_data is not None,
+                    "frame_id": frame_id,
+                }
+            )
             return Response(
                 HTTPStatus.OK,
                 "OK",
-                websockets.Headers([
-                    ("Content-Type", "application/json"),
-                    ("Content-Length", str(len(status))),
-                ]),
+                websockets.Headers(
+                    [
+                        ("Content-Type", "application/json"),
+                        ("Content-Length", str(len(status))),
+                    ]
+                ),
                 status.encode(),
             )
 
@@ -372,7 +377,7 @@ class WebSocketStreamServer:
 
     def _get_viewer_html(self) -> str:
         """Generate the WebSocket viewer HTML page."""
-        return """<!DOCTYPE html>
+        return r"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">

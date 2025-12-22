@@ -14,6 +14,7 @@ from gsplay_launcher.api.routes.instances import router as instances_router
 from gsplay_launcher.api.routes.logs import router as logs_router
 from gsplay_launcher.api.routes.proxy import router as proxy_router
 
+
 # Main API router (prefixed with /api)
 api_router = APIRouter(prefix="/api", tags=["api"])
 api_router.include_router(health_router)

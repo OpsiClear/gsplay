@@ -5,4 +5,5 @@ from src.infrastructure.validation.config_validator import (
     ValidationResult,
 )
 
+
 __all__ = ["ConfigValidator", "ValidationResult"]

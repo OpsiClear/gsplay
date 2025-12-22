@@ -5,8 +5,10 @@ Dataclasses shared across processing strategies.
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 from src.domain.entities import GSTensor
 from src.gsplay.config.settings import GSPlayConfig
+
 from .protocols import ColorProcessor, GSBridge, OpacityAdjuster, SceneTransformer
 from .volume_filter import VolumeFilterService
 

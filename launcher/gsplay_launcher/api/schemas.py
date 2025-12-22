@@ -14,15 +14,26 @@ class CreateInstanceRequest(BaseModel):
     config_path: str = Field(..., description="Path to PLY folder or JSON config")
     name: str = Field("", description="Human-readable name")
     port: int | None = Field(None, description="Port number (auto-assigned if null)")
-    host: str | None = Field(None, description="Host to bind to (uses launcher default if null, 0.0.0.0 for external access)")
-    stream_port: int = Field(-1, description="WebSocket stream port (-1 = auto-assign to viser_port+1, 0 = disabled)")
+    host: str | None = Field(
+        None,
+        description="Host to bind to (uses launcher default if null, 0.0.0.0 for external access)",
+    )
+    stream_port: int = Field(
+        -1, description="WebSocket stream port (-1 = auto-assign to viser_port+1, 0 = disabled)"
+    )
     gpu: int | None = Field(None, description="GPU device number")
     view_only: bool = Field(False, description="Hide editing UI")
     compact: bool = Field(False, description="Use compact/mobile UI")
     log_level: str = Field("INFO", description="Logging level")
-    custom_ip: str | None = Field(None, description="Custom IP for Open button URL (auto-detect if null)")
-    viewer_id: str | None = Field(None, description="Custom ID for /v/{id}/ proxy path (auto-generated if null)")
-    stream_token: str | None = Field(None, description="Custom token for /s/{token}/ proxy path (auto-generated if null)")
+    custom_ip: str | None = Field(
+        None, description="Custom IP for Open button URL (auto-detect if null)"
+    )
+    viewer_id: str | None = Field(
+        None, description="Custom ID for /v/{id}/ proxy path (auto-generated if null)"
+    )
+    stream_token: str | None = Field(
+        None, description="Custom token for /s/{token}/ proxy path (auto-generated if null)"
+    )
 
 
 class InstanceResponse(BaseModel):
@@ -222,8 +233,12 @@ class BrowseConfigResponse(BaseModel):
     enabled: bool
     root_path: str | None = None
     default_custom_ip: str | None = None
-    external_url: str | None = None  # External base URL for proxy access (e.g., https://gsplay.4dgst.win)
-    network_url: str | None = None  # Persistent base URL for both viser viewer and streaming channel
+    external_url: str | None = (
+        None  # External base URL for proxy access (e.g., https://gsplay.4dgst.win)
+    )
+    network_url: str | None = (
+        None  # Persistent base URL for both viser viewer and streaming channel
+    )
     view_only: bool = False  # If true, all instances are forced to view-only mode
     history_limit: int = 5  # Maximum number of launch history entries to show in UI
 
@@ -234,13 +249,21 @@ class BrowseLaunchRequest(BaseModel):
     path: str = Field(..., description="Relative path to launch")
     name: str = Field("", description="Human-readable name")
     port: int | None = Field(None, description="Port number (auto-assigned if null)")
-    stream_port: int = Field(-1, description="WebSocket stream port (-1 = auto-assign to viser_port+1, 0 = disabled)")
+    stream_port: int = Field(
+        -1, description="WebSocket stream port (-1 = auto-assign to viser_port+1, 0 = disabled)"
+    )
     gpu: int | None = Field(None, description="GPU device number")
     view_only: bool = Field(False, description="Hide editing UI")
     compact: bool = Field(False, description="Use compact/mobile UI")
-    custom_ip: str | None = Field(None, description="Custom IP for Open button URL (auto-detect if null)")
-    viewer_id: str | None = Field(None, description="Custom ID for /v/{id}/ proxy path (auto-generated if null)")
-    stream_token: str | None = Field(None, description="Custom token for /s/{token}/ proxy path (auto-generated if null)")
+    custom_ip: str | None = Field(
+        None, description="Custom IP for Open button URL (auto-detect if null)"
+    )
+    viewer_id: str | None = Field(
+        None, description="Custom ID for /v/{id}/ proxy path (auto-generated if null)"
+    )
+    stream_token: str | None = Field(
+        None, description="Custom token for /s/{token}/ proxy path (auto-generated if null)"
+    )
 
 
 # Log API schemas

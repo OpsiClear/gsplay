@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
+
 
 if TYPE_CHECKING:
     import viser
@@ -22,10 +24,14 @@ logger = logging.getLogger(__name__)
 
 # Type alias for gizmo update callback
 # Callback receives: (filter_type, center_xyz, rotation_axis_angle_or_none)
-GizmoUpdateCallback = Callable[[str, tuple[float, float, float], tuple[float, float, float] | None], None]
+GizmoUpdateCallback = Callable[
+    [str, tuple[float, float, float], tuple[float, float, float] | None], None
+]
 
 
-def _axis_angle_to_quaternion(axis_angle: tuple[float, float, float]) -> tuple[float, float, float, float]:
+def _axis_angle_to_quaternion(
+    axis_angle: tuple[float, float, float],
+) -> tuple[float, float, float, float]:
     """Convert axis-angle rotation to quaternion (w, x, y, z)."""
     ax, ay, az = axis_angle
     angle = math.sqrt(ax * ax + ay * ay + az * az)
@@ -59,7 +65,9 @@ def _euler_to_quaternion(rx: float, ry: float, rz: float) -> tuple[float, float,
     )
 
 
-def _quaternion_to_axis_angle(quat: tuple[float, float, float, float]) -> tuple[float, float, float]:
+def _quaternion_to_axis_angle(
+    quat: tuple[float, float, float, float],
+) -> tuple[float, float, float]:
     """Convert quaternion (w, x, y, z) to axis-angle rotation."""
     w, x, y, z = quat
 
@@ -124,36 +132,57 @@ def _create_wireframe_sphere(
 
 def _create_axis_lines(size: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
     """Create axis indicator lines (X=red, Y=green, Z=blue)."""
-    vertices = np.array([
-        [0, 0, 0], [size, 0, 0],  # X axis
-        [0, 0, 0], [0, size, 0],  # Y axis
-        [0, 0, 0], [0, 0, size],  # Z axis
-    ], dtype=np.float32)
+    vertices = np.array(
+        [
+            [0, 0, 0],
+            [size, 0, 0],  # X axis
+            [0, 0, 0],
+            [0, size, 0],  # Y axis
+            [0, 0, 0],
+            [0, 0, size],  # Z axis
+        ],
+        dtype=np.float32,
+    )
     lines = np.array([[0, 1], [2, 3], [4, 5]], dtype=np.int32)
     return vertices, lines
 
 
 def _create_wireframe_box() -> tuple[np.ndarray, np.ndarray]:
     """Create wireframe box vertices and line indices (unit cube centered at origin)."""
-    vertices = np.array([
-        [-0.5, -0.5, -0.5],
-        [0.5, -0.5, -0.5],
-        [0.5, 0.5, -0.5],
-        [-0.5, 0.5, -0.5],
-        [-0.5, -0.5, 0.5],
-        [0.5, -0.5, 0.5],
-        [0.5, 0.5, 0.5],
-        [-0.5, 0.5, 0.5],
-    ], dtype=np.float32)
+    vertices = np.array(
+        [
+            [-0.5, -0.5, -0.5],
+            [0.5, -0.5, -0.5],
+            [0.5, 0.5, -0.5],
+            [-0.5, 0.5, -0.5],
+            [-0.5, -0.5, 0.5],
+            [0.5, -0.5, 0.5],
+            [0.5, 0.5, 0.5],
+            [-0.5, 0.5, 0.5],
+        ],
+        dtype=np.float32,
+    )
 
-    lines = np.array([
-        # Bottom face
-        [0, 1], [1, 2], [2, 3], [3, 0],
-        # Top face
-        [4, 5], [5, 6], [6, 7], [7, 4],
-        # Vertical edges
-        [0, 4], [1, 5], [2, 6], [3, 7],
-    ], dtype=np.int32)
+    lines = np.array(
+        [
+            # Bottom face
+            [0, 1],
+            [1, 2],
+            [2, 3],
+            [3, 0],
+            # Top face
+            [4, 5],
+            [5, 6],
+            [6, 7],
+            [7, 4],
+            # Vertical edges
+            [0, 4],
+            [1, 5],
+            [2, 6],
+            [3, 7],
+        ],
+        dtype=np.int32,
+    )
 
     return vertices, lines
 
@@ -176,31 +205,49 @@ def _create_wireframe_frustum(
     far_w = far_h * aspect
 
     # Vertices: camera at origin, looking along -Z
-    vertices = np.array([
-        # Origin (camera position)
-        [0, 0, 0],
-        # Near plane corners
-        [-near_w, -near_h, -near],
-        [near_w, -near_h, -near],
-        [near_w, near_h, -near],
-        [-near_w, near_h, -near],
-        # Far plane corners
-        [-far_w, -far_h, -far],
-        [far_w, -far_h, -far],
-        [far_w, far_h, -far],
-        [-far_w, far_h, -far],
-    ], dtype=np.float32)
+    vertices = np.array(
+        [
+            # Origin (camera position)
+            [0, 0, 0],
+            # Near plane corners
+            [-near_w, -near_h, -near],
+            [near_w, -near_h, -near],
+            [near_w, near_h, -near],
+            [-near_w, near_h, -near],
+            # Far plane corners
+            [-far_w, -far_h, -far],
+            [far_w, -far_h, -far],
+            [far_w, far_h, -far],
+            [-far_w, far_h, -far],
+        ],
+        dtype=np.float32,
+    )
 
-    lines = np.array([
-        # Rays from origin to far corners
-        [0, 5], [0, 6], [0, 7], [0, 8],
-        # Near plane
-        [1, 2], [2, 3], [3, 4], [4, 1],
-        # Far plane
-        [5, 6], [6, 7], [7, 8], [8, 5],
-        # Connect near to far
-        [1, 5], [2, 6], [3, 7], [4, 8],
-    ], dtype=np.int32)
+    lines = np.array(
+        [
+            # Rays from origin to far corners
+            [0, 5],
+            [0, 6],
+            [0, 7],
+            [0, 8],
+            # Near plane
+            [1, 2],
+            [2, 3],
+            [3, 4],
+            [4, 1],
+            # Far plane
+            [5, 6],
+            [6, 7],
+            [7, 8],
+            [8, 5],
+            # Connect near to far
+            [1, 5],
+            [2, 6],
+            [3, 7],
+            [4, 8],
+        ],
+        dtype=np.int32,
+    )
 
     return vertices, lines
 
@@ -213,15 +260,15 @@ class FilterVisualizer:
     """
 
     # Colors for different filter types (RGB, 0-255) - vibrant, modern palette
-    SPHERE_COLOR = np.array([59, 130, 246], dtype=np.uint8)    # Bright blue
-    BOX_COLOR = np.array([249, 115, 22], dtype=np.uint8)       # Vibrant orange
-    ELLIPSOID_COLOR = np.array([168, 85, 247], dtype=np.uint8) # Vivid purple
-    FRUSTUM_COLOR = np.array([34, 197, 94], dtype=np.uint8)    # Emerald green
+    SPHERE_COLOR = np.array([59, 130, 246], dtype=np.uint8)  # Bright blue
+    BOX_COLOR = np.array([249, 115, 22], dtype=np.uint8)  # Vibrant orange
+    ELLIPSOID_COLOR = np.array([168, 85, 247], dtype=np.uint8)  # Vivid purple
+    FRUSTUM_COLOR = np.array([34, 197, 94], dtype=np.uint8)  # Emerald green
 
     # Axis colors (RGB)
-    AXIS_X_COLOR = np.array([239, 68, 68], dtype=np.uint8)     # Red
-    AXIS_Y_COLOR = np.array([34, 197, 94], dtype=np.uint8)     # Green
-    AXIS_Z_COLOR = np.array([59, 130, 246], dtype=np.uint8)    # Blue
+    AXIS_X_COLOR = np.array([239, 68, 68], dtype=np.uint8)  # Red
+    AXIS_Y_COLOR = np.array([34, 197, 94], dtype=np.uint8)  # Green
+    AXIS_Z_COLOR = np.array([59, 130, 246], dtype=np.uint8)  # Blue
 
     # Line widths
     MAIN_LINE_WIDTH = 3.0
@@ -289,14 +336,22 @@ class FilterVisualizer:
             self._frustum_handle.visible = self._visible and self._current_type == "Frustum"
 
         # Update axis visibility (hide when gizmo is enabled - gizmo has its own axes)
-        show_axes = self._visible and self._current_type in ("Box", "Ellipsoid", "Frustum") and not self._gizmo_enabled
+        show_axes = (
+            self._visible
+            and self._current_type in ("Box", "Ellipsoid", "Frustum")
+            and not self._gizmo_enabled
+        )
         for handle in [self._axis_x_handle, self._axis_y_handle, self._axis_z_handle]:
             if handle is not None:
                 handle.visible = show_axes
 
         # Update gizmo visibility
         if self._gizmo_handle is not None:
-            self._gizmo_handle.visible = self._visible and self._gizmo_enabled and self._current_type in ("Sphere", "Box", "Ellipsoid", "Frustum")
+            self._gizmo_handle.visible = (
+                self._visible
+                and self._gizmo_enabled
+                and self._current_type in ("Sphere", "Box", "Ellipsoid", "Frustum")
+            )
 
     def _remove_axes(self) -> None:
         """Remove axis handles."""
@@ -425,7 +480,7 @@ class FilterVisualizer:
 
         # Compose rotations: filter rotation + scene transform rotation
         final_quat = rotation_quat or (1.0, 0.0, 0.0, 0.0)
-        if self._transform_values is not None and hasattr(self._transform_values, 'rotation'):
+        if self._transform_values is not None and hasattr(self._transform_values, "rotation"):
             scene_rot = self._transform_values.rotation
             if scene_rot is not None:
                 # Compose: scene_rot * filter_rot
@@ -435,10 +490,12 @@ class FilterVisualizer:
         needs_recreate = False
         if self._gizmo_handle is not None:
             # Check if disable_rotations setting changed
-            if hasattr(self._gizmo_handle, 'disable_rotations'):
+            if hasattr(self._gizmo_handle, "disable_rotations"):
                 if self._gizmo_handle.disable_rotations != disable_rotations:
                     needs_recreate = True
-                    logger.debug(f"Gizmo needs recreate: disable_rotations changed from {self._gizmo_handle.disable_rotations} to {disable_rotations}")
+                    logger.debug(
+                        f"Gizmo needs recreate: disable_rotations changed from {self._gizmo_handle.disable_rotations} to {disable_rotations}"
+                    )
 
         # Remove gizmo if it needs to be recreated
         if needs_recreate:
@@ -475,7 +532,9 @@ class FilterVisualizer:
             return
 
         if self._updating_from_gizmo:
-            logger.warning("Gizmo update called while _updating_from_gizmo is True (possible re-entrant call)")
+            logger.warning(
+                "Gizmo update called while _updating_from_gizmo is True (possible re-entrant call)"
+            )
             return
 
         self._updating_from_gizmo = True
@@ -491,7 +550,7 @@ class FilterVisualizer:
 
             # Remove scene transform rotation to get filter-space rotation
             filter_quat = gizmo_quat
-            if self._transform_values is not None and hasattr(self._transform_values, 'rotation'):
+            if self._transform_values is not None and hasattr(self._transform_values, "rotation"):
                 scene_rot = self._transform_values.rotation
                 if scene_rot is not None:
                     # filter_rot = scene_rot^-1 * gizmo_rot
@@ -499,7 +558,9 @@ class FilterVisualizer:
                     filter_quat = self._quat_multiply(scene_rot_inv, gizmo_quat)
 
             # Convert quaternion to axis-angle
-            rotation_aa = _quaternion_to_axis_angle(filter_quat) if self._current_type != "Sphere" else None
+            rotation_aa = (
+                _quaternion_to_axis_angle(filter_quat) if self._current_type != "Sphere" else None
+            )
 
             # Call the callback
             try:
@@ -532,11 +593,11 @@ class FilterVisualizer:
         tv = self._transform_values
 
         # Check if transform is neutral
-        if hasattr(tv, 'is_neutral') and tv.is_neutral():
+        if hasattr(tv, "is_neutral") and tv.is_neutral():
             return verts
 
         # Use gsmod's inverse_matrix() if available
-        if hasattr(tv, 'inverse_matrix'):
+        if hasattr(tv, "inverse_matrix"):
             M_inv = tv.inverse_matrix()
             N = len(verts)
             verts_h = np.ones((N, 4), dtype=np.float32)
@@ -548,18 +609,26 @@ class FilterVisualizer:
         # Original transform: P_display = S*R*(P - center) + center + translate
         # Inverse: P_filter = R^-1 * S^-1 * (P_display - center - translate) + center
 
-        translate = getattr(tv, 'translate', None) or getattr(tv, 'translation', (0.0, 0.0, 0.0)) or (0.0, 0.0, 0.0)
+        translate = (
+            getattr(tv, "translate", None)
+            or getattr(tv, "translation", (0.0, 0.0, 0.0))
+            or (0.0, 0.0, 0.0)
+        )
         translate = np.array(translate, dtype=np.float32)
 
-        scale_raw = getattr(tv, 'scale', 1.0) or 1.0
-        if hasattr(scale_raw, '__len__'):
+        scale_raw = getattr(tv, "scale", 1.0) or 1.0
+        if hasattr(scale_raw, "__len__"):
             scale = np.array(scale_raw, dtype=np.float32)
         else:
             scale = np.array([scale_raw, scale_raw, scale_raw], dtype=np.float32)
 
-        rotate = getattr(tv, 'rotate', None) or getattr(tv, 'rotation', (1.0, 0.0, 0.0, 0.0)) or (1.0, 0.0, 0.0, 0.0)
+        rotate = (
+            getattr(tv, "rotate", None)
+            or getattr(tv, "rotation", (1.0, 0.0, 0.0, 0.0))
+            or (1.0, 0.0, 0.0, 0.0)
+        )
 
-        center = getattr(tv, 'center', None)
+        center = getattr(tv, "center", None)
         if center is not None:
             center = np.array(center, dtype=np.float32)
 
@@ -863,11 +932,14 @@ class FilterVisualizer:
         r21 = 2 * (y * z + w * x)
         r22 = 1 - 2 * (x * x + y * y)
 
-        R = np.array([
-            [r00, r01, r02],
-            [r10, r11, r12],
-            [r20, r21, r22],
-        ], dtype=np.float32)
+        R = np.array(
+            [
+                [r00, r01, r02],
+                [r10, r11, r12],
+                [r20, r21, r22],
+            ],
+            dtype=np.float32,
+        )
 
         return points @ R.T
 
@@ -894,11 +966,11 @@ class FilterVisualizer:
         tv = self._transform_values
 
         # Check if transform is neutral (no-op)
-        if hasattr(tv, 'is_neutral') and tv.is_neutral():
+        if hasattr(tv, "is_neutral") and tv.is_neutral():
             return verts
 
         # Use gsmod's to_matrix() for exact consistency with Gaussian transform
-        if hasattr(tv, 'to_matrix'):
+        if hasattr(tv, "to_matrix"):
             # Get the 4x4 transformation matrix from gsmod
             M = tv.to_matrix()  # 4x4 matrix
 
@@ -914,31 +986,31 @@ class FilterVisualizer:
 
         # Fallback: manual transform (for older gsmod versions without to_matrix)
         # Get translation - handle both attribute names
-        translate = getattr(tv, 'translate', None)
+        translate = getattr(tv, "translate", None)
         if translate is None:
-            translate = getattr(tv, 'translation', (0.0, 0.0, 0.0))
+            translate = getattr(tv, "translation", (0.0, 0.0, 0.0))
         if translate is None:
             translate = (0.0, 0.0, 0.0)
         translate = np.array(translate, dtype=np.float32)
 
         # Get scale - handle both scalar and per-axis
-        scale_raw = getattr(tv, 'scale', 1.0)
+        scale_raw = getattr(tv, "scale", 1.0)
         if scale_raw is None:
             scale_raw = 1.0
-        if hasattr(scale_raw, '__len__'):
+        if hasattr(scale_raw, "__len__"):
             scale = np.array(scale_raw, dtype=np.float32)
         else:
             scale = np.array([scale_raw, scale_raw, scale_raw], dtype=np.float32)
 
         # Get rotation quaternion - handle both attribute names
-        rotate = getattr(tv, 'rotate', None)
+        rotate = getattr(tv, "rotate", None)
         if rotate is None:
-            rotate = getattr(tv, 'rotation', (1.0, 0.0, 0.0, 0.0))
+            rotate = getattr(tv, "rotation", (1.0, 0.0, 0.0, 0.0))
         if rotate is None:
             rotate = (1.0, 0.0, 0.0, 0.0)
 
         # Get center/pivot point
-        center = getattr(tv, 'center', None)
+        center = getattr(tv, "center", None)
         if center is not None:
             center = np.array(center, dtype=np.float32)
 

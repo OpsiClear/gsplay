@@ -93,11 +93,12 @@ CONTENTS
 See each module for detailed documentation and implementation guidance.
 """
 
-from src.plugins.demo.demo_source import DemoRandomSource, DemoRandomSourceConfig
 from src.plugins.demo.demo_sink import DemoJsonSink
+from src.plugins.demo.demo_source import DemoRandomSource, DemoRandomSourceConfig
+
 
 __all__ = [
+    "DemoJsonSink",
     "DemoRandomSource",
     "DemoRandomSourceConfig",
-    "DemoJsonSink",
 ]

@@ -11,7 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from src.domain.interfaces import PluginState, HealthStatus, HealthCheckResult
+from src.domain.interfaces import HealthCheckResult, HealthStatus, PluginState
+
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +182,7 @@ class LifecycleMixin:
 
     # Context manager support
 
-    def __enter__(self) -> "LifecycleMixin":
+    def __enter__(self) -> LifecycleMixin:
         """Enter context - initialize plugin."""
         if self._state == PluginState.CREATED:
             try:
@@ -249,7 +250,7 @@ class LifecycleMixin:
 
 
 __all__ = [
-    "LifecycleError",
     "InvalidStateTransitionError",
+    "LifecycleError",
     "LifecycleMixin",
 ]

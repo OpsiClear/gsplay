@@ -16,11 +16,10 @@ from __future__ import annotations
 
 import logging
 
-from gsply import GSData, GSTensor
 from gsmod import GSDataPro
 from gsmod.torch import GSTensorPro
+from gsply import GSData, GSTensor
 
-from src.infrastructure.processing_mode import ProcessingMode
 from src.gsplay.config.settings import GSPlayConfig
 from src.gsplay.processing import (
     AllCpuStrategy,
@@ -40,6 +39,8 @@ from src.gsplay.processing import (
     TransformGpuStrategy,
     VolumeFilterService,
 )
+from src.infrastructure.processing_mode import ProcessingMode
+
 
 logger = logging.getLogger(__name__)
 
@@ -113,11 +114,15 @@ class EditManager:
         transform = self.config.transform_values
         translate = tuple(
             float(x)
-            for x in getattr(transform, "translate", getattr(transform, "translation", (0.0, 0.0, 0.0)))
+            for x in getattr(
+                transform, "translate", getattr(transform, "translation", (0.0, 0.0, 0.0))
+            )
         )
         rotate = tuple(
             float(x)
-            for x in getattr(transform, "rotate", getattr(transform, "rotation", (0.0, 0.0, 0.0, 1.0)))
+            for x in getattr(
+                transform, "rotate", getattr(transform, "rotation", (0.0, 0.0, 0.0, 1.0))
+            )
         )
         scale = (
             float(transform.scale)
@@ -156,9 +161,7 @@ class EditManager:
             self.config.volume_filter.processing_mode,  # Include mode for cache invalidation
         )
 
-        return hash(
-            (transform_tuple, color_tuple, volume_tuple, self.config.edits_active)
-        )
+        return hash((transform_tuple, color_tuple, volume_tuple, self.config.edits_active))
 
     def apply_edits(
         self,

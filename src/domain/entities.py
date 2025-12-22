@@ -13,8 +13,7 @@ Extended with gsmod Pro types for enhanced processing:
 from dataclasses import dataclass
 
 import gsply
-from gsmod import GSDataPro
-from gsmod.torch import GSTensorPro
+
 
 # Re-export gsply containers for convenience
 # Use GSData for CPU operations, GSTensor for GPU operations
@@ -63,6 +62,7 @@ class GaussianLayer:
         z_order: Rendering order (higher values render on top)
         opacity_multiplier: Global opacity adjustment for this layer (0.0 to 1.0)
     """
+
     data: GSTensor
     layer_id: str
     visible: bool = True
@@ -82,6 +82,7 @@ class CompositeGSTensor:
     Attributes:
         layers: List of GaussianLayer objects to compose
     """
+
     layers: list[GaussianLayer]
 
     def merge(self, filter_invisible: bool = True) -> GSTensor:
@@ -101,10 +102,7 @@ class CompositeGSTensor:
             ValueError: If no visible layers exist
         """
         # Filter and sort layers
-        layers_to_merge = [
-            layer for layer in self.layers
-            if not filter_invisible or layer.visible
-        ]
+        layers_to_merge = [layer for layer in self.layers if not filter_invisible or layer.visible]
 
         if not layers_to_merge:
             raise ValueError("No visible layers to merge")

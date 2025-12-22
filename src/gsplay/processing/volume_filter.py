@@ -22,8 +22,10 @@ import time
 from typing import Any
 
 from gsmod.config.values import FilterValues
+
 from src.domain.entities import GSData, GSDataPro, GSTensor, GSTensorPro
 from src.gsplay.config.settings import GSPlayConfig
+
 
 logger = logging.getLogger(__name__)
 

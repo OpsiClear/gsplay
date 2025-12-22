@@ -121,7 +121,14 @@
       "Bash(npm run build:*)",
       "Bash(source:*)",
       "Bash(sort:*)",
-      "Bash(.venv/bin/gsplay:*)"
+      "Bash(.venv/bin/gsplay:*)",
+      "Bash(.venv/bin/pre-commit:*)",
+      "Bash(uvx ty check:*)",
+      "WebFetch(domain:docs.astral.sh)",
+      "Bash(uvx ty:*)",
+      "Bash(uvx ruff check:*)",
+      "Bash(npx markdownlint-cli2:*)",
+      "Bash(git reset:*)"
     ],
     "deny": [],
     "ask": []

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import torch
 from gsmod import ColorValues
 
+
 if TYPE_CHECKING:
     from src.domain.entities import GSTensor
 
@@ -58,9 +59,7 @@ def _auto_contrast_torch(
     return ColorValues(contrast=contrast.item())
 
 
-def _auto_white_balance_torch(
-    sh0: torch.Tensor, method: str = "gray_world"
-) -> ColorValues:
+def _auto_white_balance_torch(sh0: torch.Tensor, method: str = "gray_world") -> ColorValues:
     """GPU auto white-balance: Gray World or White Patch."""
     if method == "white_patch":
         # Use brightest pixels (top 1%)
@@ -166,7 +165,7 @@ def _apply_auto_correction_cpu(sh0_numpy, correction_type: str) -> ColorValues:
 
 
 def apply_auto_correction(
-    gaussians: "GSTensor",
+    gaussians: GSTensor,
     correction_type: str,
     use_gpu: bool = True,
 ) -> ColorValues:

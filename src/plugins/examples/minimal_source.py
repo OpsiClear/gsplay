@@ -6,8 +6,6 @@ showing only the required methods.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 
 from src.domain.data import GaussianData

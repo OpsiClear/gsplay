@@ -44,10 +44,11 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING
 
 import numpy as np
+
 
 if TYPE_CHECKING:
     from src.gsplay.core.app import UniversalGSPlay
@@ -58,7 +59,7 @@ logger = logging.getLogger(__name__)
 class ControlRequestHandler(BaseHTTPRequestHandler):
     """HTTP request handler for control commands."""
 
-    viewer: "UniversalGSPlay"
+    viewer: UniversalGSPlay
 
     def log_message(self, format: str, *args) -> None:
         """Override to use logging instead of stderr."""
@@ -207,14 +208,18 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
             # Trigger rerender
             viewer.render_component.rerender()
 
-            self._send_json({
-                "ok": True,
-                "centroid": centroid,
-                "translation_applied": [tx, ty, tz],
-                "filtered_count": len(means),
-                "total_count": total_count,
-            })
-            logger.info(f"Scene centered: centroid={centroid} ({len(means)}/{total_count} gaussians)")
+            self._send_json(
+                {
+                    "ok": True,
+                    "centroid": centroid,
+                    "translation_applied": [tx, ty, tz],
+                    "filtered_count": len(means),
+                    "total_count": total_count,
+                }
+            )
+            logger.info(
+                f"Scene centered: centroid={centroid} ({len(means)}/{total_count} gaussians)"
+            )
 
         except Exception as e:
             logger.error(f"center-scene failed: {e}", exc_info=True)
@@ -226,10 +231,12 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
 
         try:
             state = viewer.api.get_state()
-            self._send_json({
-                "ok": True,
-                "state": state.to_dict(),
-            })
+            self._send_json(
+                {
+                    "ok": True,
+                    "state": state.to_dict(),
+                }
+            )
         except Exception as e:
             logger.error(f"get-state failed: {e}", exc_info=True)
             self._send_error_json(str(e), 500)
@@ -251,10 +258,12 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
             viewer.api.set_translation(float(x), float(y), float(z))
             viewer.render_component.rerender()
 
-            self._send_json({
-                "ok": True,
-                "translation": [x, y, z],
-            })
+            self._send_json(
+                {
+                    "ok": True,
+                    "translation": [x, y, z],
+                }
+            )
             logger.info(f"Translation set: ({x}, {y}, {z})")
 
         except Exception as e:
@@ -310,13 +319,15 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
                 state = viewer.camera_controller.get_rotation_state()
                 self._send_json({"ok": True, **state})
             else:
-                self._send_json({
-                    "ok": True,
-                    "active": False,
-                    "speed": 0.0,
-                    "axis": "y",
-                    "direction": "stopped",
-                })
+                self._send_json(
+                    {
+                        "ok": True,
+                        "active": False,
+                        "speed": 0.0,
+                        "axis": "y",
+                        "direction": "stopped",
+                    }
+                )
         except Exception as e:
             logger.error(f"rotation-state failed: {e}", exc_info=True)
             self._send_error_json(str(e), 500)
@@ -380,7 +391,7 @@ class ControlServer:
     Runs in a daemon thread, listening on viser_port + 2.
     """
 
-    def __init__(self, port: int, viewer: "UniversalGSPlay"):
+    def __init__(self, port: int, viewer: UniversalGSPlay):
         """Initialize control server.
 
         Parameters

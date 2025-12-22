@@ -51,7 +51,7 @@ uv run gsplay_launcher --external-url https://viewer.example.com
 
 ### Access the Dashboard
 
-Open http://localhost:8000 in your browser.
+Open <http://localhost:8000> in your browser.
 
 ## Frontend Development
 

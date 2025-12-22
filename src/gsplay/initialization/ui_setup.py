@@ -8,13 +8,15 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from src.gsplay.ui.layers import create_layer_controls
 from src.gsplay.ui.filter_visualizer import FilterVisualizer
+from src.gsplay.ui.layers import create_layer_controls
+
 
 if TYPE_CHECKING:
     import viser
-    from src.gsplay.core.app import UniversalGSPlay
+
     from src.gsplay.config.settings import UIHandles
+    from src.gsplay.core.app import UniversalGSPlay
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ class UISetup:
     complexity and improve testability.
     """
 
-    def __init__(self, viewer: "UniversalGSPlay"):
+    def __init__(self, viewer: UniversalGSPlay):
         """Initialize UI setup helper.
 
         Parameters
@@ -37,12 +39,12 @@ class UISetup:
         self._viewer = viewer
 
     @property
-    def server(self) -> "viser.ViserServer":
+    def server(self) -> viser.ViserServer:
         """Get viser server."""
         return self._viewer.server
 
     @property
-    def ui(self) -> "UIHandles | None":
+    def ui(self) -> UIHandles | None:
         """Get UI handles."""
         return self._viewer.ui
 
@@ -101,9 +103,7 @@ class UISetup:
 
     def setup_layer_controls(self) -> None:
         """Setup layer management UI if model supports layers."""
-        if hasattr(self.model, "get_layer_info") and hasattr(
-            self.model, "set_layer_visibility"
-        ):
+        if hasattr(self.model, "get_layer_info") and hasattr(self.model, "set_layer_visibility"):
             logger.info("Setting up layer controls for multi-layer model")
             layer_controls = create_layer_controls(self.server, self.model)
             logger.info(f"Layer controls created: {list(layer_controls.keys())}")
@@ -183,19 +183,31 @@ class UISetup:
 
             if filter_type == "Sphere":
                 if self.ui.sphere_center_x:
-                    self.ui.sphere_center_x.value = clamp(center[0], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
+                    self.ui.sphere_center_x.value = clamp(
+                        center[0], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX
+                    )
                 if self.ui.sphere_center_y:
-                    self.ui.sphere_center_y.value = clamp(center[1], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
+                    self.ui.sphere_center_y.value = clamp(
+                        center[1], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX
+                    )
                 if self.ui.sphere_center_z:
-                    self.ui.sphere_center_z.value = clamp(center[2], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
+                    self.ui.sphere_center_z.value = clamp(
+                        center[2], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX
+                    )
 
             elif filter_type == "Box":
                 if self.ui.box_center_x:
-                    self.ui.box_center_x.value = clamp(center[0], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
+                    self.ui.box_center_x.value = clamp(
+                        center[0], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX
+                    )
                 if self.ui.box_center_y:
-                    self.ui.box_center_y.value = clamp(center[1], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
+                    self.ui.box_center_y.value = clamp(
+                        center[1], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX
+                    )
                 if self.ui.box_center_z:
-                    self.ui.box_center_z.value = clamp(center[2], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
+                    self.ui.box_center_z.value = clamp(
+                        center[2], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX
+                    )
                 if rotation_aa is not None:
                     rx, ry, rz = axis_angle_to_euler_deg(rotation_aa)
                     if self.ui.box_rot_x:
@@ -207,11 +219,17 @@ class UISetup:
 
             elif filter_type == "Ellipsoid":
                 if self.ui.ellipsoid_center_x:
-                    self.ui.ellipsoid_center_x.value = clamp(center[0], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
+                    self.ui.ellipsoid_center_x.value = clamp(
+                        center[0], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX
+                    )
                 if self.ui.ellipsoid_center_y:
-                    self.ui.ellipsoid_center_y.value = clamp(center[1], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
+                    self.ui.ellipsoid_center_y.value = clamp(
+                        center[1], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX
+                    )
                 if self.ui.ellipsoid_center_z:
-                    self.ui.ellipsoid_center_z.value = clamp(center[2], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX)
+                    self.ui.ellipsoid_center_z.value = clamp(
+                        center[2], SB.FILTER_CENTER_MIN, SB.FILTER_CENTER_MAX
+                    )
                 if rotation_aa is not None:
                     rx, ry, rz = axis_angle_to_euler_deg(rotation_aa)
                     if self.ui.ellipsoid_rot_x:
@@ -223,11 +241,17 @@ class UISetup:
 
             elif filter_type == "Frustum":
                 if self.ui.frustum_pos_x:
-                    self.ui.frustum_pos_x.value = clamp(center[0], SB.FRUSTUM_POSITION_MIN, SB.FRUSTUM_POSITION_MAX)
+                    self.ui.frustum_pos_x.value = clamp(
+                        center[0], SB.FRUSTUM_POSITION_MIN, SB.FRUSTUM_POSITION_MAX
+                    )
                 if self.ui.frustum_pos_y:
-                    self.ui.frustum_pos_y.value = clamp(center[1], SB.FRUSTUM_POSITION_MIN, SB.FRUSTUM_POSITION_MAX)
+                    self.ui.frustum_pos_y.value = clamp(
+                        center[1], SB.FRUSTUM_POSITION_MIN, SB.FRUSTUM_POSITION_MAX
+                    )
                 if self.ui.frustum_pos_z:
-                    self.ui.frustum_pos_z.value = clamp(center[2], SB.FRUSTUM_POSITION_MIN, SB.FRUSTUM_POSITION_MAX)
+                    self.ui.frustum_pos_z.value = clamp(
+                        center[2], SB.FRUSTUM_POSITION_MIN, SB.FRUSTUM_POSITION_MAX
+                    )
                 if rotation_aa is not None:
                     rx, ry, rz = axis_angle_to_euler_deg(rotation_aa)
                     if self.ui.frustum_rot_x:
@@ -252,22 +276,47 @@ class UISetup:
             self.ui.spatial_filter_type.on_update(on_filter_change)
 
         # Register callbacks for all spatial filter controls
-        self._register_callbacks([
-            # Sphere filter
-            'sphere_center_x', 'sphere_center_y', 'sphere_center_z', 'sphere_radius',
-            # Box filter
-            'box_center_x', 'box_center_y', 'box_center_z',
-            'box_size_x', 'box_size_y', 'box_size_z',
-            'box_rot_x', 'box_rot_y', 'box_rot_z',
-            # Ellipsoid filter
-            'ellipsoid_center_x', 'ellipsoid_center_y', 'ellipsoid_center_z',
-            'ellipsoid_radius_x', 'ellipsoid_radius_y', 'ellipsoid_radius_z',
-            'ellipsoid_rot_x', 'ellipsoid_rot_y', 'ellipsoid_rot_z',
-            # Frustum filter
-            'frustum_fov', 'frustum_aspect', 'frustum_near', 'frustum_far',
-            'frustum_pos_x', 'frustum_pos_y', 'frustum_pos_z',
-            'frustum_rot_x', 'frustum_rot_y', 'frustum_rot_z',
-        ], on_filter_change)
+        self._register_callbacks(
+            [
+                # Sphere filter
+                "sphere_center_x",
+                "sphere_center_y",
+                "sphere_center_z",
+                "sphere_radius",
+                # Box filter
+                "box_center_x",
+                "box_center_y",
+                "box_center_z",
+                "box_size_x",
+                "box_size_y",
+                "box_size_z",
+                "box_rot_x",
+                "box_rot_y",
+                "box_rot_z",
+                # Ellipsoid filter
+                "ellipsoid_center_x",
+                "ellipsoid_center_y",
+                "ellipsoid_center_z",
+                "ellipsoid_radius_x",
+                "ellipsoid_radius_y",
+                "ellipsoid_radius_z",
+                "ellipsoid_rot_x",
+                "ellipsoid_rot_y",
+                "ellipsoid_rot_z",
+                # Frustum filter
+                "frustum_fov",
+                "frustum_aspect",
+                "frustum_near",
+                "frustum_far",
+                "frustum_pos_x",
+                "frustum_pos_y",
+                "frustum_pos_z",
+                "frustum_rot_x",
+                "frustum_rot_y",
+                "frustum_rot_z",
+            ],
+            on_filter_change,
+        )
 
         # Register "Use Current Camera" button callback
         if self.ui.frustum_use_camera:
@@ -306,13 +355,25 @@ class UISetup:
                         filter_visualizer.set_gizmo_enabled(True)
 
         # Register callbacks for scene transformation controls
-        self._register_callbacks([
-            'scale_slider', 'scale_x_slider', 'scale_y_slider', 'scale_z_slider',
-            'translation_x_slider', 'translation_y_slider', 'translation_z_slider',
-            'rotate_x_slider', 'rotate_y_slider', 'rotate_z_slider',
-            'pivot_x_slider', 'pivot_y_slider', 'pivot_z_slider',
-            'use_pivot_checkbox',
-        ], on_transform_change)
+        self._register_callbacks(
+            [
+                "scale_slider",
+                "scale_x_slider",
+                "scale_y_slider",
+                "scale_z_slider",
+                "translation_x_slider",
+                "translation_y_slider",
+                "translation_z_slider",
+                "rotate_x_slider",
+                "rotate_y_slider",
+                "rotate_z_slider",
+                "pivot_x_slider",
+                "pivot_y_slider",
+                "pivot_z_slider",
+                "use_pivot_checkbox",
+            ],
+            on_transform_change,
+        )
 
         logger.debug("Filter visualizer callbacks registered")
 

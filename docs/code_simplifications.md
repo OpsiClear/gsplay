@@ -5,6 +5,7 @@ This document outlines the simplifications made to improve code conciseness and 
 ## Overview
 
 The following areas were identified and simplified:
+
 1. Event subscription management in `UIController`
 2. Repetitive slider callback setup in `HandlerManager`
 3. Button callback registration patterns
@@ -17,12 +18,14 @@ The following areas were identified and simplified:
 
 **File:** `src/viewer/ui_controller.py`
 
-**Problem:** 
+**Problem:**
+
 - 8 individual `subscribe()` calls in `_setup_subscriptions()`
 - 8 individual `unsubscribe()` calls in `cleanup()`
 - Difficult to maintain when adding/removing events
 
 **Solution:**
+
 ```python
 # Before: 8 separate subscribe calls
 self.event_bus.subscribe(EventType.MODEL_LOADED, self._on_model_loaded)
@@ -41,6 +44,7 @@ for event_type, callback in self._subscriptions:
 ```
 
 **Benefits:**
+
 - Reduced from 16 lines to 13 lines (19% reduction)
 - Single source of truth for subscriptions
 - Cleanup automatically stays in sync with subscriptions
@@ -55,6 +59,7 @@ for event_type, callback in self._subscriptions:
 **File:** `src/viewer/handlers.py`
 
 **Problem:**
+
 - Three methods (`setup_color_callbacks`, `setup_transform_callbacks`, `setup_volume_filter_callbacks`) had identical patterns
 - Each method: create list → loop → null-check → attach callback → count → log
 - ~20 lines per method = 60 lines total
@@ -70,17 +75,18 @@ def _setup_slider_group(self, sliders: list, group_name: str, immediate: bool = 
             self.trigger_immediate_rerender()
         else:
             self.trigger_rerender()
-    
+
     active_count = 0
     for slider in sliders:
         if slider is not None:
             slider.on_update(callback)
             active_count += 1
-    
+
     logger.debug(f"Registered {active_count} {group_name} slider callbacks")
 ```
 
 **Usage:**
+
 ```python
 # Before: 20 lines
 def setup_color_callbacks(self, ui: UIHandles) -> None:
@@ -97,6 +103,7 @@ def setup_color_callbacks(self, ui: UIHandles) -> None:
 ```
 
 **Benefits:**
+
 - Reduced from ~60 lines to ~35 lines (42% reduction)
 - DRY principle: single implementation for all slider groups
 - Consistent behavior across all slider types
@@ -111,11 +118,13 @@ def setup_color_callbacks(self, ui: UIHandles) -> None:
 **File:** `src/viewer/handlers.py`
 
 **Problem:**
+
 - 5 button callbacks with nearly identical structure
 - Each button: null-check → decorator → emit event
 - ~8 lines per button = 40 lines total
 
 **Solution:**
+
 ```python
 # Before: 8 lines per button × 4 buttons = 32 lines
 if ui.export_ply_button is not None:
@@ -137,6 +146,7 @@ for button, event_type, event_data in button_mappings:
 ```
 
 **Benefits:**
+
 - Reduced from ~40 lines to ~18 lines (55% reduction)
 - Easy to add new buttons: just add to list
 - Consistent pattern across all buttons
@@ -151,10 +161,12 @@ for button, event_type, event_data in button_mappings:
 **File:** `src/viewer/app.py`
 
 **Problem:**
+
 - Sphere and cuboid centers were assigned separately with identical values
 - Duplicate code that's error-prone to maintain
 
 **Solution:**
+
 ```python
 # Before: 11 lines
 if self.ui.filter_center_x:
@@ -181,6 +193,7 @@ if self.ui.filter_center_x:
 ```
 
 **Benefits:**
+
 - Reduced from 11 lines to 8 lines (27% reduction)
 - Single source of truth for center calculation
 - Clearer intent: both filters use same center
@@ -195,6 +208,7 @@ if self.ui.filter_center_x:
 **File:** `src/viewer/ui_controller.py`
 
 **Problem:**
+
 - Repetitive pattern throughout: `if ui.control: ui.control.attr = value`
 - ~50 instances across all event handlers
 - Verbose null-checking obscures intent
@@ -211,6 +225,7 @@ def _update_ui_control(self, control, **kwargs) -> None:
 ```
 
 **Usage:**
+
 ```python
 # Before: 3 lines per update
 if self.ui.load_data_button:
@@ -224,6 +239,7 @@ self._update_ui_control(self.ui.time_slider, max=99, value=0, disabled=False)
 ```
 
 **Benefits:**
+
 - Reduced from ~100 lines to ~50 lines (50% reduction)
 - Cleaner, more readable code
 - Consistent null-checking across all UI updates
@@ -268,6 +284,7 @@ self._update_ui_control(self.ui.time_slider, max=99, value=0, disabled=False)
 ### Future Simplifications (Not Implemented)
 
 1. **EventBus: Bulk Subscribe/Unsubscribe**
+
    ```python
    # Potential addition to EventBus class
    def subscribe_many(self, subscriptions: list[tuple[EventType, Callable]]) -> None:
@@ -280,6 +297,7 @@ self._update_ui_control(self.ui.time_slider, max=99, value=0, disabled=False)
    - Could create `sync_config_from_ui()` helper
 
 3. **Conditional Assignment Helper**
+
    ```python
    def update_if_exists(obj, attr, value):
        if hasattr(obj, attr) and getattr(obj, attr) is not None:
@@ -319,4 +337,3 @@ When adding new functionality:
 - **New event subscriptions:** Add to `_subscriptions` list in `UIController`
 
 This ensures consistency and maintains the conciseness achieved through these simplifications.
-

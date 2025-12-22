@@ -183,8 +183,16 @@ def compose_color_values(base: ColorValues, style: ColorValues) -> ColorValues:
         hue_shift=base.hue_shift + style.hue_shift,
         fade=base.fade + style.fade,
         # Tint colors (use style if set)
-        shadow_tint_hue=style.shadow_tint_hue if style.shadow_tint_hue != 0 else base.shadow_tint_hue,
-        shadow_tint_sat=style.shadow_tint_sat if style.shadow_tint_sat != 0 else base.shadow_tint_sat,
-        highlight_tint_hue=style.highlight_tint_hue if style.highlight_tint_hue != 0 else base.highlight_tint_hue,
-        highlight_tint_sat=style.highlight_tint_sat if style.highlight_tint_sat != 0 else base.highlight_tint_sat,
+        shadow_tint_hue=style.shadow_tint_hue
+        if style.shadow_tint_hue != 0
+        else base.shadow_tint_hue,
+        shadow_tint_sat=style.shadow_tint_sat
+        if style.shadow_tint_sat != 0
+        else base.shadow_tint_sat,
+        highlight_tint_hue=style.highlight_tint_hue
+        if style.highlight_tint_hue != 0
+        else base.highlight_tint_hue,
+        highlight_tint_sat=style.highlight_tint_sat
+        if style.highlight_tint_sat != 0
+        else base.highlight_tint_sat,
     )

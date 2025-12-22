@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from gsplay_launcher.api.schemas import CleanupResponse, CleanupStopRequest, ProcessInfo
 
+
 router = APIRouter(tags=["cleanup"])
 
 
@@ -14,7 +15,16 @@ def discover_processes() -> CleanupResponse:
 
     processes = find_gsplay_processes()
     return CleanupResponse(
-        processes=[ProcessInfo(pid=p.pid, port=p.port, config_path=p.config_path, memory_mb=round(p.memory_mb, 1), status=p.status) for p in processes],
+        processes=[
+            ProcessInfo(
+                pid=p.pid,
+                port=p.port,
+                config_path=p.config_path,
+                memory_mb=round(p.memory_mb, 1),
+                status=p.status,
+            )
+            for p in processes
+        ],
         total=len(processes),
     )
 
@@ -34,6 +44,15 @@ def stop_processes(body: CleanupStopRequest) -> CleanupResponse:
 
     remaining = find_gsplay_processes()
     return CleanupResponse(
-        processes=[ProcessInfo(pid=p.pid, port=p.port, config_path=p.config_path, memory_mb=round(p.memory_mb, 1), status=p.status) for p in remaining],
+        processes=[
+            ProcessInfo(
+                pid=p.pid,
+                port=p.port,
+                config_path=p.config_path,
+                memory_mb=round(p.memory_mb, 1),
+                status=p.status,
+            )
+            for p in remaining
+        ],
         total=len(remaining),
     )

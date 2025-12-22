@@ -24,10 +24,6 @@ Example
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass
@@ -169,12 +165,10 @@ class TimeDomain:
         int
             Nearest frame index
         """
-        frame = int(round(source_time - self.min_time))
+        frame = round(source_time - self.min_time)
         return max(0, min(frame, self.frame_count - 1))
 
-    def get_surrounding_keyframes(
-        self, source_time: float
-    ) -> tuple[int, int, float] | None:
+    def get_surrounding_keyframes(self, source_time: float) -> tuple[int, int, float] | None:
         """Get surrounding keyframe indices and interpolation factor.
 
         For interpolation sources, finds the two keyframes surrounding
@@ -232,7 +226,7 @@ class TimeDomain:
         # Handle None or empty keyframe_times - fall back to frame index rounding
         if self.keyframe_times is None or len(self.keyframe_times) == 0:
             # Discrete source without explicit keyframes - round to nearest frame
-            idx = int(round(source_time))
+            idx = round(source_time)
             idx = max(0, min(idx, self.frame_count - 1))
             return (idx, float(idx))
 

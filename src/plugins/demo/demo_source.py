@@ -29,8 +29,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from src.domain.data import GaussianData, FormatInfo
+from src.domain.data import FormatInfo, GaussianData
 from src.plugins.base import BaseDataSource, source_metadata
+
 
 logger = logging.getLogger(__name__)
 

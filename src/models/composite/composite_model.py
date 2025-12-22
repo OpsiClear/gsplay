@@ -14,23 +14,25 @@ the viewer when creating CompositeModel instances.
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from src.domain.entities import GSTensor, GaussianLayer, CompositeGSTensor
+from gsmod import ColorValues, FilterValues, TransformValues
+
+from src.domain.data import GaussianData
+from src.domain.entities import CompositeGSTensor, GaussianLayer, GSTensor
 from src.domain.filters import VolumeFilter
 from src.domain.interfaces import (
     BaseGaussianSource,
-    SourceMetadata,
-    EditManagerProtocol,
     EditManagerFactory,
-    PluginState,
-    HealthStatus,
+    EditManagerProtocol,
     HealthCheckResult,
+    HealthStatus,
+    PluginState,
+    SourceMetadata,
 )
 from src.domain.lifecycle import LifecycleMixin
-from src.domain.data import GaussianData
 from src.infrastructure.processing_mode import ProcessingMode
-from gsmod import ColorValues, TransformValues, FilterValues
+
 
 if TYPE_CHECKING:
     from src.gsplay.config.settings import GSPlayConfig
@@ -145,9 +147,7 @@ class CompositeModel(LifecycleMixin):
             self._calculate_layer_bounds(layer_id, model)
 
         # Determine total frames (use maximum across all layers)
-        self._total_frames = max(
-            (model.total_frames for model in self.models.values()), default=0
-        )
+        self._total_frames = max((model.total_frames for model in self.models.values()), default=0)
 
         # Transition to READY state
         self._state = PluginState.READY
@@ -164,9 +164,7 @@ class CompositeModel(LifecycleMixin):
         """Total number of frames available."""
         return self._total_frames
 
-    def _create_model_from_config(
-        self, config: dict[str, Any], device: str
-    ) -> BaseGaussianSource:
+    def _create_model_from_config(self, config: dict[str, Any], device: str) -> BaseGaussianSource:
         """
         Factory method to create a model instance from config using SourceRegistry.
 
@@ -223,8 +221,7 @@ class CompositeModel(LifecycleMixin):
             # Re-raise with available sources for better error message
             available = SourceRegistry.names()
             raise ValueError(
-                f"Unknown model type: {model_type}. "
-                f"Available: {', '.join(available)}"
+                f"Unknown model type: {model_type}. Available: {', '.join(available)}"
             ) from e
 
     def _create_layer_viewer_config(self, config: dict[str, Any]) -> Any:
@@ -272,12 +269,8 @@ class CompositeModel(LifecycleMixin):
             import numpy as np
 
             viewer_config.transform_values = TransformValues(
-                translate=np.array(
-                    tv.get("translate", [0.0, 0.0, 0.0]), dtype=np.float32
-                ),
-                rotate=np.array(
-                    tv.get("rotate", [0.0, 0.0, 0.0, 1.0]), dtype=np.float32
-                ),
+                translate=np.array(tv.get("translate", [0.0, 0.0, 0.0]), dtype=np.float32),
+                rotate=np.array(tv.get("rotate", [0.0, 0.0, 0.0, 1.0]), dtype=np.float32),
                 scale=tv.get("scale", 1.0),
             )
 
@@ -390,9 +383,7 @@ class CompositeModel(LifecycleMixin):
 
         # Convert normalized time to frame index for time_range filtering
         current_frame = (
-            int(normalized_time * (self.total_frames - 1))
-            if self.total_frames > 1
-            else 0
+            int(normalized_time * (self.total_frames - 1)) if self.total_frames > 1 else 0
         )
 
         for layer_id, model in self.models.items():
@@ -424,9 +415,7 @@ class CompositeModel(LifecycleMixin):
             try:
                 gaussian_data = model.get_gaussians_at_normalized_time(layer_time)
                 if gaussian_data is None:
-                    logger.warning(
-                        f"Layer '{layer_id}' returned None at time {layer_time}"
-                    )
+                    logger.warning(f"Layer '{layer_id}' returned None at time {layer_time}")
                     continue
             except Exception as e:
                 logger.error(f"Error fetching layer '{layer_id}': {e}")
@@ -504,6 +493,7 @@ class CompositeModel(LifecycleMixin):
             Discrete frame-based time domain
         """
         from src.domain.time import TimeDomain
+
         return TimeDomain.discrete(self._total_frames)
 
     def get_frame_at_source_time(self, source_time: float) -> GaussianData:
@@ -522,7 +512,7 @@ class CompositeModel(LifecycleMixin):
             Frame data at the nearest frame
         """
         # Round to nearest frame index
-        frame_idx = int(round(source_time))
+        frame_idx = round(source_time)
         frame_idx = max(0, min(frame_idx, self._total_frames - 1))
 
         # Convert to normalized time and use existing implementation
@@ -572,7 +562,9 @@ class CompositeModel(LifecycleMixin):
             # GSTensor (PyTorch) - wrap in GaussianData
             return GaussianData.from_gstensor(result)
         else:
-            logger.error("Unexpected result type from get_gaussians_at_normalized_time: %s", type(result))
+            logger.error(
+                "Unexpected result type from get_gaussians_at_normalized_time: %s", type(result)
+            )
             return GaussianData(
                 means=np.zeros((0, 3), dtype=np.float32),
                 scales=np.zeros((0, 3), dtype=np.float32),
@@ -776,6 +768,4 @@ class CompositeModel(LifecycleMixin):
             or config.volume_filter.is_active()
         )
 
-        logger.debug(
-            f"Updated edits for layer '{layer_id}', edits_active={config.edits_active}"
-        )
+        logger.debug(f"Updated edits for layer '{layer_id}', edits_active={config.edits_active}")

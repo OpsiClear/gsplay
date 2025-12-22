@@ -7,11 +7,12 @@ providing detailed error messages for invalid configurations.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, fields, is_dataclass, MISSING
+from dataclasses import MISSING, dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import Any, get_type_hints, get_origin, get_args, Union
+from typing import Any, Union, get_args, get_origin, get_type_hints
 
 from src.shared.exceptions import ConfigValidationError
+
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,8 @@ class ConfigValidator:
         # Get field info
         schema_fields = {f.name: f for f in fields(schema)}
         required_fields = {
-            name for name, f in schema_fields.items()
+            name
+            for name, f in schema_fields.items()
             if f.default is MISSING and f.default_factory is MISSING
         }
 
@@ -133,9 +135,7 @@ class ConfigValidator:
             if field_name in config:
                 # Field provided - validate type
                 value = config[field_name]
-                validated, error = cls._validate_type(
-                    value, expected_type, field_name
-                )
+                validated, error = cls._validate_type(value, expected_type, field_name)
                 if error:
                     errors.append(error)
                 else:
@@ -143,12 +143,11 @@ class ConfigValidator:
             elif field_name in required_fields:
                 # Required field missing
                 errors.append(f"Missing required field: '{field_name}'")
-            else:
-                # Optional field - use default
-                if field_info.default is not MISSING:
-                    coerced[field_name] = field_info.default
-                elif field_info.default_factory is not MISSING:
-                    coerced[field_name] = field_info.default_factory()
+            # Optional field - use default
+            elif field_info.default is not MISSING:
+                coerced[field_name] = field_info.default
+            elif field_info.default_factory is not MISSING:
+                coerced[field_name] = field_info.default_factory()
 
         return ValidationResult(
             valid=len(errors) == 0,
@@ -228,7 +227,10 @@ class ConfigValidator:
                     coerced, error = cls._validate_type(value, t, field_name)
                     if error is None:
                         return coerced, None
-                return None, f"Field '{field_name}': expected {expected_type}, got {type(value).__name__}"
+                return (
+                    None,
+                    f"Field '{field_name}': expected {expected_type}, got {type(value).__name__}",
+                )
 
         # Handle list types
         if origin is list:

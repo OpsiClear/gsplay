@@ -11,7 +11,8 @@ This component is responsible for:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import viser
 
@@ -20,6 +21,7 @@ from src.domain.interfaces import ModelInterface
 from src.gsplay.config.settings import UIHandles
 from src.gsplay.interaction.events import EventBus, EventType
 from src.gsplay.nerfview import GSPlay
+
 
 if TYPE_CHECKING:
     from src.gsplay.config.settings import GSPlayConfig
@@ -140,21 +142,15 @@ class RenderComponent:
         """
         if render_fn is None:
             if self.render_fn is None:
-                raise ValueError(
-                    "No render function available. Call create_render_function first."
-                )
+                raise ValueError("No render function available. Call create_render_function first.")
             render_fn = self.render_fn
 
         logger.info("Creating nerfview viewer")
-        logger.debug(
-            f"JPEG quality: static={jpeg_quality_static}, move={jpeg_quality_move}"
-        )
+        logger.debug(f"JPEG quality: static={jpeg_quality_static}, move={jpeg_quality_move}")
 
         # Emit viewer creation event
         if self.event_bus:
-            self.event_bus.emit(
-                EventType.VIEWER_CREATED, source="render_component", mode=mode
-            )
+            self.event_bus.emit(EventType.VIEWER_CREATED, source="render_component", mode=mode)
 
         self.viewer = GSPlay(
             server=self.server,
@@ -234,9 +230,7 @@ class RenderComponent:
 
         # Hide the Render Res control (we use Quality slider instead)
         if hasattr(self.viewer, "_rendering_tab_handles"):
-            render_res_control = self.viewer._rendering_tab_handles.get(
-                "render_res_vec2"
-            )
+            render_res_control = self.viewer._rendering_tab_handles.get("render_res_vec2")
             if render_res_control is not None:
                 render_res_control.visible = False
                 logger.debug("Hidden Render Res control from nerfview")
@@ -244,9 +238,7 @@ class RenderComponent:
         # Sync initial quality slider value with viewer_res
         if ui and ui.render_quality:
             self.viewer.render_tab_state.viewer_res = int(ui.render_quality.value)
-            logger.debug(
-                f"Set initial viewer_res to {self.viewer.render_tab_state.viewer_res}"
-            )
+            logger.debug(f"Set initial viewer_res to {self.viewer.render_tab_state.viewer_res}")
 
     def get_viewer(self) -> GSPlay | None:
         """Get the nerfview viewer instance."""

@@ -10,12 +10,14 @@ from typing import Any, Protocol
 
 from src.domain.interfaces import BaseGaussianSource, DataLoaderInterface
 
+
 logger = logging.getLogger(__name__)
 
 
 def _ensure_registry_initialized() -> None:
     """Ensure the data source registry is initialized with defaults."""
     from src.infrastructure.registry import register_defaults
+
     register_defaults()
 
 

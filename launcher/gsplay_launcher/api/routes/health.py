@@ -6,6 +6,7 @@ from gsplay_launcher.api.dependencies import get_instance_manager
 from gsplay_launcher.api.schemas import HealthResponse
 from gsplay_launcher.services.instance_manager import InstanceManager
 
+
 router = APIRouter(tags=["health"])
 
 

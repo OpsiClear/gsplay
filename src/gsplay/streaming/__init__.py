@@ -10,6 +10,7 @@ from .websocket_server import (
     set_websocket_server,
 )
 
+
 # Aliases for backward compatibility
 StreamServer = WebSocketStreamServer
 get_stream_server = get_websocket_server

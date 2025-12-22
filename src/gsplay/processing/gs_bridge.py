@@ -10,12 +10,13 @@ Also supports GaussianData for the new unified data IO abstraction.
 
 from __future__ import annotations
 
-from typing import Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from src.domain.entities import GSData, GSDataPro, GSTensor, GSTensorPro
 from src.shared.perf import PerfMonitor
 
 from .protocols import GSBridge
+
 
 if TYPE_CHECKING:
     from src.domain.data import GaussianData
@@ -49,7 +50,7 @@ class DefaultGSBridge(GSBridge):
         self,
         gaussians: GSData | GSTensor,
         device: str,
-    ) -> Tuple[GSTensor, float]:
+    ) -> tuple[GSTensor, float]:
         """
         Return a GSTensor located on the requested device along with transfer timing.
 
@@ -86,7 +87,7 @@ class DefaultGSBridge(GSBridge):
         self,
         data: GaussianData,
         device: str,
-    ) -> Tuple[GSTensorPro, float]:
+    ) -> tuple[GSTensorPro, float]:
         """Convert GaussianData to GSTensorPro for GPU processing.
 
         Parameters

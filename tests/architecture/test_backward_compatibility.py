@@ -6,8 +6,9 @@ This test verifies that the refactored UniversalViewer maintains
 the same public API and behavior as before.
 """
 
-import sys
 import logging
+import sys
+
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -18,13 +19,11 @@ def test_properties_are_accessible():
     logger.info("[TEST] Testing property accessibility...")
 
     try:
-        from src.viewer.core.app import UniversalViewer
         from src.viewer.config.settings import ViewerConfig
+        from src.viewer.core.app import UniversalViewer
 
         # Create a minimal viewer config
-        config = ViewerConfig(
-            port=6020, device="cpu"
-        )  # Use different port to avoid conflicts
+        config = ViewerConfig(port=6020, device="cpu")  # Use different port to avoid conflicts
 
         # Create viewer (should not fail)
         viewer = UniversalViewer(config)
@@ -54,8 +53,8 @@ def test_components_exist():
     logger.info("[TEST] Testing component accessibility...")
 
     try:
-        from src.viewer.core.app import UniversalViewer
         from src.viewer.config.settings import ViewerConfig
+        from src.viewer.core.app import UniversalViewer
 
         config = ViewerConfig(port=6021, device="cpu")
         viewer = UniversalViewer(config)
@@ -85,9 +84,9 @@ def test_api_compatibility():
     logger.info("[TEST] Testing ViewerAPI compatibility...")
 
     try:
-        from src.viewer.core.app import UniversalViewer
         from src.viewer.config.settings import ViewerConfig
         from src.viewer.core.api import ViewerAPI
+        from src.viewer.core.app import UniversalViewer
 
         config = ViewerConfig(port=6022, device="cpu")
         viewer = UniversalViewer(config)
@@ -116,9 +115,10 @@ def test_method_signatures():
     logger.info("[TEST] Testing method signatures...")
 
     try:
-        from src.viewer.core.app import UniversalViewer
-        from src.viewer.config.settings import ViewerConfig
         import inspect
+
+        from src.viewer.config.settings import ViewerConfig
+        from src.viewer.core.app import UniversalViewer
 
         config = ViewerConfig(port=6023, device="cpu")
         viewer = UniversalViewer(config)
@@ -143,12 +143,8 @@ def test_method_signatures():
         # Check load_model_from_config signature
         sig = inspect.signature(viewer.load_model_from_config)
         params = list(sig.parameters.keys())
-        assert "config_dict" in params, (
-            "load_model_from_config missing config_dict param"
-        )
-        assert "config_file" in params, (
-            "load_model_from_config missing config_file param"
-        )
+        assert "config_dict" in params, "load_model_from_config missing config_dict param"
+        assert "config_file" in params, "load_model_from_config missing config_file param"
 
         logger.info("[PASS] All method signatures are preserved")
         return True
@@ -163,8 +159,8 @@ def test_no_breaking_changes():
     logger.info("[TEST] Testing no breaking changes in property access...")
 
     try:
-        from src.viewer.core.app import UniversalViewer
         from src.viewer.config.settings import ViewerConfig
+        from src.viewer.core.app import UniversalViewer
 
         config = ViewerConfig(port=6024, device="cpu")
         viewer = UniversalViewer(config)

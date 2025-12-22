@@ -28,9 +28,10 @@ Usage
 
 import logging
 
+from .sinks import DataSinkRegistry
 from .source_registry import SourceRegistry
 from .sources import DataSourceRegistry  # Legacy alias
-from .sinks import DataSinkRegistry
+
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,8 @@ def register_default_sources() -> None:
     BaseGaussianSource protocol directly).
     """
     # Import here to avoid circular imports
-    from src.models.ply.optimized_model import OptimizedPlyModel
     from src.models.ply.interpolated_model import InterpolatedPlyModel
+    from src.models.ply.optimized_model import OptimizedPlyModel
 
     SourceRegistry.register("load-ply", OptimizedPlyModel)
     SourceRegistry.register("interpolated-ply", InterpolatedPlyModel)
@@ -91,10 +92,10 @@ def register_defaults() -> None:
 
 
 __all__ = [
-    "SourceRegistry",
-    "DataSourceRegistry",  # Legacy alias
     "DataSinkRegistry",
-    "register_defaults",
-    "register_default_sources",
+    "DataSourceRegistry",  # Legacy alias
+    "SourceRegistry",
     "register_default_sinks",
+    "register_default_sources",
+    "register_defaults",
 ]

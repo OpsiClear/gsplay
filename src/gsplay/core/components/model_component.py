@@ -12,9 +12,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from src.domain.interfaces import ModelInterface, DataLoaderInterface
-from src.infrastructure.io.path_io import UniversalPath
+from src.domain.interfaces import DataLoaderInterface, ModelInterface
 from src.gsplay.interaction.events import EventBus, EventType
+from src.infrastructure.io.path_io import UniversalPath
+
 
 logger = logging.getLogger(__name__)
 
@@ -122,9 +123,7 @@ class ModelComponent:
                     source_path=str(self.source_path) if self.source_path else None,
                 )
 
-            logger.info(
-                f"Model loaded successfully: {self.model.get_total_frames()} frames"
-            )
+            logger.info(f"Model loaded successfully: {self.model.get_total_frames()} frames")
 
             return self.model, self.data_loader, self.metadata
 
@@ -182,18 +181,14 @@ class ModelComponent:
 
         elif path_obj.is_file() and path_obj.suffix == ".json":
             # JSON config
-            with open(path_obj, "r") as f:
+            with open(path_obj) as f:
                 config_dict = json.load(f)
             logger.info(f"Loading from JSON config: {path_obj}")
 
         else:
-            raise ValueError(
-                f"Invalid path type: {path}. Must be PLY folder or JSON config."
-            )
+            raise ValueError(f"Invalid path type: {path}. Must be PLY folder or JSON config.")
 
-        return self.load_from_config(
-            config_dict, config_file=str(path_obj), **extra_config
-        )
+        return self.load_from_config(config_dict, config_file=str(path_obj), **extra_config)
 
     def reload(self) -> bool:
         """

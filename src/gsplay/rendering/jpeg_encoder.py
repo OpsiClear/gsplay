@@ -52,14 +52,12 @@ import logging
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 import numpy as np
 import torch
 from torchvision.io import encode_jpeg
 
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +81,15 @@ class ChromaSubsampling(str, Enum):
     CSS_444 = "444"
 
     @classmethod
-    def from_string(cls, value: str) -> "ChromaSubsampling":
+    def from_string(cls, value: str) -> ChromaSubsampling:
         """Convert string to ChromaSubsampling enum."""
         mapping = {
-            "420": cls.CSS_420, "4:2:0": cls.CSS_420,
-            "422": cls.CSS_422, "4:2:2": cls.CSS_422,
-            "444": cls.CSS_444, "4:4:4": cls.CSS_444,
+            "420": cls.CSS_420,
+            "4:2:0": cls.CSS_420,
+            "422": cls.CSS_422,
+            "4:2:2": cls.CSS_422,
+            "444": cls.CSS_444,
+            "4:4:4": cls.CSS_444,
         }
         if value in mapping:
             return mapping[value]
@@ -147,7 +148,11 @@ class TorchvisionJpegBackend:
     ) -> bytes:
         # Log once
         if not self._logged:
-            device_id = image.device.index if isinstance(image, torch.Tensor) and image.is_cuda else self._default_device_id
+            device_id = (
+                image.device.index
+                if isinstance(image, torch.Tensor) and image.is_cuda
+                else self._default_device_id
+            )
             logger.info(f"JPEG encoder: torchvision (GPU:{device_id}, nvJPEG)")
             self._logged = True
 
@@ -197,6 +202,7 @@ class TorchvisionJpegBackend:
 
 class GPUJpegBackend(TorchvisionJpegBackend):
     """GPU JPEG encoding backend using torchvision.io.encode_jpeg (nvJPEG)."""
+
     pass
 
 
@@ -352,7 +358,11 @@ class JpegEncodingService:
             "420", "422", or "444". Uses default if not specified.
         """
         q = quality if quality is not None else self.default_quality
-        css = chroma_subsampling if chroma_subsampling is not None else self.default_chroma_subsampling
+        css = (
+            chroma_subsampling
+            if chroma_subsampling is not None
+            else self.default_chroma_subsampling
+        )
         return self._encoder.encode(image, q, css)
 
     def encode_and_cache(
@@ -387,7 +397,11 @@ class JpegEncodingService:
             JPEG bytes (also cached for later retrieval).
         """
         q = quality if quality is not None else self.default_quality
-        css = chroma_subsampling if chroma_subsampling is not None else self.default_chroma_subsampling
+        css = (
+            chroma_subsampling
+            if chroma_subsampling is not None
+            else self.default_chroma_subsampling
+        )
 
         # Encode first (while previous frame's tensor reference is still held)
         jpeg_bytes = self._encoder.encode(image, q, css)

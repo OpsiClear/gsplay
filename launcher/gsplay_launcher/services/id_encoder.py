@@ -15,16 +15,17 @@ import hmac
 import logging
 from typing import TYPE_CHECKING
 
+
 if TYPE_CHECKING:
     from gsplay_launcher.config import LauncherConfig
 
 logger = logging.getLogger(__name__)
 
 # Global config reference (set by app.py)
-_config: "LauncherConfig | None" = None
+_config: LauncherConfig | None = None
 
 
-def set_config(config: "LauncherConfig") -> None:
+def set_config(config: LauncherConfig) -> None:
     """Set the config for ID encoding.
 
     Parameters

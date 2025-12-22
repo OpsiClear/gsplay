@@ -39,10 +39,12 @@ Filter Panel:
 ## Technical Details
 
 **Model** (`src/models/ply/optimized_model.py`):
+
 - Calculates 99.5th percentile on first load
 - Exposes via `get_recommended_max_scale()`
 
 **Filtering** (`src/viewer/edit_manager.py`):
+
 - Applies mask: `scales.max(dim=1).values <= config.volume_filter.max_scale`
 - Single source of truth: `config.volume_filter.max_scale`
 

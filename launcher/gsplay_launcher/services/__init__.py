@@ -6,6 +6,7 @@ from gsplay_launcher.services.instance_manager import InstanceManager
 from gsplay_launcher.services.process_manager import ProcessManager
 from gsplay_launcher.services.websocket_proxy import WebSocketProxy
 
+
 __all__ = [
     "FileBrowserService",
     "GpuInfo",

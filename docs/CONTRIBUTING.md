@@ -5,6 +5,7 @@ Thank you for your interest in contributing!
 ## Attribution
 
 This project builds upon excellent open-source work:
+
 - **[nerfview](https://github.com/hangg7/nerfview)** - The original NeRF viewer (MIT License)
 - **[viser](https://github.com/nerfstudio-project/viser)** - Web-based 3D visualization framework (MIT License)
 
@@ -19,12 +20,14 @@ By submitting a pull request or any contribution to this project, you agree that
 ## Quick Start
 
 1. **Fork and Clone**
+
    ```bash
    git clone https://github.com/opsiclear/gsplay.git
    cd gsplay
    ```
 
 2. **Set Up Environment**
+
    ```bash
    uv venv && source .venv/bin/activate
    uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
@@ -32,6 +35,7 @@ By submitting a pull request or any contribution to this project, you agree that
    ```
 
 3. **Create Branch, Make Changes, Submit PR**
+
    ```bash
    git checkout -b feature/your-feature
    # Make changes, add tests

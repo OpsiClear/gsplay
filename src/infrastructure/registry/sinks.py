@@ -8,9 +8,9 @@ enabling easy extension with new format support.
 from __future__ import annotations
 
 import logging
-from typing import Type
 
-from src.domain.interfaces import DataSinkProtocol, DataSinkMetadata
+from src.domain.interfaces import DataSinkMetadata, DataSinkProtocol
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +39,10 @@ class DataSinkRegistry:
     ...     print(f"{meta.name}: {meta.description}")
     """
 
-    _sinks: dict[str, Type[DataSinkProtocol]] = {}
+    _sinks: dict[str, type[DataSinkProtocol]] = {}
 
     @classmethod
-    def register(cls, name: str, sink_class: Type[DataSinkProtocol]) -> None:
+    def register(cls, name: str, sink_class: type[DataSinkProtocol]) -> None:
         """Register a data sink implementation.
 
         Parameters
@@ -69,7 +69,7 @@ class DataSinkRegistry:
             )
 
     @classmethod
-    def get(cls, name: str) -> Type[DataSinkProtocol] | None:
+    def get(cls, name: str) -> type[DataSinkProtocol] | None:
         """Get a registered sink by name.
 
         Parameters
@@ -113,7 +113,7 @@ class DataSinkRegistry:
         return sorted(cls._sinks.keys())
 
     @classmethod
-    def find_by_extension(cls, extension: str) -> Type[DataSinkProtocol] | None:
+    def find_by_extension(cls, extension: str) -> type[DataSinkProtocol] | None:
         """Find a sink that outputs files with the given extension.
 
         Parameters
@@ -136,7 +136,9 @@ class DataSinkRegistry:
                 if meta.file_extension == extension:
                     return sink
             except Exception as e:
-                logger.debug(f"Sink '{name}' metadata check failed for extension '{extension}': {e}")
+                logger.debug(
+                    f"Sink '{name}' metadata check failed for extension '{extension}': {e}"
+                )
                 continue
         return None
 

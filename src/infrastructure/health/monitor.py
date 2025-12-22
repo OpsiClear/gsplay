@@ -10,9 +10,9 @@ import logging
 import threading
 import time
 from typing import Any, Protocol
-from datetime import datetime
 
-from src.domain.interfaces import HealthStatus, HealthCheckResult
+from src.domain.interfaces import HealthCheckResult, HealthStatus
+
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ class PluginHealthMonitor:
                 self._history[name].append(result)
                 # Trim history
                 if len(self._history[name]) > self._max_history:
-                    self._history[name] = self._history[name][-self._max_history:]
+                    self._history[name] = self._history[name][-self._max_history :]
 
         return result
 
@@ -218,7 +218,8 @@ class PluginHealthMonitor:
         return {
             "plugins": {n: self.get_diagnostics(n) for n in names},
             "aggregate_status": self.get_aggregate_status().name,
-            "monitoring_active": self._monitor_thread is not None and self._monitor_thread.is_alive(),
+            "monitoring_active": self._monitor_thread is not None
+            and self._monitor_thread.is_alive(),
         }
 
     def get_history(self, name: str, limit: int = 10) -> list[HealthCheckResult]:
@@ -261,7 +262,9 @@ class PluginHealthMonitor:
             while not self._stop_event.wait(timeout=interval):
                 try:
                     results = self.check_all()
-                    unhealthy = [n for n, r in results.items() if r.status == HealthStatus.UNHEALTHY]
+                    unhealthy = [
+                        n for n, r in results.items() if r.status == HealthStatus.UNHEALTHY
+                    ]
                     if unhealthy:
                         logger.warning("[HealthMonitor] Unhealthy plugins: %s", unhealthy)
                 except Exception as e:

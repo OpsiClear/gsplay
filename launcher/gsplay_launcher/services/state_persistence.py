@@ -9,6 +9,7 @@ from pathlib import Path
 
 from gsplay_launcher.models import LauncherState
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +43,7 @@ class StatePersistence:
             return LauncherState()
 
         try:
-            with open(self.state_file, "r", encoding="utf-8") as f:
+            with open(self.state_file, encoding="utf-8") as f:
                 content = f.read()
 
             state = LauncherState.from_json(content)

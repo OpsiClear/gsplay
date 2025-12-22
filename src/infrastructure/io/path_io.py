@@ -41,6 +41,7 @@ import logging
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,11 +131,11 @@ class FsspecBackend:
         """Lazy import and initialize fsspec."""
         try:
             import fsspec
+
             self._fsspec = fsspec
         except ImportError:
             raise ImportError(
-                f"fsspec is required for {self.protocol} paths. "
-                f"Install with: pip install fsspec"
+                f"fsspec is required for {self.protocol} paths. Install with: pip install fsspec"
             )
 
         # Get filesystem for this protocol
@@ -144,8 +145,7 @@ class FsspecBackend:
             # Provide specific error messages for common cloud providers
             if self.protocol == "s3":
                 raise ImportError(
-                    f"S3 support requires s3fs. Install with: pip install s3fs\n"
-                    f"Original error: {e}"
+                    f"S3 support requires s3fs. Install with: pip install s3fs\nOriginal error: {e}"
                 ) from e
             elif self.protocol == "gs" or self.protocol == "gcs":
                 raise ImportError(
@@ -163,9 +163,7 @@ class FsspecBackend:
                     f"Original error: {e}"
                 ) from e
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to initialize {self.protocol} filesystem: {e}"
-            ) from e
+            raise RuntimeError(f"Failed to initialize {self.protocol} filesystem: {e}") from e
 
     def open(self, path: str, mode: str = "rb") -> BinaryIO:
         """Open remote file via fsspec."""

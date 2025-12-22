@@ -2,9 +2,9 @@
 Processing subsystem for the viewer edit pipeline.
 """
 
-from .gs_bridge import DefaultGSBridge
 from .color import DefaultColorProcessor
 from .context import EditContext, ProcessingResult
+from .gs_bridge import DefaultGSBridge
 from .opacity import DefaultOpacityAdjuster
 from .protocols import ColorProcessor, GSBridge, OpacityAdjuster, SceneTransformer
 from .strategies import (
@@ -18,12 +18,13 @@ from .strategies import (
 from .transformer import DefaultSceneTransformer
 from .volume_filter import VolumeFilterService
 
+
 __all__ = [
     "AllCpuStrategy",
     "AllGpuStrategy",
     "ColorGpuStrategy",
-    "ColorTransformGpuStrategy",
     "ColorProcessor",
+    "ColorTransformGpuStrategy",
     "DefaultColorProcessor",
     "DefaultGSBridge",
     "DefaultOpacityAdjuster",
@@ -37,4 +38,3 @@ __all__ = [
     "TransformGpuStrategy",
     "VolumeFilterService",
 ]
-

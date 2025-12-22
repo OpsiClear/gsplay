@@ -7,9 +7,11 @@ providing a clean interface for registering event handlers.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from src.gsplay.interaction.events import EventBus, EventType
+
 
 if TYPE_CHECKING:
     from src.gsplay.core.app import UniversalGSPlay
@@ -36,7 +38,7 @@ class EventDispatcher:
         self._subscriptions: list[tuple[EventType, Callable]] = []
         logger.debug("EventDispatcher initialized")
 
-    def register_app_handlers(self, app: "UniversalGSPlay") -> None:
+    def register_app_handlers(self, app: UniversalGSPlay) -> None:
         """Register all application event handlers.
 
         Parameters
@@ -48,7 +50,6 @@ class EventDispatcher:
             # Model events
             (EventType.MODEL_LOADED, app._on_model_loaded),
             (EventType.FRAME_CHANGED, app._on_frame_changed),
-
             # Command events
             (EventType.LOAD_DATA_REQUESTED, app._on_load_data_requested),
             (EventType.EXPORT_REQUESTED, app._on_export_requested),

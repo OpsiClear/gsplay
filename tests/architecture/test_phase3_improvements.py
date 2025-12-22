@@ -4,12 +4,13 @@ Test script to verify Phase 3 architecture improvements work correctly.
 
 Run with: python test_phase3_improvements.py
 """
-import sys
-import logging
-from pathlib import Path
-import torch
 
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+import logging
+import sys
+from pathlib import Path
+
+
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -20,12 +21,12 @@ def test_duplicate_writers_removed():
     try:
         # Fast writer should not exist anymore
         fast_writer_path = Path("src/models/ply/fast_writer.py")
-        assert not fast_writer_path.exists(), \
-            "Duplicate fast_writer.py still exists"
+        assert not fast_writer_path.exists(), "Duplicate fast_writer.py still exists"
 
         # Try to import should fail
         try:
             from src.models.ply.fast_writer import fast_write_gaussian_ply as _  # noqa: F401
+
             logger.error("[FAIL] fast_writer module still importable")
             return False
         except ImportError:
@@ -33,6 +34,7 @@ def test_duplicate_writers_removed():
 
         # Main writer should exist
         from src.infrastructure.processing.ply.writer import write_ply
+
         assert write_ply is not None, "Main write_ply function not found"
 
         logger.info("[PASS] Duplicate PLY writer successfully removed")
@@ -50,21 +52,23 @@ def test_configurable_model_interface():
     logger.info("[TEST] Testing ConfigurableModelInterface...")
 
     try:
-        from src.domain.interfaces import (
-            ConfigurableModelInterface
-        )
+        from src.domain.interfaces import ConfigurableModelInterface
 
         # Check that ConfigurableModelInterface exists
-        assert hasattr(ConfigurableModelInterface, "from_config"), \
-            "ConfigurableModelInterface missing from_config method"
+        assert hasattr(
+            ConfigurableModelInterface, "from_config"
+        ), "ConfigurableModelInterface missing from_config method"
 
         # Check it has ModelInterface methods too
-        assert hasattr(ConfigurableModelInterface, "get_gaussians_at_normalized_time"), \
-            "ConfigurableModelInterface missing get_gaussians_at_normalized_time"
-        assert hasattr(ConfigurableModelInterface, "get_total_frames"), \
-            "ConfigurableModelInterface missing get_total_frames"
-        assert hasattr(ConfigurableModelInterface, "get_frame_time"), \
-            "ConfigurableModelInterface missing get_frame_time"
+        assert hasattr(
+            ConfigurableModelInterface, "get_gaussians_at_normalized_time"
+        ), "ConfigurableModelInterface missing get_gaussians_at_normalized_time"
+        assert hasattr(
+            ConfigurableModelInterface, "get_total_frames"
+        ), "ConfigurableModelInterface missing get_total_frames"
+        assert hasattr(
+            ConfigurableModelInterface, "get_frame_time"
+        ), "ConfigurableModelInterface missing get_frame_time"
 
         logger.info("[PASS] ConfigurableModelInterface properly defined")
         return True
@@ -84,12 +88,12 @@ def test_model_factory_registry():
         from src.infrastructure.model_factory import ModelFactory
 
         # Check that register_model method exists
-        assert hasattr(ModelFactory, "register_model"), \
-            "ModelFactory missing register_model method"
+        assert hasattr(ModelFactory, "register_model"), "ModelFactory missing register_model method"
 
         # Check that _configurable_models registry exists
-        assert hasattr(ModelFactory, "_configurable_models"), \
-            "ModelFactory missing _configurable_models registry"
+        assert hasattr(
+            ModelFactory, "_configurable_models"
+        ), "ModelFactory missing _configurable_models registry"
 
         logger.info("[PASS] ModelFactory registry pattern implemented")
         return True
@@ -107,6 +111,7 @@ def test_no_duplicate_constants():
 
     try:
         import inspect
+
         import src.models.ply.optimized_model as ply_module
 
         source = inspect.getsource(ply_module)
@@ -115,19 +120,18 @@ def test_no_duplicate_constants():
         hardcoded_patterns = [
             "C0 = 0.28209479177387814",
             "LOG_SCALE_THRESHOLD = -5.0",
-            'MIN_SCALE = 1e-6',
-            'MAX_SCALE = 1e3',
+            "MIN_SCALE = 1e-6",
+            "MAX_SCALE = 1e3",
         ]
 
         for pattern in hardcoded_patterns:
-            assert pattern not in source, \
-                f"Found hardcoded constant: {pattern}"
+            assert pattern not in source, f"Found hardcoded constant: {pattern}"
 
         # Should use GaussianConstants
-        assert "from src.infrastructure.processing.gaussian_constants import" in source, \
-            "Not importing GaussianConstants"
-        assert "GC." in source, \
-            "Not using GC alias"
+        assert (
+            "from src.infrastructure.processing.gaussian_constants import" in source
+        ), "Not importing GaussianConstants"
+        assert "GC." in source, "Not using GC alias"
 
         logger.info("[PASS] No duplicate constants found")
         return True
@@ -145,20 +149,20 @@ def test_clean_imports():
 
     try:
         # Domain should not import from infrastructure (except interfaces)
+        import inspect
+
         import src.domain.entities as entities
         import src.domain.services as services
-        import inspect
 
         for module in [entities, services]:
             source = inspect.getsource(module)
             # Check for bad imports
-            assert "from src.infrastructure" not in source or \
-                   "from src.infrastructure.processing.gaussian_constants" in source, \
-                f"{module.__name__} has infrastructure imports"
-            assert "from src.models" not in source, \
-                f"{module.__name__} has model imports"
-            assert "from src.viewer" not in source, \
-                f"{module.__name__} has viewer imports"
+            assert (
+                "from src.infrastructure" not in source
+                or "from src.infrastructure.processing.gaussian_constants" in source
+            ), f"{module.__name__} has infrastructure imports"
+            assert "from src.models" not in source, f"{module.__name__} has model imports"
+            assert "from src.viewer" not in source, f"{module.__name__} has viewer imports"
 
         logger.info("[PASS] Import structure is clean")
         return True

@@ -96,8 +96,7 @@ class ProcessingMode(Enum):
             return ui_to_mode[value.lower()]
 
         raise ValueError(
-            f"Unknown processing mode: {value}. "
-            f"Valid options: {[m.value for m in cls]}"
+            f"Unknown processing mode: {value}. Valid options: {[m.value for m in cls]}"
         )
 
     def to_display_string(self) -> str:

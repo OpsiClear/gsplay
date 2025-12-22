@@ -7,17 +7,20 @@ You already have `UIHandles` (a dataclass container), but it doesn't provide a c
 ## Option 1: Direct Access (No Wrapper)
 
 ### Pros
+
 - Simple, no extra code
 - Direct access to viser features
 - Less maintenance
 
 ### Cons
+
 - Verbose and error-prone
 - No validation
 - Coupled to viser implementation
 - Unclear API for external users
 
 ### Example Usage
+
 ```python
 # Accessing the viewer
 viewer.ui.time_slider.value = 42
@@ -38,6 +41,7 @@ viewer._handle_export_ply()  # Accessing private method!
 ## Option 2: Wrapper API (Recommended)
 
 ### Pros
+
 - Clean, discoverable API
 - Type-safe with validation
 - Decoupled from viser (easier to change later)
@@ -45,10 +49,12 @@ viewer._handle_export_ply()  # Accessing private method!
 - Testable
 
 ### Cons
+
 - ~100 lines of wrapper code
 - One more layer (minimal overhead)
 
 ### Example Usage
+
 ```python
 # Clean API
 viewer.api.seek_to_frame(42)
@@ -74,12 +80,14 @@ viewer.api.set_color_adjustments(
 ## Recommendation
 
 **Use a wrapper if you plan to:**
+
 1. Script automation (batch processing, testing)
 2. External integrations (other tools calling your viewer)
 3. Build CLI commands
 4. Provide programmatic control to users
 
 **Skip the wrapper if:**
+
 1. Only manual browser-based control
 2. No external API consumers
 3. Simple, one-off scripts
@@ -134,6 +142,7 @@ class ViewerAPI:
 ```
 
 Usage:
+
 ```python
 viewer = UniversalViewer(config)
 viewer.setup_viewer()
@@ -146,6 +155,7 @@ viewer.api.seek_to_frame(42)      # Clean API (recommended)
 ## My Recommendation
 
 **Create a minimal wrapper** (~100 lines). It provides:
+
 - Much better developer experience
 - Type safety and validation
 - Future flexibility

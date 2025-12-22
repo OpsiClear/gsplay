@@ -4,12 +4,14 @@ Centralized constants for Gaussian Splatting operations.
 This module provides a single source of truth for all magic numbers and constants
 used throughout the GSPlay codebase, grouped by their usage context.
 """
+
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class SphericalHarmonics:
     """Constants related to Spherical Harmonics color representation."""
+
     C0: float = 0.28209479177387814
     """SH normalization constant: sqrt(1/(4*pi))"""
 
@@ -17,6 +19,7 @@ class SphericalHarmonics:
 @dataclass(frozen=True)
 class FormatDetection:
     """Thresholds for auto-detecting data formats (log vs linear space)."""
+
     LOG_SCALE_THRESHOLD: float = -5.0
     """If minimum scale value is below this, assume log-space format"""
 
@@ -24,6 +27,7 @@ class FormatDetection:
 @dataclass(frozen=True)
 class NumericalStability:
     """Small values for numerical stability and clamping."""
+
     EPS: float = 1e-8
     """Epsilon for general numerical stability (division, log, logit)"""
 
@@ -46,11 +50,12 @@ class NumericalStability:
 @dataclass(frozen=True)
 class Filtering:
     """Constants for scale filtering and outlier detection."""
+
     DEFAULT_PERCENTILE: float = 0.995
     """Default percentile (99.5%) for scale threshold recommendation"""
 
     @classmethod
-    def get_percentile_label(cls, percentile: float = None) -> str:
+    def get_percentile_label(cls, percentile: float | None = None) -> str:
         """Get human-readable label for percentile value."""
         p = percentile or cls.DEFAULT_PERCENTILE
         return f"{p * 100:.1f}th percentile"
@@ -59,6 +64,7 @@ class Filtering:
 @dataclass(frozen=True)
 class RenderingDefaults:
     """Default values for rendering parameters."""
+
     DEFAULT_DEVICE: str = "cuda:0"
     """Default GPU device for tensor operations"""
 
@@ -72,6 +78,7 @@ class RenderingDefaults:
 @dataclass(frozen=True)
 class LogSpace:
     """Constants for log-space clamping before storage."""
+
     MIN_LOG_SCALE: float = -20.0
     """Minimum log scale value for stable storage"""
 
@@ -99,6 +106,7 @@ class GaussianConstants:
         # Use filtering
         percentile = torch.quantile(scales, GC.Filtering.DEFAULT_PERCENTILE)
     """
+
     SH = SphericalHarmonics()
     Format = FormatDetection()
     Numerical = NumericalStability()
@@ -114,11 +122,11 @@ class GaussianConstants:
 
 # Export all submodules for convenience
 __all__ = [
-    "GaussianConstants",
-    "SphericalHarmonics",
-    "FormatDetection",
-    "NumericalStability",
     "Filtering",
-    "RenderingDefaults",
+    "FormatDetection",
+    "GaussianConstants",
     "LogSpace",
+    "NumericalStability",
+    "RenderingDefaults",
+    "SphericalHarmonics",
 ]

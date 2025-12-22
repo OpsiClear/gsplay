@@ -73,6 +73,7 @@ def build_frontend(logger: logging.Logger) -> bool:
         logger.info("Building frontend with deno...")
         result = subprocess.run(
             [deno_path, "task", "build"],
+            check=False,
             cwd=frontend_dir,
             capture_output=True,
             text=True,
@@ -109,9 +110,13 @@ def setup_logging(level: str) -> None:
 
 
 def main(
-    host: Annotated[str, tyro.conf.arg(help="Host to bind the launcher API (0.0.0.0 for external access)")] = "0.0.0.0",
+    host: Annotated[
+        str, tyro.conf.arg(help="Host to bind the launcher API (0.0.0.0 for external access)")
+    ] = "0.0.0.0",
     port: Annotated[int, tyro.conf.arg(help="Port for the launcher API")] = 8000,
-    gsplay_host: Annotated[str, tyro.conf.arg(help="Host for GSPlay instances (0.0.0.0 for external access)")] = "0.0.0.0",
+    gsplay_host: Annotated[
+        str, tyro.conf.arg(help="Host for GSPlay instances (0.0.0.0 for external access)")
+    ] = "0.0.0.0",
     log_level: Annotated[str, tyro.conf.arg(help="Logging level")] = "INFO",
     gsplay_script: Annotated[
         str,
@@ -143,11 +148,15 @@ def main(
     ] = None,
     network_url: Annotated[
         str | None,
-        tyro.conf.arg(help="Persistent base URL for viser viewer and streaming (e.g., https://gsplay.example.com). Port appended automatically."),
+        tyro.conf.arg(
+            help="Persistent base URL for viser viewer and streaming (e.g., https://gsplay.example.com). Port appended automatically."
+        ),
     ] = None,
     view_only: Annotated[
         bool,
-        tyro.conf.arg(help="Force all instances to launch in view-only mode (hides data loader UI)"),
+        tyro.conf.arg(
+            help="Force all instances to launch in view-only mode (hides data loader UI)"
+        ),
     ] = False,
     history_limit: Annotated[
         int,
@@ -185,7 +194,9 @@ def main(
         # Path() handles both absolute and relative paths correctly
         browse_path_resolved = Path(browse_path).resolve()
         if not browse_path_resolved.is_dir():
-            logger.error("Browse path does not exist or is not a directory: %s", browse_path_resolved)
+            logger.error(
+                "Browse path does not exist or is not a directory: %s", browse_path_resolved
+            )
             raise SystemExit(1)
 
     # Create configuration
@@ -199,8 +210,8 @@ def main(
         gsplay_script=gsplay_script_path,
         browse_path=browse_path_resolved,
         custom_ip=custom_ip,
-        external_url=external_url.rstrip('/') if external_url else None,
-        network_url=network_url.rstrip('/') if network_url else None,
+        external_url=external_url.rstrip("/") if external_url else None,
+        network_url=network_url.rstrip("/") if network_url else None,
         view_only=view_only,
         history_limit=history_limit,
     )

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import os
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
+
 
 logger = logging.getLogger(__name__)
 
@@ -60,17 +59,21 @@ class LauncherConfig:
     gsplay_port_start: int = 6020
     gsplay_port_end: int = 6100
     data_dir: Path = field(default_factory=lambda: Path("./data"))
-    gsplay_script: Path = field(
-        default_factory=lambda: Path("./src/gsplay/core/main.py")
-    )
+    gsplay_script: Path = field(default_factory=lambda: Path("./src/gsplay/core/main.py"))
     process_stop_timeout: float = 10.0
     browse_path: Path | None = None  # Root for file browser (None = disabled)
     custom_ip: str | None = None  # Default custom IP for URLs (None = auto)
-    external_url: str | None = None  # External base URL for proxy access (e.g., https://gsplay.4dgst.win)
-    network_url: str | None = None  # Persistent base URL for both viser viewer and streaming channel (e.g., https://gsplay.example.com). Overrides auto-detected IP for direct URLs.
+    external_url: str | None = (
+        None  # External base URL for proxy access (e.g., https://gsplay.4dgst.win)
+    )
+    network_url: str | None = (
+        None  # Persistent base URL for both viser viewer and streaming channel (e.g., https://gsplay.example.com). Overrides auto-detected IP for direct URLs.
+    )
     view_only: bool = False  # Force all instances to launch in view-only mode
     history_limit: int = 5  # Maximum number of launch history entries to show in UI
-    url_secret: str = field(default_factory=_generate_url_secret)  # Secret for encoding instance IDs in URLs
+    url_secret: str = field(
+        default_factory=_generate_url_secret
+    )  # Secret for encoding instance IDs in URLs
 
     @property
     def state_file(self) -> Path:
@@ -108,7 +111,6 @@ class LauncherConfig:
 
         if not self.gsplay_script.exists():
             logger.warning(
-                "GSPlay script not found at %s - "
-                "processes may fail to start",
+                "GSPlay script not found at %s - processes may fail to start",
                 self.gsplay_script,
             )

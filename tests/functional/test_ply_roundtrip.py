@@ -7,16 +7,18 @@ This test verifies that:
 3. Round-trip preserves data within acceptable tolerance
 """
 
-import tempfile
 import logging
+import tempfile
 from pathlib import Path
 
 import numpy as np
 
-from src.infrastructure.processing.ply import write_ply, load_ply_as_gsdata
+from src.infrastructure.processing.ply import load_ply_as_gsdata, write_ply
 
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
 
 def test_roundtrip():
     """Test PLY round-trip: load -> save -> load -> compare."""
@@ -37,7 +39,9 @@ def test_roundtrip():
 
     logger.info(f"  Loaded {gsdata1.means.shape[0]} Gaussians")
     logger.info(f"  Scales range: [{gsdata1.scales.min():.4f}, {gsdata1.scales.max():.4f}]")
-    logger.info(f"  Opacities range: [{gsdata1.opacities.min():.4f}, {gsdata1.opacities.max():.4f}]")
+    logger.info(
+        f"  Opacities range: [{gsdata1.opacities.min():.4f}, {gsdata1.opacities.max():.4f}]"
+    )
 
     # Step 2: Save to temporary file (standard format)
     logger.info("Step 2: Writing to temporary PLY (standard format)...")
@@ -45,11 +49,7 @@ def test_roundtrip():
         tmp_path = tmp.name
 
     try:
-        write_ply(
-            tmp_path,
-            gsdata1,
-            format="ply"
-        )
+        write_ply(tmp_path, gsdata1, format="ply")
         logger.info(f"  Written to {tmp_path}")
 
         # Step 3: Reload from temporary file
@@ -58,13 +58,17 @@ def test_roundtrip():
 
         logger.info(f"  Reloaded {gsdata2.means.shape[0]} Gaussians")
         logger.info(f"  Scales range: [{gsdata2.scales.min():.4f}, {gsdata2.scales.max():.4f}]")
-        logger.info(f"  Opacities range: [{gsdata2.opacities.min():.4f}, {gsdata2.opacities.max():.4f}]")
+        logger.info(
+            f"  Opacities range: [{gsdata2.opacities.min():.4f}, {gsdata2.opacities.max():.4f}]"
+        )
 
         # Step 4: Compare tensors
         logger.info("Step 4: Comparing tensors...")
 
         # Check shapes match
-        assert gsdata1.means.shape == gsdata2.means.shape, f"Means shape mismatch: {gsdata1.means.shape} != {gsdata2.means.shape}"
+        assert (
+            gsdata1.means.shape == gsdata2.means.shape
+        ), f"Means shape mismatch: {gsdata1.means.shape} != {gsdata2.means.shape}"
         assert gsdata1.scales.shape == gsdata2.scales.shape, "Scales shape mismatch"
         assert gsdata1.quats.shape == gsdata2.quats.shape, "Quats shape mismatch"
         assert gsdata1.opacities.shape == gsdata2.opacities.shape, "Opacities shape mismatch"
@@ -109,9 +113,11 @@ def test_roundtrip():
     finally:
         # Clean up temporary file
         import os
+
         if Path(tmp_path).exists():
             os.unlink(tmp_path)
             logger.debug(f"Cleaned up temporary file: {tmp_path}")
+
 
 def test_compressed_roundtrip():
     """Test compressed PLY round-trip."""
@@ -134,11 +140,7 @@ def test_compressed_roundtrip():
         tmp_path = tmp.name
 
     try:
-        write_ply(
-            tmp_path,
-            gsdata1,
-            format="compressed"
-        )
+        write_ply(tmp_path, gsdata1, format="compressed")
         logger.info(f"  Written compressed to {tmp_path}")
 
         # Reload
@@ -162,13 +164,17 @@ def test_compressed_roundtrip():
             logger.info("[PASS] Compressed round-trip test passed!")
             return True
         else:
-            logger.warning("[WARNING] Compressed format has differences (expected for lossy compression)")
+            logger.warning(
+                "[WARNING] Compressed format has differences (expected for lossy compression)"
+            )
             return True  # Still pass, as some difference is expected
 
     finally:
         import os
+
         if Path(tmp_path).exists():
             os.unlink(tmp_path)
+
 
 if __name__ == "__main__":
     logger.info("=" * 60)

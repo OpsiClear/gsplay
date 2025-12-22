@@ -24,5 +24,4 @@ def natural_sort_key(path: str | Path) -> list:
         ['image_1.ply', 'image_2.ply', 'image_10.ply']
     """
     path_str = str(path)
-    return [int(text) if text.isdigit() else text.lower()
-            for text in re.split(r'(\d+)', path_str)]
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", path_str)]

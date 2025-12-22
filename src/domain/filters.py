@@ -7,8 +7,9 @@ across all layers without UI dependencies.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING
+
 
 if TYPE_CHECKING:
     from src.domain.entities import SceneBounds

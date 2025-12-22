@@ -5,10 +5,12 @@ Welcome to the gsplay documentation!
 ## For Users
 
 ### Getting Started
+
 - **[README.md](../README.md)** - Main project README with quick start guide
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - How to contribute to the project
 
 ### Features
+
 - **[API_COMPARISON.md](API_COMPARISON.md)** - API comparison and usage patterns
 - **[CLOUD_STORAGE.md](CLOUD_STORAGE.md)** - Cloud storage integration guide
 - **[EXPORT_FORMAT_FIX.md](EXPORT_FORMAT_FIX.md)** - Export format documentation
@@ -20,6 +22,7 @@ Welcome to the gsplay documentation!
 ## For Developers
 
 ### Architecture
+
 - **[architecture/](architecture/)** - Architecture documentation and design decisions
   - [ARCHITECTURE_ANALYSIS.md](architecture/ARCHITECTURE_ANALYSIS.md)
   - [ARCHITECTURE_AUDIT_REPORT.md](architecture/ARCHITECTURE_AUDIT_REPORT.md)
@@ -32,10 +35,12 @@ Welcome to the gsplay documentation!
   - [REFACTORING_VERIFICATION.md](architecture/REFACTORING_VERIFICATION.md)
 
 ### Development
+
 - **[development/](development/)** - Development guides and priorities
   - [REFACTORING_PRIORITIES.txt](development/REFACTORING_PRIORITIES.txt)
 
 ### Reports
+
 - **[reports/](reports/)** - Historical reports and summaries
   - [EXECUTIVE_SUMMARY.md](reports/EXECUTIVE_SUMMARY.md)
   - [GSPLY_VERIFICATION_REPORT.md](reports/GSPLY_VERIFICATION_REPORT.md)

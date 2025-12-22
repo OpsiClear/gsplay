@@ -8,9 +8,9 @@ enabling easy extension with new format support.
 from __future__ import annotations
 
 import logging
-from typing import Type
 
-from src.domain.interfaces import DataSourceProtocol, DataSourceMetadata
+from src.domain.interfaces import DataSourceMetadata, DataSourceProtocol
+
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +36,10 @@ class DataSourceRegistry:
     >>> source_class = DataSourceRegistry.find_for_path("/path/to/file.splat")
     """
 
-    _sources: dict[str, Type[DataSourceProtocol]] = {}
+    _sources: dict[str, type[DataSourceProtocol]] = {}
 
     @classmethod
-    def register(cls, name: str, source_class: Type[DataSourceProtocol]) -> None:
+    def register(cls, name: str, source_class: type[DataSourceProtocol]) -> None:
         """Register a data source implementation.
 
         Parameters
@@ -66,7 +66,7 @@ class DataSourceRegistry:
             )
 
     @classmethod
-    def get(cls, name: str) -> Type[DataSourceProtocol] | None:
+    def get(cls, name: str) -> type[DataSourceProtocol] | None:
         """Get a registered source by name.
 
         Parameters
@@ -99,7 +99,7 @@ class DataSourceRegistry:
         return result
 
     @classmethod
-    def find_for_path(cls, path: str) -> Type[DataSourceProtocol] | None:
+    def find_for_path(cls, path: str) -> type[DataSourceProtocol] | None:
         """Find a source that can load the given path.
 
         Checks each registered source's can_load() method.

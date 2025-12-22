@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+
 if TYPE_CHECKING:
     from src.domain.entities import SceneBounds
 
@@ -33,7 +34,7 @@ class TransformService:
         percentile_min: float = 5.0,
         percentile_max: float = 95.0,
         padding: float = 0.1,
-    ) -> "SceneBounds":
+    ) -> SceneBounds:
         """
         Calculate scene bounding box from point cloud.
 
@@ -64,9 +65,12 @@ class TransformService:
 
             logger.debug(
                 "Scene bounds: X [%.3f, %.3f], Y [%.3f, %.3f], Z [%.3f, %.3f]",
-                min_coords[0], max_coords[0],
-                min_coords[1], max_coords[1],
-                min_coords[2], max_coords[2],
+                min_coords[0],
+                max_coords[0],
+                min_coords[1],
+                max_coords[1],
+                min_coords[2],
+                max_coords[2],
             )
 
             return SceneBounds(
@@ -103,7 +107,9 @@ class TransformService:
 
         logger.debug(
             "Bounding sphere: center=%s, radius=%.3f (%sth percentile)",
-            center, radius, percentile,
+            center,
+            radius,
+            percentile,
         )
 
         return center, radius

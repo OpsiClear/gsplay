@@ -19,6 +19,7 @@ import websockets.exceptions
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
+
 if TYPE_CHECKING:
     from websockets.asyncio.client import ClientConnection
 
@@ -48,7 +49,7 @@ class WebSocketProxy:
     async def proxy(
         self,
         client_ws: WebSocket,
-        instance: "GSPlayInstance",
+        instance: GSPlayInstance,
         port_override: int | None = None,
     ) -> None:
         """Proxy WebSocket connection to a GSPlay instance.
@@ -78,9 +79,7 @@ class WebSocketProxy:
         )
 
         # Track connection
-        self._active_connections[instance.id] = (
-            self._active_connections.get(instance.id, 0) + 1
-        )
+        self._active_connections[instance.id] = self._active_connections.get(instance.id, 0) + 1
 
         try:
             # Set Origin and Host headers to match what viser expects (localhost)

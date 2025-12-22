@@ -11,13 +11,14 @@ through the TimeDomain abstraction.
 from __future__ import annotations
 
 import logging
-import time
 import threading
+import time
 from typing import TYPE_CHECKING
 
-from src.gsplay.interaction.events import EventBus, EventType
-from src.gsplay.config.settings import GSPlayConfig
 from src.domain.time import TimeDomain
+from src.gsplay.config.settings import GSPlayConfig
+from src.gsplay.interaction.events import EventBus, EventType
+
 
 if TYPE_CHECKING:
     from src.domain.interfaces import ModelInterface
@@ -78,7 +79,7 @@ class PlaybackController:
 
         if model is not None:
             # Get time domain from model (with fallback for legacy models)
-            if hasattr(model, 'time_domain'):
+            if hasattr(model, "time_domain"):
                 self._time_domain = model.time_domain
             else:
                 # Legacy model: create discrete time domain
@@ -95,19 +96,19 @@ class PlaybackController:
 
             # --- Read time configuration from model ---
             # Playback FPS
-            if hasattr(model, 'playback_fps'):
+            if hasattr(model, "playback_fps"):
                 self.config.animation.play_speed_fps = model.playback_fps
                 logger.debug(f"Applied model playback_fps: {model.playback_fps}")
 
             # FPS locking
-            if hasattr(model, 'lock_playback_fps'):
+            if hasattr(model, "lock_playback_fps"):
                 self._lock_playback_fps = model.lock_playback_fps
                 logger.debug(f"FPS lock: {self._lock_playback_fps}")
             else:
                 self._lock_playback_fps = False
 
             # Autoplay
-            if hasattr(model, 'autoplay') and model.autoplay:
+            if hasattr(model, "autoplay") and model.autoplay:
                 self.config.animation.auto_play = True
                 logger.info("Autoplay enabled from model config")
 
@@ -210,7 +211,7 @@ class PlaybackController:
         if self._model is None:
             return
 
-        if hasattr(self._model, 'time_domain'):
+        if hasattr(self._model, "time_domain"):
             self._time_domain = self._model.time_domain
             logger.debug(
                 f"Time domain refreshed: "
@@ -252,7 +253,7 @@ class PlaybackController:
             # Update config frame index for backward compatibility
             if self._time_domain.is_discrete:
                 # Discrete: snap to nearest frame
-                self.config.animation.current_frame = int(round(source_time))
+                self.config.animation.current_frame = round(source_time)
             else:
                 # Continuous: estimate frame for UI
                 normalized = self._time_domain.to_normalized(source_time)
@@ -291,9 +292,7 @@ class PlaybackController:
             return False
 
         self.config.animation.play_speed_fps = max(0.1, fps)
-        self.event_bus.emit(
-            EventType.FPS_CHANGED, fps=self.config.animation.play_speed_fps
-        )
+        self.event_bus.emit(EventType.FPS_CHANGED, fps=self.config.animation.play_speed_fps)
         return True
 
     def run_loop(self) -> None:

@@ -17,22 +17,21 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.domain.data import GaussianData
 from src.domain.interfaces import (
-    BaseGaussianSource,
-    InterpolatableSource,
-    SourceMetadata,
-    PluginState,
-    HealthStatus,
     HealthCheckResult,
+    HealthStatus,
+    PluginState,
+    SourceMetadata,
+)
+from src.domain.interpolation import (
+    InterpolationMethod,
+    interpolate_gaussian_data,
 )
 from src.domain.lifecycle import LifecycleMixin
-from src.domain.data import GaussianData
 from src.domain.time import TimeDomain
-from src.domain.interpolation import (
-    interpolate_gaussian_data,
-    InterpolationMethod,
-)
 from src.models.ply.optimized_model import OptimizedPlyModel
+
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +121,11 @@ class InterpolatedPlyModel(LifecycleMixin):
         self._state = PluginState.READY
         logger.info(
             f"InterpolatedPlyModel initialized with {self._base_model.total_frames} keyframes"
-            + (f" (source_fps={self._base_model.source_fps})" if self._base_model.source_fps else "")
+            + (
+                f" (source_fps={self._base_model.source_fps})"
+                if self._base_model.source_fps
+                else ""
+            )
         )
 
     # --- BaseGaussianSource Protocol Properties ---
@@ -323,7 +326,7 @@ class InterpolatedPlyModel(LifecycleMixin):
 
     def get_recommended_max_scale(self) -> float | None:
         """Delegate to base model for scale recommendation."""
-        if hasattr(self._base_model, 'get_recommended_max_scale'):
+        if hasattr(self._base_model, "get_recommended_max_scale"):
             return self._base_model.get_recommended_max_scale()
         return None
 
@@ -331,12 +334,12 @@ class InterpolatedPlyModel(LifecycleMixin):
 
     def on_init(self) -> None:
         """Initialize resources."""
-        if hasattr(self._base_model, 'on_init'):
+        if hasattr(self._base_model, "on_init"):
             self._base_model.on_init()
 
     def on_load(self) -> None:
         """Prepare for active use."""
-        if hasattr(self._base_model, 'on_load'):
+        if hasattr(self._base_model, "on_load"):
             self._base_model.on_load()
 
     def on_unload(self) -> None:
@@ -345,7 +348,7 @@ class InterpolatedPlyModel(LifecycleMixin):
         self._keyframe_cache.clear()
         self._cache_order.clear()
 
-        if hasattr(self._base_model, 'on_unload'):
+        if hasattr(self._base_model, "on_unload"):
             self._base_model.on_unload()
 
     def on_shutdown(self, timeout: float = 5.0) -> None:
@@ -353,7 +356,7 @@ class InterpolatedPlyModel(LifecycleMixin):
         self._keyframe_cache.clear()
         self._cache_order.clear()
 
-        if hasattr(self._base_model, 'on_shutdown'):
+        if hasattr(self._base_model, "on_shutdown"):
             self._base_model.on_shutdown(timeout)
 
         self._state = PluginState.TERMINATED

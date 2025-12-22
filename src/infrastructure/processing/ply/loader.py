@@ -11,16 +11,17 @@ Performance:
 """
 
 import logging
-from pathlib import Path
-import tempfile
 import os
+import tempfile
 from contextlib import contextmanager
+from pathlib import Path
 
 import gsply
 import torch
 from gsply import GSTensor
 
 from src.infrastructure.io.path_io import UniversalPath
+
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +42,7 @@ def _temp_ply_file(file_path: UniversalPath):
 
 
 def load_ply(
-    file_path: str | Path | UniversalPath,
-    device: str = "cpu"
+    file_path: str | Path | UniversalPath, device: str = "cpu"
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Load Gaussian splatting PLY file using gsply.
 
@@ -82,10 +82,14 @@ def load_ply(
                 data = gsply.plyread(ply_path)
                 gstensor = gsply.GSTensor.from_gsdata(data, device="cpu")
 
-        logger.debug(f"[PLY Loader] Loaded {gstensor.means.shape[0]} Gaussians from {file_path.name}")
+        logger.debug(
+            f"[PLY Loader] Loaded {gstensor.means.shape[0]} Gaussians from {file_path.name}"
+        )
 
-        shN = gstensor.shN if gstensor.shN is not None else torch.zeros(
-            (gstensor.means.shape[0], 0, 3), dtype=torch.float32, device=device
+        shN = (
+            gstensor.shN
+            if gstensor.shN is not None
+            else torch.zeros((gstensor.means.shape[0], 0, 3), dtype=torch.float32, device=device)
         )
         return (
             gstensor.means,
@@ -104,9 +108,7 @@ def load_ply(
         raise ValueError(f"Failed to load PLY file {file_path.name}: {e}") from e
 
 
-def load_ply_as_gsdata(
-    file_path: str | Path | UniversalPath
-) -> gsply.GSData:
+def load_ply_as_gsdata(file_path: str | Path | UniversalPath) -> gsply.GSData:
     """Load PLY file directly as GSData (NumPy arrays, CPU-optimized).
 
     This is the optimal loading path for CPU-based processing.
@@ -143,10 +145,7 @@ def load_ply_as_gsdata(
         raise ValueError(f"Failed to load PLY file {file_path.name}: {e}") from e
 
 
-def load_ply_as_gstensor(
-    file_path: str | Path | UniversalPath,
-    device: str = "cpu"
-) -> GSTensor:
+def load_ply_as_gstensor(file_path: str | Path | UniversalPath, device: str = "cpu") -> GSTensor:
     """Load PLY file directly as GSTensor (PyTorch tensors, GPU-optimized).
 
     This is the optimal loading path for GPU-based processing.

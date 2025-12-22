@@ -8,20 +8,19 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from src.domain.data import GaussianData
 from src.domain.interfaces import (
-    BaseGaussianSource,
-    SourceMetadata,
-    PluginState,
-    HealthStatus,
     HealthCheckResult,
+    HealthStatus,
+    PluginState,
+    SourceMetadata,
 )
 from src.domain.lifecycle import LifecycleMixin
-from src.domain.data import GaussianData
+
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +146,7 @@ class BaseDataSource(LifecycleMixin, ABC):
             Description of how this source represents time
         """
         from src.domain.time import TimeDomain
+
         return TimeDomain.discrete(self.total_frames)
 
     def get_frame_at_source_time(self, source_time: float) -> GaussianData:
@@ -187,7 +187,7 @@ class BaseDataSource(LifecycleMixin, ABC):
         if self.total_frames <= 1:
             return 0
 
-        index = int(round(normalized_time * (self.total_frames - 1)))
+        index = round(normalized_time * (self.total_frames - 1))
         return max(0, min(index, self.total_frames - 1))
 
     def _index_to_time(self, index: int) -> float:

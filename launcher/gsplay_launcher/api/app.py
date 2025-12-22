@@ -4,21 +4,22 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from gsplay_launcher.api.dependencies import AppState, STATE_KEY
+from gsplay_launcher.api.dependencies import STATE_KEY, AppState
 from gsplay_launcher.api.routes import api_router, proxy_router
 from gsplay_launcher.config import LauncherConfig
 from gsplay_launcher.services.file_browser import FileBrowserService
 from gsplay_launcher.services.id_encoder import set_config as set_encoder_config
 from gsplay_launcher.services.instance_manager import InstanceManager
+
 
 logger = logging.getLogger(__name__)
 

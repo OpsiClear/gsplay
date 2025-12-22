@@ -7,9 +7,10 @@ memory leaks and enable controlled resource release.
 from __future__ import annotations
 
 import logging
+import threading
 import weakref
 from typing import Any, TypeVar
-import threading
+
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ class GPUResourceManager:
         # Request CUDA memory cleanup
         try:
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except ImportError:
@@ -164,7 +166,7 @@ class GPUResourceManager:
             "estimated_memory_mb": memory / (1024 * 1024) if memory > 0 else 0,
         }
 
-    def __enter__(self) -> "GPUResourceManager":
+    def __enter__(self) -> GPUResourceManager:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:

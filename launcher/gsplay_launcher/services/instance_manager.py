@@ -8,10 +8,11 @@ from pathlib import Path
 import psutil
 
 from gsplay_launcher.config import LauncherConfig
-from gsplay_launcher.models import InstanceStatus, LauncherState, GSPlayInstance
+from gsplay_launcher.models import GSPlayInstance, InstanceStatus, LauncherState
 from gsplay_launcher.services.port_allocator import PortAllocator
 from gsplay_launcher.services.process_manager import ProcessManager, ProcessStartError
 from gsplay_launcher.services.state_persistence import StatePersistence
+
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,6 @@ class InstanceManager:
         host: str | None = None,
         stream_port: int = 0,
         gpu: int | None = None,
-
         view_only: bool = False,
         compact: bool = False,
         log_level: str = "INFO",
@@ -187,11 +187,7 @@ class InstanceManager:
             assigned_port = port
         else:
             # Auto-assign port (allocator returns even ports with port+1 available)
-            used_ports = {
-                inst.port
-                for inst in self._state.instances.values()
-                if inst.is_active
-            }
+            used_ports = {inst.port for inst in self._state.instances.values() if inst.is_active}
             assigned_port = self._port_allocator.find_available(
                 exclude=used_ports,
                 start_hint=self._state.next_port_hint,
@@ -212,7 +208,6 @@ class InstanceManager:
             host=assigned_host,
             stream_port=stream_port,
             gpu=gpu,
-
             view_only=view_only,
             compact=compact,
             log_level=log_level,
@@ -420,11 +415,7 @@ class InstanceManager:
         int | None
             Available port or None.
         """
-        used_ports = {
-            inst.port
-            for inst in self._state.instances.values()
-            if inst.is_active
-        }
+        used_ports = {inst.port for inst in self._state.instances.values() if inst.is_active}
         return self._port_allocator.find_available(
             exclude=used_ports,
             start_hint=self._state.next_port_hint,

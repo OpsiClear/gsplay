@@ -4,11 +4,13 @@ Event bus system for decoupling UI components from handlers.
 This module provides a simple event bus pattern for loose coupling between
 UI components and business logic handlers.
 """
+
 import logging
 from collections.abc import Callable
-from typing import Any
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import Any
+
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +43,10 @@ class EventType(Enum):
     EXPORT_REQUESTED = auto()
     EXPORT_COMPLETED = auto()
     EXPORT_FAILED = auto()
-    EXPORT_PROGRESS = auto()    # Progress during multi-frame export: {"current": int, "total": int, "source_time": float}
-    EXPORT_CANCELLED = auto()   # Export was cancelled
+    EXPORT_PROGRESS = (
+        auto()
+    )  # Progress during multi-frame export: {"current": int, "total": int, "source_time": float}
+    EXPORT_CANCELLED = auto()  # Export was cancelled
 
     # Edit events
     EDIT_APPLIED = auto()
@@ -83,6 +87,7 @@ class EventType(Enum):
 @dataclass
 class Event:
     """Event data container."""
+
     type: EventType | str
     data: dict[str, Any]
     source: str | None = None
@@ -112,10 +117,7 @@ class EventBus:
         logger.debug(f"Created EventBus: {name}")
 
     def subscribe(
-        self,
-        event_type: EventType | str,
-        callback: Callable[[Event], None],
-        priority: int = 0
+        self, event_type: EventType | str, callback: Callable[[Event], None], priority: int = 0
     ) -> None:
         """
         Subscribe to an event type.
@@ -145,15 +147,10 @@ class EventBus:
             callbacks.append((priority, callback))
 
         logger.debug(
-            f"[{self.name}] Subscribed to {event_type}: "
-            f"{callback.__name__} (priority={priority})"
+            f"[{self.name}] Subscribed to {event_type}: {callback.__name__} (priority={priority})"
         )
 
-    def unsubscribe(
-        self,
-        event_type: EventType | str,
-        callback: Callable[[Event], None]
-    ) -> bool:
+    def unsubscribe(self, event_type: EventType | str, callback: Callable[[Event], None]) -> bool:
         """
         Unsubscribe from an event type.
 
@@ -176,20 +173,12 @@ class EventBus:
         for i, (_, cb) in enumerate(callbacks):
             if cb == callback:
                 del callbacks[i]
-                logger.debug(
-                    f"[{self.name}] Unsubscribed from {event_type}: "
-                    f"{callback.__name__}"
-                )
+                logger.debug(f"[{self.name}] Unsubscribed from {event_type}: {callback.__name__}")
                 return True
 
         return False
 
-    def emit(
-        self,
-        event_type: EventType | str,
-        source: str | None = None,
-        **data
-    ) -> None:
+    def emit(self, event_type: EventType | str, source: str | None = None, **data) -> None:
         """
         Emit an event.
 
@@ -217,19 +206,18 @@ class EventBus:
                 f"to {len(subscribers)} subscribers"
             )
 
-            for priority, callback in subscribers:
+            for _priority, callback in subscribers:
                 try:
                     callback(event)
                 except Exception as e:
                     logger.error(
                         f"[{self.name}] Error in event handler {callback.__name__} "
                         f"for {event_type}: {e}",
-                        exc_info=True
+                        exc_info=True,
                     )
         else:
             logger.debug(
-                f"[{self.name}] Emitted {event_type} from {source or 'unknown'} "
-                f"(no subscribers)"
+                f"[{self.name}] Emitted {event_type} from {source or 'unknown'} (no subscribers)"
             )
 
     def clear_subscribers(self, event_type: (EventType | str) | None = None) -> None:
@@ -250,9 +238,7 @@ class EventBus:
             logger.debug(f"[{self.name}] Cleared subscribers for {event_type}")
 
     def get_history(
-        self,
-        event_type: (EventType | str) | None = None,
-        limit: int | None = None
+        self, event_type: (EventType | str) | None = None, limit: int | None = None
     ) -> list[Event]:
         """
         Get event history.
@@ -299,29 +285,24 @@ def emit_event(event_type: EventType | str, source: str | None = None, **data) -
 
 
 def subscribe_event(
-    event_type: EventType | str,
-    callback: Callable[[Event], None],
-    priority: int = 0
+    event_type: EventType | str, callback: Callable[[Event], None], priority: int = 0
 ) -> None:
     """Subscribe to event on global bus (convenience function)."""
     _global_event_bus.subscribe(event_type, callback, priority=priority)
 
 
-def unsubscribe_event(
-    event_type: EventType | str,
-    callback: Callable[[Event], None]
-) -> bool:
+def unsubscribe_event(event_type: EventType | str, callback: Callable[[Event], None]) -> bool:
     """Unsubscribe from event on global bus (convenience function)."""
     return _global_event_bus.unsubscribe(event_type, callback)
 
 
 # Export public API
 __all__ = [
-    "EventBus",
     "Event",
+    "EventBus",
     "EventType",
-    "get_event_bus",
     "emit_event",
+    "get_event_bus",
     "subscribe_event",
     "unsubscribe_event",
 ]

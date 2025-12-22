@@ -11,15 +11,16 @@ from .render_panel import (
     apply_float_colormap,
 )
 from .version import __version__
-from .viewer import VIEWER_LOCK, RenderCamera, GSPlay, with_viewer_lock
+from .viewer import VIEWER_LOCK, GSPlay, RenderCamera, with_viewer_lock
+
 
 __all__ = [
+    "VIEWER_LOCK",
+    "Colormaps",
+    "GSPlay",
     "RenderCamera",
     "RenderTabState",
-    "GSPlay",
-    "VIEWER_LOCK",
-    "with_viewer_lock",
     "__version__",
-    "Colormaps",
     "apply_float_colormap",
+    "with_viewer_lock",
 ]

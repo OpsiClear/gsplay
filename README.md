@@ -20,6 +20,7 @@
 **gsplay** is a high-performance, real-time viewer for rendering dynamic 4D Gaussian Splatting scenes. Load and play sequences of PLY files with an intuitive web-based interface, manage multiple instances through a modern launcher dashboard, and stream live previews to monitor your scenes.
 
 **Key Capabilities:**
+
 - **Local PLY Playback**: Load and render sequences of `.ply` files directly from disk
 - **Web-Based Launcher**: Manage multiple viewer instances with a modern dashboard UI
 - **Real-Time Streaming**: WebSocket-based live preview with GStream minimal viewer
@@ -62,23 +63,27 @@ cd gsplay
 ### 2. Run Installation Script
 
 **Windows:**
+
 ```powershell
 .\install.ps1
 ```
 
 **Linux:**
+
 ```bash
 chmod +x install.sh
 ./install.sh
 ```
 
 The installation script will:
+
 1. Set up MSVC compiler environment (Windows only)
 2. Run `uv sync` to install all dependencies from `pyproject.toml`
 3. Install `gsplat` from GitHub with JIT compilation for CUDA 12.8
 4. Verify the installation
 
 This creates a virtual environment in `.venv/` with:
+
 - PyTorch 2.9.1 with CUDA 12.8 support
 - JIT-compiled `gsplat` for optimal performance
 - All other dependencies including `viser`, `gsmod`, etc.
@@ -107,6 +112,7 @@ uv run -m gsplay_launcher --browse-path /path/to/your/data
 ```
 
 The launcher provides:
+
 - File browser to navigate and launch PLY folders
 - GPU selection and instance configuration
 - Live stream preview with recording
@@ -115,6 +121,7 @@ The launcher provides:
 ### Configuration Examples
 
 **Local PLY (JSON config):**
+
 ```json
 {
     "module": "load-ply",
@@ -125,6 +132,7 @@ The launcher provides:
 ```
 
 **Launcher CLI Options:**
+
 ```bash
 uv run -m gsplay_launcher \
   --browse-path /data/scenes \
@@ -152,6 +160,7 @@ Once running, the viewer will print a URL (e.g., `http://localhost:6019`). Open 
 ### Troubleshooting
 
 **"viser Version mismatch" error:**
+
 - Perform a hard refresh in your browser:
   - Windows/Linux: `Ctrl + Shift + R`
   - Mac: `Cmd + Shift + R`
@@ -216,7 +225,6 @@ curl -X POST http://localhost:6021/get-state
 
 ## System Architecture
 
-
 Following **Clean Architecture** principles for clear separation of concerns:
 
 ```
@@ -263,6 +271,7 @@ src/
 ```
 
 Layering guidelines:
+
 - **Domain** contains only dataclasses, protocols, and stateless services that work with plain tensors/arrays—no viewer or filesystem imports.
 - **Infrastructure** adapts frameworks and external services (PLY I/O, caching, exporters) to the domain interfaces; it can depend on domain but never on viewer code.
 - **Models + Viewer** make up the application/presentation layer: they orchestrate user interactions, rendering, and model lifecycles while calling into domain services for pure math and infrastructure for I/O.
@@ -363,6 +372,7 @@ pytest tests/ -v --cov=src --cov-report=html
 ### Code Style
 
 This project uses:
+
 - **Type hints**: Python 3.12+ type syntax
 - **CLI tools**: `tyro` for type-safe argument parsing
 - **Logging**: Use logging instead of print statements
@@ -390,6 +400,7 @@ The documentation is organized into three focused guides:
 - **[docs/archive/](docs/archive/)** - Historical development documentation
 
 Quick answers:
+
 - **First time here?** Start with [docs/GUIDE.md](docs/GUIDE.md)
 - **Want to contribute?** See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 - **Looking for version history?** Check [docs/CHANGELOG.md](docs/CHANGELOG.md)
@@ -400,11 +411,13 @@ Quick answers:
 ## Performance
 
 ### Optimized PLY Loading
+
 - **Format Auto-Detection**: Automatically detects log-space vs linear-space PLY data
 - **Caching**: Smart caching system for fast frame switching
 - **Parallel Loading**: Multi-threaded PLY file loading
 
 ### GPU Acceleration
+
 - **CUDA-optimized**: All rendering and decompression on GPU
 - **Low-end GPU support**: Configurable quality settings for varied hardware
 - **Efficient Memory**: Smart buffer management to prevent overruns
