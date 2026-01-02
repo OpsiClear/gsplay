@@ -6,6 +6,8 @@ Uses gsply v0.2.5 GSTensor.save() and GSData.save() for object-oriented I/O.
 Supports both standard and compressed formats with automatic GPU acceleration.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import tempfile

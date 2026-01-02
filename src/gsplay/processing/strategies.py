@@ -22,7 +22,10 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from src.domain.entities import GSData, GSDataPro, GSTensor, GSTensorPro
+from gsmod import GSDataPro
+from gsmod.torch import GSTensorPro
+
+from src.domain.entities import GSData, GSTensor
 from src.infrastructure.processing_mode import ProcessingMode
 from src.shared.perf import PerfMonitor
 

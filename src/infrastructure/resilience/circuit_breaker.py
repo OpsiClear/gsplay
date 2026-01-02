@@ -59,31 +59,23 @@ class CircuitBreaker:
     Implements the circuit breaker pattern to prevent repeated
     calls to failing operations.
 
-    Example
-    -------
-    >>> breaker = CircuitBreaker("FrameLoader")
-    >>>
-    >>> @breaker
-    ... def load_frame(path: str) -> Data:
-    ...     return read_file(path)
-    ...
-    >>> # Or explicit calls
-    >>> breaker.call(load_frame, "path/to/file.ply")
+    **Example**::
 
-    States
-    ------
-    CLOSED: Normal operation
-        - Failures increment counter
-        - When failures >= threshold, transition to OPEN
+        >>> breaker = CircuitBreaker("FrameLoader")
+        >>> @breaker
+        ... def load_frame(path: str) -> Data:
+        ...     return read_file(path)
+        >>> breaker.call(load_frame, "path/to/file.ply")
 
-    OPEN: Rejecting all calls
-        - Calls immediately raise CircuitBreakerOpenError
-        - After reset_timeout, transition to HALF_OPEN
+    **States**:
 
-    HALF_OPEN: Testing recovery
-        - Allow limited calls through
-        - Success: increment success counter, if >= threshold -> CLOSED
-        - Failure: immediately transition to OPEN
+    - CLOSED: Normal operation. Failures increment counter.
+      When failures >= threshold, transition to OPEN.
+    - OPEN: Rejecting all calls. Calls raise CircuitBreakerOpenError.
+      After reset_timeout, transition to HALF_OPEN.
+    - HALF_OPEN: Testing recovery. Allow limited calls through.
+      Success increments counter, if >= threshold -> CLOSED.
+      Failure immediately transitions to OPEN.
     """
 
     def __init__(

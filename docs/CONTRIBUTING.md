@@ -49,10 +49,10 @@ By submitting a pull request or any contribution to this project, you agree that
 - **Python 3.12+** with type hints
 - **Use `uv run`** for script execution
 - **Use logging** instead of print statements
-- **Follow Clean Architecture** - see [CLAUDE.md](../CLAUDE.md)
+- **Follow Clean Architecture** - see [CLAUDE.md](https://github.com/opsiclear/gsplay/blob/master/CLAUDE.md)
 - **Add tests** for new functionality
 
 ## Questions?
 
-- Architecture: [CLAUDE.md](../CLAUDE.md)
+- Architecture: [CLAUDE.md](https://github.com/opsiclear/gsplay/blob/master/CLAUDE.md)
 - Issues: [GitHub Issues](https://github.com/opsiclear/gsplay/issues)

@@ -5,9 +5,10 @@ Uses GSTensorPro.transform() for GPU and GSDataPro.transform() for CPU.
 
 from __future__ import annotations
 
-from gsmod import TransformValues
+from gsmod import GSDataPro, TransformValues
+from gsmod.torch import GSTensorPro
 
-from src.domain.entities import GSData, GSDataPro, GSTensor, GSTensorPro
+from src.domain.entities import GSData, GSTensor
 
 from .protocols import SceneTransformer
 

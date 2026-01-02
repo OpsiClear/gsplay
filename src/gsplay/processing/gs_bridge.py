@@ -12,7 +12,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.domain.entities import GSData, GSDataPro, GSTensor, GSTensorPro
+from gsmod import GSDataPro
+from gsmod.torch import GSTensorPro
+
+from src.domain.entities import GSData, GSTensor
 from src.shared.perf import PerfMonitor
 
 from .protocols import GSBridge

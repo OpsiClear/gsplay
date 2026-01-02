@@ -1,12 +1,13 @@
 """WebSocket streaming server for low-latency JPEG delivery.
 
 This module provides low-latency WebSocket streaming through:
+
 - Persistent connection (no HTTP overhead per frame)
 - Push-based delivery (no polling)
 - Binary transport (direct JPEG bytes)
 
-Architecture
-------------
+**Architecture**::
+
     ┌─────────────────────────────────────────────────────────────────┐
     │                    WebSocketStreamServer                        │
     │  - Async WebSocket server (websockets library)                  │
@@ -22,8 +23,8 @@ Architecture
     │  - ~100-150ms latency                                           │
     └─────────────────────────────────────────────────────────────────┘
 
-Usage
------
+**Example Usage**::
+
     from src.gsplay.streaming.websocket_server import WebSocketStreamServer
 
     server = WebSocketStreamServer(port=8080, frame_buffer=frame_buffer)

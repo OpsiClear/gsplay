@@ -4,7 +4,8 @@ Universal path abstraction supporting local and cloud storage.
 This module provides a unified interface for file operations across different
 storage backends (local filesystem, S3, GCS, Azure Blob, HTTP/HTTPS).
 
-Key Features:
+**Key Features**:
+
 - Zero dependencies for local paths (uses pathlib)
 - Optional cloud support via fsspec (install separately)
 - Automatic protocol detection (local, s3://, gs://, az://, http://, https://)
@@ -12,7 +13,8 @@ Key Features:
 - Caching support for remote files
 - Full read/write capabilities
 
-Example Usage:
+**Example Usage**::
+
     # Local filesystem (no extra dependencies)
     path = UniversalPath("./export_with_edits/frame_00000.ply")
     data = path.read_bytes()
@@ -224,18 +226,18 @@ class UniversalPath:
 
     Examples
     --------
-    Local filesystem:
-        >>> path = UniversalPath("./data/frame.ply")
-        >>> data = path.read_bytes()
+    >>> # Local filesystem
+    >>> path = UniversalPath("./data/frame.ply")
+    >>> data = path.read_bytes()
 
-    S3:
-        >>> path = UniversalPath("s3://bucket/data/frame.ply")
-        >>> with path.open("rb") as f:
-        ...     data = f.read()
+    >>> # S3
+    >>> path = UniversalPath("s3://bucket/data/frame.ply")
+    >>> with path.open("rb") as f:
+    ...     data = f.read()
 
-    Glob pattern:
-        >>> folder = UniversalPath("s3://bucket/data/")
-        >>> ply_files = folder.glob("*.ply")
+    >>> # Glob pattern
+    >>> folder = UniversalPath("s3://bucket/data/")
+    >>> ply_files = folder.glob("*.ply")
     """
 
     def __init__(self, path: str | Path | UniversalPath):

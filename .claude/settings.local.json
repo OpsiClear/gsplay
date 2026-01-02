@@ -128,7 +128,13 @@
       "Bash(uvx ty:*)",
       "Bash(uvx ruff check:*)",
       "Bash(npx markdownlint-cli2:*)",
-      "Bash(git reset:*)"
+      "Bash(git reset:*)",
+      "Bash(wc:*)",
+      "Bash(ln:*)",
+      "Bash(make:*)",
+      "Bash(SPHINXBUILD=/home/yeheliu/production/gsplay/.venv/bin/sphinx-build make:*)",
+      "Bash(SPHINXBUILD=/home/yeheliu/production/gsplay/.venv/bin/sphinx-build /home/yeheliu/production/gsplay/.venv/bin/sphinx-build:*)",
+      "Bash(/home/yeheliu/production/gsplay/.venv/bin/sphinx-build:*)"
     ],
     "deny": [],
     "ask": []

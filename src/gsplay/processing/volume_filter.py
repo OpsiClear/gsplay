@@ -21,9 +21,11 @@ import logging
 import time
 from typing import Any
 
+from gsmod import GSDataPro
 from gsmod.config.values import FilterValues
+from gsmod.torch import GSTensorPro
 
-from src.domain.entities import GSData, GSDataPro, GSTensor, GSTensorPro
+from src.domain.entities import GSData, GSTensor
 from src.gsplay.config.settings import GSPlayConfig
 
 

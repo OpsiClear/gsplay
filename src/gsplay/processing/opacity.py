@@ -5,9 +5,11 @@ Uses GSTensorPro.opacity() for GPU and GSDataPro.opacity() for CPU.
 
 from __future__ import annotations
 
+from gsmod import GSDataPro
 from gsmod.config.values import OpacityValues
+from gsmod.torch import GSTensorPro
 
-from src.domain.entities import GSData, GSDataPro, GSTensor, GSTensorPro
+from src.domain.entities import GSData, GSTensor
 
 from .protocols import OpacityAdjuster
 

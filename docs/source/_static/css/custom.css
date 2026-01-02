@@ -1,0 +1,25 @@
+/* Custom styles for GSPlay documentation */
+
+/* Improve code block readability */
+.highlight pre {
+    padding: 1rem;
+    border-radius: 0.5rem;
+}
+
+/* Better table styling */
+table.docutils {
+    width: 100%;
+}
+
+/* API reference improvements */
+.sig-name {
+    font-weight: 600;
+}
+
+/* Protocol/class distinction */
+dl.class > dt,
+dl.protocol > dt {
+    background-color: var(--color-background-secondary);
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+}

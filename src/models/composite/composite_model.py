@@ -94,7 +94,8 @@ class CompositeModel(LifecycleMixin):
         Initialize the composite model with multiple layers.
 
         Args:
-            layer_configs: Dictionary mapping layer_id to layer config:
+            layer_configs: Dictionary mapping layer_id to layer config::
+
                 {
                     "layer_id": {
                         "type": "ply" | "load-ply" | any registered source,
@@ -111,10 +112,11 @@ class CompositeModel(LifecycleMixin):
                         }
                     }
                 }
+
             device: Target device for computation
             edit_manager_factory: Optional factory function to create edit managers.
                 If provided, enables per-layer edit pipelines. Signature:
-                (config: dict, device: str) -> EditManagerProtocol
+                ``(config: dict, device: str) -> EditManagerProtocol``
         """
         # Initialize lifecycle mixin
         LifecycleMixin.__init__(self)
@@ -676,19 +678,20 @@ class CompositeModel(LifecycleMixin):
         Get information about all layers.
 
         Returns:
-            Dictionary mapping layer_id to layer info:
-            {
-                "layer_id": {
-                    "type": str,
-                    "visible": bool,
-                    "z_order": int,
-                    "frames": int,
-                    "static": bool,
-                    "opacity_multiplier": float,
-                    "time_range": [int, int] | None,
-                    "has_edits": bool,
+            Dictionary mapping layer_id to layer info::
+
+                {
+                    "layer_id": {
+                        "type": str,
+                        "visible": bool,
+                        "z_order": int,
+                        "frames": int,
+                        "static": bool,
+                        "opacity_multiplier": float,
+                        "time_range": [int, int] | None,
+                        "has_edits": bool,
+                    }
                 }
-            }
         """
         info = {}
         for layer_id, model in self.models.items():
