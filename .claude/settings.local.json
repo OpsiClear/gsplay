@@ -134,7 +134,9 @@
       "Bash(make:*)",
       "Bash(SPHINXBUILD=/home/yeheliu/production/gsplay/.venv/bin/sphinx-build make:*)",
       "Bash(SPHINXBUILD=/home/yeheliu/production/gsplay/.venv/bin/sphinx-build /home/yeheliu/production/gsplay/.venv/bin/sphinx-build:*)",
-      "Bash(/home/yeheliu/production/gsplay/.venv/bin/sphinx-build:*)"
+      "Bash(/home/yeheliu/production/gsplay/.venv/bin/sphinx-build:*)",
+      "Bash(paste:*)",
+      "Bash(uvx ruff format:*)"
     ],
     "deny": [],
     "ask": []

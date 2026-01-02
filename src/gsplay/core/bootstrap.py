@@ -27,6 +27,7 @@ CUDA_TO_INDEX = {
 TORCH_VERSION = "2.9.0"
 TORCHVISION_VERSION = "0.24.0"
 GSPLAT_VERSION = "1.0.0"
+TRITON_VERSION = "3.0.0"
 
 
 def get_cache_dir() -> Path:
@@ -92,6 +93,22 @@ def check_gsplat_available() -> tuple[bool, str]:
         return True, f"gsplat {version}"
     except ImportError:
         return False, "gsplat is not installed"
+
+
+def check_triton_available() -> tuple[bool, str]:
+    """
+    Check if triton is available.
+
+    Returns:
+        Tuple of (triton_available, message)
+    """
+    try:
+        import triton
+
+        version = getattr(triton, "__version__", "unknown")
+        return True, f"triton {version}"
+    except ImportError:
+        return False, "triton is not installed"
 
 
 def detect_cuda_version() -> str | None:
@@ -248,6 +265,41 @@ def install_gsplat() -> bool:
         return False
 
 
+def install_triton() -> bool:
+    """
+    Install triton (or triton-windows on Windows).
+
+    Returns:
+        True if installation succeeded, False otherwise
+    """
+    # Use platform-specific package name
+    if sys.platform == "win32":
+        package = f"triton-windows>={TRITON_VERSION}"
+    else:
+        package = f"triton>={TRITON_VERSION}"
+
+    print(f"\nInstalling {package.split('>=')[0]}...")
+    print(f"Package: {package}\n")
+
+    # Try uv first (faster), fall back to pip
+    try:
+        cmd = ["uv", "pip", "install", package]
+        result = subprocess.run(cmd, check=False)
+        if result.returncode == 0:
+            return True
+    except FileNotFoundError:
+        pass
+
+    # Fall back to pip
+    try:
+        cmd = [sys.executable, "-m", "pip", "install", package]
+        result = subprocess.run(cmd, check=False)
+        return result.returncode == 0
+    except Exception as e:
+        print(f"Installation failed: {e}")
+        return False
+
+
 def prompt_yes_no(prompt: str, default: bool = True) -> bool:
     """Prompt the user for yes/no input."""
     suffix = " [Y/n] " if default else " [y/N] "
@@ -276,9 +328,9 @@ def is_ephemeral_environment() -> bool:
 
 def ensure_dependencies() -> bool:
     """
-    Ensure PyTorch with CUDA and gsplat are available.
+    Ensure PyTorch with CUDA, triton, and gsplat are available.
 
-    This function checks for PyTorch and gsplat availability.
+    This function checks for PyTorch, triton, and gsplat availability.
     If they are missing or PyTorch doesn't have CUDA support,
     it offers to install the correct versions.
 
@@ -287,12 +339,14 @@ def ensure_dependencies() -> bool:
     """
     # Check current state
     torch_available, cuda_available, torch_msg = check_torch_available()
+    triton_available, triton_msg = check_triton_available()
     gsplat_available, gsplat_msg = check_gsplat_available()
 
     # If everything is available, we're good
-    if torch_available and cuda_available and gsplat_available:
+    if torch_available and cuda_available and triton_available and gsplat_available:
         if not is_torch_setup_complete():
             print(f"✓ {torch_msg}")
+            print(f"✓ {triton_msg}")
             print(f"✓ {gsplat_msg}")
             mark_torch_setup_complete()
         return True
@@ -346,6 +400,7 @@ def ensure_dependencies() -> bool:
         print("\n  For persistent installation, use:")
         print("    uv pip install gsplay")
         print(f"    uv pip install torch torchvision --index-url {index_url}")
+        print("    uv pip install triton  # or triton-windows on Windows")
         print("    uv pip install gsplat --no-build-isolation")
         print()
         if not prompt_yes_no("Install anyway for this session?", default=True):
@@ -353,6 +408,7 @@ def ensure_dependencies() -> bool:
 
     # Determine what needs to be installed
     need_torch = not torch_available or not cuda_available
+    need_triton = not triton_available
     need_gsplat = not gsplat_available
 
     print("\nInstallation plan:")
@@ -364,12 +420,18 @@ def ensure_dependencies() -> bool:
     else:
         print(f"  • PyTorch: already installed ({torch_msg})")
 
+    if need_triton:
+        triton_pkg = "triton-windows" if sys.platform == "win32" else "triton"
+        print(f"  • {triton_pkg}: install (GPU kernel acceleration)")
+    else:
+        print(f"  • triton: already installed ({triton_msg})")
+
     if need_gsplat:
         print("  • gsplat: install (requires compilation)")
     else:
         print(f"  • gsplat: already installed ({gsplat_msg})")
 
-    if not need_torch and not need_gsplat:
+    if not need_torch and not need_triton and not need_gsplat:
         mark_torch_setup_complete()
         return True
 
@@ -405,6 +467,25 @@ def ensure_dependencies() -> bool:
             print(f"⚠ {torch_msg}")
             print("  CUDA still not available after installation.")
             print("  This may indicate a driver issue.")
+
+    # Install triton if needed
+    if need_triton:
+        if not install_triton():
+            triton_pkg = "triton-windows" if sys.platform == "win32" else "triton"
+            print(f"\n✗ {triton_pkg} installation failed.")
+            print("  Try installing manually:")
+            print(f"    uv pip install {triton_pkg}")
+            return False
+
+        print("\n✓ triton installed successfully!")
+
+        # Verify installation
+        if "triton" in sys.modules:
+            del sys.modules["triton"]
+
+        triton_available, triton_msg = check_triton_available()
+        if triton_available:
+            print(f"✓ {triton_msg}")
 
     # Install gsplat if needed
     if need_gsplat:
