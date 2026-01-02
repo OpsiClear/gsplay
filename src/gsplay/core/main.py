@@ -6,41 +6,42 @@ This is the CLI entry point that uses tyro for argument parsing.
 
 from __future__ import annotations
 
-
-# --- Monkeypatch for viser on Windows with uv/pip entry points ---
-try:
-    import viser._tunnel
-
-    _original_is_multiprocess_ok = viser._tunnel._is_multiprocess_ok
-
-    def _safe_is_multiprocess_ok() -> bool:
-        try:
-            return _original_is_multiprocess_ok()
-        except (FileNotFoundError, OSError):
-            return False
-
-    viser._tunnel._is_multiprocess_ok = _safe_is_multiprocess_ok
-except ImportError:
-    pass
-# -----------------------------------------------------------------
-
 import json
 import logging
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Union
 
-import torch
-
-# Pre-import torchvision to avoid circular import issues when imported from threads
-import torchvision  # noqa: F401
 import tyro
 
-from src.gsplay.config.settings import GSPlayConfig
-from src.gsplay.core.app import UniversalGSPlay
+# Bootstrap check - must run before importing torch
+from src.gsplay.core.bootstrap import ensure_dependencies, reset_torch_setup
 
 
 logger = logging.getLogger(__name__)
+
+
+def _init_heavy_imports() -> None:
+    """Initialize heavy imports (torch, viser) after bootstrap."""
+    # --- Monkeypatch for viser on Windows with uv/pip entry points ---
+    try:
+        import viser._tunnel
+
+        _original_is_multiprocess_ok = viser._tunnel._is_multiprocess_ok
+
+        def _safe_is_multiprocess_ok() -> bool:
+            try:
+                return _original_is_multiprocess_ok()
+            except (FileNotFoundError, OSError):
+                return False
+
+        viser._tunnel._is_multiprocess_ok = _safe_is_multiprocess_ok
+    except ImportError:
+        pass
+
+    # Pre-import torchvision to avoid circular import issues when imported from threads
+    import torchvision  # noqa: F401
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -117,9 +118,18 @@ class PluginTestCmd:
     """Device to use for testing."""
 
 
+@dataclass
+class SetupCmd:
+    """Run first-time setup (install PyTorch + gsplat)."""
+
+    force: bool = False
+    """Force re-run setup even if already completed."""
+
+
 # Main command union with flat subcommands
 MainCommand = Union[
     Annotated[ViewCmd, tyro.conf.subcommand("view", default=True)],
+    Annotated[SetupCmd, tyro.conf.subcommand("setup")],
     Annotated[PluginListCmd, tyro.conf.subcommand("plugins-list")],
     Annotated[PluginInfoCmd, tyro.conf.subcommand("plugins-info")],
     Annotated[PluginTestCmd, tyro.conf.subcommand("plugins-test")],
@@ -131,8 +141,32 @@ MainCommand = Union[
 # ============================================================================
 
 
+def run_setup(cmd: SetupCmd) -> None:
+    """Run first-time setup."""
+    if cmd.force:
+        reset_torch_setup()
+
+    if ensure_dependencies():
+        print("\nSetup complete! You can now run: gsplay <path-to-ply-folder>")
+    else:
+        print("\nSetup incomplete. Please resolve the issues above and try again.")
+        sys.exit(1)
+
+
 def run_view(cmd: ViewCmd) -> None:
     """Run the viewer with the given configuration."""
+    # Ensure dependencies are installed
+    if not ensure_dependencies():
+        print("\nRun 'gsplay setup' to install required dependencies.")
+        sys.exit(1)
+
+    # Now safe to import torch and heavy modules
+    _init_heavy_imports()
+    import torch
+
+    from src.gsplay.config.settings import GSPlayConfig
+    from src.gsplay.core.app import UniversalGSPlay
+
     setup_logging(cmd.log_level)
 
     # Convert GPU number to device string
@@ -305,13 +339,19 @@ def run_plugin_test(cmd: PluginTestCmd) -> None:
 
 def cli() -> None:
     """Entry point for the installed script."""
-    import sys
-
     # Check if first arg looks like a path (not a subcommand)
     # This allows `gsplay /path/to/ply` to work without `view` prefix
     if len(sys.argv) > 1:
         first_arg = sys.argv[1]
-        subcommands = {"view", "plugins-list", "plugins-info", "plugins-test", "-h", "--help"}
+        subcommands = {
+            "view",
+            "setup",
+            "plugins-list",
+            "plugins-info",
+            "plugins-test",
+            "-h",
+            "--help",
+        }
         if first_arg not in subcommands and not first_arg.startswith("-"):
             # Insert 'view' as the subcommand
             sys.argv.insert(1, "view")
@@ -320,6 +360,8 @@ def cli() -> None:
 
     if isinstance(cmd, ViewCmd):
         run_view(cmd)
+    elif isinstance(cmd, SetupCmd):
+        run_setup(cmd)
     elif isinstance(cmd, PluginListCmd):
         run_plugin_list(cmd)
     elif isinstance(cmd, PluginInfoCmd):
