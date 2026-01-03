@@ -261,9 +261,9 @@ class GSPlay:
             time.sleep(0.05)
 
         if self.state == "training" and self._training_tab_handles["train_util_slider"].value != 1:
-            assert (
-                self.render_tab_state.num_train_rays_per_sec is not None
-            ), "User must keep track of `num_train_rays_per_sec` to use `update`."
+            assert self.render_tab_state.num_train_rays_per_sec is not None, (
+                "User must keep track of `num_train_rays_per_sec` to use `update`."
+            )
             train_s = self.render_tab_state.num_train_rays_per_sec
             view_s = self.render_tab_state.num_view_rays_per_sec
             train_util = self._training_tab_handles["train_util_slider"].value
