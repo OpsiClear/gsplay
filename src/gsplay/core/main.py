@@ -15,15 +15,12 @@ from typing import Annotated, Union
 
 import tyro
 
-# Bootstrap check - must run before importing torch
-from src.gsplay.core.bootstrap import ensure_dependencies, reset_torch_setup
-
 
 logger = logging.getLogger(__name__)
 
 
 def _init_heavy_imports() -> None:
-    """Initialize heavy imports (torch, viser) after bootstrap."""
+    """Initialize heavy imports (torch, viser) after dependency check."""
     # --- Monkeypatch for viser on Windows with uv/pip entry points ---
     try:
         import viser._tunnel
@@ -89,6 +86,25 @@ class ViewCmd:
 
 
 @dataclass
+class SetupCmd:
+    """Install GPU dependencies (PyTorch, gsplat, triton)."""
+
+    force: bool = False
+    """Force reinstall even if dependencies are present."""
+
+    yes: bool = False
+    """Skip confirmation prompts (for CI/automated use)."""
+
+
+@dataclass
+class DoctorCmd:
+    """Diagnose environment and check dependencies."""
+
+    verbose: bool = False
+    """Show detailed diagnostic information."""
+
+
+@dataclass
 class PluginListCmd:
     """List all discovered plugins."""
 
@@ -118,18 +134,11 @@ class PluginTestCmd:
     """Device to use for testing."""
 
 
-@dataclass
-class SetupCmd:
-    """Run first-time setup (install PyTorch + gsplat)."""
-
-    force: bool = False
-    """Force re-run setup even if already completed."""
-
-
 # Main command union with flat subcommands
 MainCommand = Union[
     Annotated[ViewCmd, tyro.conf.subcommand("view", default=True)],
     Annotated[SetupCmd, tyro.conf.subcommand("setup")],
+    Annotated[DoctorCmd, tyro.conf.subcommand("doctor")],
     Annotated[PluginListCmd, tyro.conf.subcommand("plugins-list")],
     Annotated[PluginInfoCmd, tyro.conf.subcommand("plugins-info")],
     Annotated[PluginTestCmd, tyro.conf.subcommand("plugins-test")],
@@ -141,23 +150,109 @@ MainCommand = Union[
 # ============================================================================
 
 
-def run_setup(cmd: SetupCmd) -> None:
-    """Run first-time setup."""
-    if cmd.force:
-        reset_torch_setup()
+def run_doctor(cmd: DoctorCmd) -> None:
+    """Run environment diagnostics."""
+    from src.gsplay.core.dependency_check import (
+        check_environment,
+        check_gsplat,
+        check_python,
+        check_torch,
+        check_triton,
+        check_viser,
+        detect_system_cuda,
+    )
 
-    if ensure_dependencies():
-        print("\nSetup complete! You can now run: gsplay <path-to-ply-folder>")
+    print("GSPlay Doctor")
+    print("=" * 50)
+    print()
+
+    # System CUDA
+    cuda = detect_system_cuda()
+    if cuda:
+        print(f"System CUDA:    ✓ {cuda}")
     else:
-        print("\nSetup incomplete. Please resolve the issues above and try again.")
-        sys.exit(1)
+        print("System CUDA:    ✗ Not detected (nvidia-smi not found)")
+
+    print()
+
+    # Check each dependency
+    checks = [
+        ("Python", check_python),
+        ("PyTorch", check_torch),
+        ("gsplat", check_gsplat),
+        ("triton", check_triton),
+        ("viser", check_viser),
+    ]
+
+    all_ok = True
+    for name, check_fn in checks:
+        status = check_fn()
+        if status.available:
+            print(f"{name:15} ✓ {status.message}")
+        else:
+            print(f"{name:15} ✗ {status.message}")
+            if status.fix_command:
+                print(f"{'':15}   Fix: {status.fix_command}")
+            all_ok = False
+
+    # Verbose mode - show more details
+    if cmd.verbose:
+        print()
+        print("Detailed Environment:")
+        print("-" * 50)
+        env = check_environment()
+
+        if env.gpu_name:
+            print(f"GPU:            {env.gpu_name}")
+        if env.gpu_memory:
+            print(f"GPU Memory:     {env.gpu_memory}")
+        if env.cuda_version:
+            print(f"CUDA (PyTorch): {env.cuda_version}")
+
+        print(f"Platform:       {sys.platform}")
+        print(f"Python Path:    {sys.executable}")
+
+    print()
+    print("=" * 50)
+    if all_ok:
+        print("✓ Environment is ready!")
+        print("  Run: gsplay <path-to-ply-folder>")
+    else:
+        print("✗ Issues found. Run 'gsplay setup' to fix.")
+
+    sys.exit(0 if all_ok else 1)
+
+
+def run_setup(cmd: SetupCmd) -> None:
+    """Run the setup wizard."""
+    from src.gsplay.core.setup import run_setup as do_setup
+
+    success = do_setup(force=cmd.force, yes=cmd.yes)
+    sys.exit(0 if success else 1)
 
 
 def run_view(cmd: ViewCmd) -> None:
     """Run the viewer with the given configuration."""
-    # Ensure dependencies are installed
-    if not ensure_dependencies():
-        print("\nRun 'gsplay setup' to install required dependencies.")
+    from src.gsplay.core.dependency_check import check_environment_fast
+
+    # Fast dependency check (fail-fast)
+    is_ready, issues = check_environment_fast()
+
+    if not is_ready:
+        print("=" * 50)
+        print("GSPlay - Missing Dependencies")
+        print("=" * 50)
+        print()
+        for issue in issues:
+            print(f"  ✗ {issue}")
+        print()
+        print("To fix, run one of:")
+        print("  gsplay setup     # Interactive setup wizard")
+        print("  gsplay doctor    # Detailed diagnostics")
+        print()
+        print("Or install manually:")
+        print("  ./install.sh     # Linux/macOS")
+        print("  ./install.ps1    # Windows")
         sys.exit(1)
 
     # Now safe to import torch and heavy modules
@@ -346,6 +441,7 @@ def cli() -> None:
         subcommands = {
             "view",
             "setup",
+            "doctor",
             "plugins-list",
             "plugins-info",
             "plugins-test",
@@ -362,6 +458,8 @@ def cli() -> None:
         run_view(cmd)
     elif isinstance(cmd, SetupCmd):
         run_setup(cmd)
+    elif isinstance(cmd, DoctorCmd):
+        run_doctor(cmd)
     elif isinstance(cmd, PluginListCmd):
         run_plugin_list(cmd)
     elif isinstance(cmd, PluginInfoCmd):

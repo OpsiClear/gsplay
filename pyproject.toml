@@ -8,22 +8,26 @@ requires-python = ">=3.12,<3.13"
 
 dependencies = [
     # Core Framework
-    # NOTE: torch, torchvision, gsplat are installed by bootstrap on first run
-    # This allows uvx to work and ensures correct CUDA version is installed
-    "numpy>=1.24.0", # Numerical computing
-    "packaging>=21.0", # Version parsing for gsplat backend
+    # NOTE: Install via install.sh/install.ps1 for correct CUDA version
+    # The scripts auto-detect CUDA and install matching PyTorch wheels
+    "torch>=2.5.0",
+    "torchvision>=0.20.0",
+    "numpy>=1.24.0",
+    "packaging>=21.0",
     # UI & Interaction
-    "viser>=0.2.0", # 3D UI interface
-    "tyro>=0.8.0", # CLI argument parsing
-    # Gaussian Splatting Rendering
-    "gsmod>=0.1.7",  # Gaussian splatting modifications (gsply included as dependency) - 0.1.7 adds center parameter
-    # GIFStream Support
-    "pyyaml>=6.0", # Config file parsing
-    # Launcher (local)
+    "viser>=0.2.0",
+    "tyro>=0.8.0",
+    # Gaussian Splatting
+    # gsplat installed separately via install script (needs --no-build-isolation)
+    "gsmod>=0.1.7",
+    # Triton for GPU kernels
+    "triton>=3.0.0; sys_platform != 'win32'",
+    "triton-windows>=3.0.0; sys_platform == 'win32'",
+    # Config & utilities
+    "pyyaml>=6.0",
     "gsplay-launcher",
-    # Spatial Operations
-    "scipy>=1.10.0", # KDTree for KNN
-    "tqdm>=4.66.0", # Progress bars for console output
+    "scipy>=1.10.0",
+    "tqdm>=4.66.0",
     "websockets>=15.0.1",
 ]
 
