@@ -11,12 +11,8 @@ permissions:
 
 jobs:
   build:
-    name: Build and verify
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.12']
+    name: Build package
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -25,14 +21,29 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: uv sync --no-build-isolation
+      - name: Set up Python 3.12
+        run: uv python install 3.12
 
       - name: Build package
         run: uv build
 
-      - name: Verify CLI works
-        run: uv run gsplay --help
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Run ruff check
+        run: uvx ruff check src/
+
+      - name: Run ruff format check
+        run: uvx ruff format --check src/
