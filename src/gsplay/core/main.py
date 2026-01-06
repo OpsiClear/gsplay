@@ -15,7 +15,6 @@ from typing import Annotated, Union
 
 import tyro
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -169,9 +168,9 @@ def run_doctor(cmd: DoctorCmd) -> None:
     # System CUDA
     cuda = detect_system_cuda()
     if cuda:
-        print(f"System CUDA:    ✓ {cuda}")
+        print(f"System CUDA:    [OK] {cuda}")
     else:
-        print("System CUDA:    ✗ Not detected (nvidia-smi not found)")
+        print("System CUDA:    [X] Not detected (nvidia-smi not found)")
 
     print()
 
@@ -188,9 +187,9 @@ def run_doctor(cmd: DoctorCmd) -> None:
     for name, check_fn in checks:
         status = check_fn()
         if status.available:
-            print(f"{name:15} ✓ {status.message}")
+            print(f"{name:15} [OK] {status.message}")
         else:
-            print(f"{name:15} ✗ {status.message}")
+            print(f"{name:15} [X] {status.message}")
             if status.fix_command:
                 print(f"{'':15}   Fix: {status.fix_command}")
             all_ok = False
@@ -215,10 +214,10 @@ def run_doctor(cmd: DoctorCmd) -> None:
     print()
     print("=" * 50)
     if all_ok:
-        print("✓ Environment is ready!")
+        print("[OK] Environment is ready!")
         print("  Run: gsplay <path-to-ply-folder>")
     else:
-        print("✗ Issues found. Run 'gsplay setup' to fix.")
+        print("[X] Issues found. Run 'gsplay setup' to fix.")
 
     sys.exit(0 if all_ok else 1)
 
@@ -244,7 +243,7 @@ def run_view(cmd: ViewCmd) -> None:
         print("=" * 50)
         print()
         for issue in issues:
-            print(f"  ✗ {issue}")
+            print(f"  [X] {issue}")
         print()
         print("To fix, run one of:")
         print("  gsplay setup     # Interactive setup wizard")

@@ -1,6 +1,4 @@
 # GSPlay Installation Script for Windows
-# Auto-detects CUDA version and installs matching PyTorch
-
 param(
     [switch]$Global,
     [switch]$Local,
@@ -8,10 +6,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-
-# =============================================================================
-# Help
-# =============================================================================
 
 if ($Help) {
     Write-Host "GSPlay Installer"
@@ -25,312 +19,167 @@ if ($Help) {
     exit 0
 }
 
-# =============================================================================
-# Configuration
-# =============================================================================
-
 $InstallMode = if ($Global) { "global" } else { "local" }
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Write-Host "=== GSPlay Installation (Windows) ===" -ForegroundColor Cyan
 Write-Host ""
 
 # =============================================================================
-# Prerequisites Check
+# [1/5] Prerequisites
 # =============================================================================
 
-Write-Host "[1/6] Checking prerequisites..." -ForegroundColor Yellow
+Write-Host "[1/5] Checking prerequisites..." -ForegroundColor Yellow
 
-# Check for uv
+# Check uv
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    Write-Host "Error: 'uv' is not installed." -ForegroundColor Red
-    Write-Host "Install with: powershell -ExecutionPolicy ByPass -c `"irm https://astral.sh/uv/install.ps1 | iex`""
+    Write-Host "Error: 'uv' not installed." -ForegroundColor Red
+    Write-Host "Install: powershell -c `"irm https://astral.sh/uv/install.ps1 | iex`""
     exit 1
 }
-Write-Host "  √ uv found: $(uv --version)"
+Write-Host "  [OK] uv: $(uv --version)"
 
-# Detect CUDA version from nvidia-smi
-function Get-CudaVersion {
-    try {
-        $nvidiaSmi = nvidia-smi 2>$null
-        if ($LASTEXITCODE -eq 0 -and $nvidiaSmi) {
-            $match = [regex]::Match($nvidiaSmi, "CUDA Version:\s*(\d+\.\d+)")
-            if ($match.Success) {
-                return $match.Groups[1].Value
-            }
-        }
-    } catch {}
-
-    # Try nvcc
-    try {
-        $nvcc = nvcc --version 2>$null
-        if ($LASTEXITCODE -eq 0 -and $nvcc) {
-            $match = [regex]::Match($nvcc, "release (\d+\.\d+)")
-            if ($match.Success) {
-                return $match.Groups[1].Value
-            }
-        }
-    } catch {}
-
-    return $null
-}
-
-$CudaVersion = Get-CudaVersion
-if (-not $CudaVersion) {
-    Write-Host "Error: CUDA not detected (nvidia-smi not found)." -ForegroundColor Red
-    Write-Host "GSPlay requires an NVIDIA GPU with CUDA support."
-    Write-Host ""
-    Write-Host "To fix:"
-    Write-Host "  1. Install NVIDIA drivers: https://www.nvidia.com/drivers"
-    Write-Host "  2. Verify with: nvidia-smi"
-    Write-Host "  3. Run this installer again"
+# Detect CUDA
+$nvidiaSmi = nvidia-smi 2>$null
+if (-not $nvidiaSmi) {
+    Write-Host "Error: CUDA not detected." -ForegroundColor Red
     exit 1
 }
-Write-Host "  √ CUDA detected: $CudaVersion"
+$CudaVersion = [regex]::Match($nvidiaSmi, "CUDA Version:\s*(\d+\.\d+)").Groups[1].Value
+Write-Host "  [OK] CUDA: $CudaVersion"
 
-# Map CUDA version to PyTorch index
-function Get-TorchIndex {
-    param([string]$Cuda)
-
-    $parts = $Cuda.Split(".")
-    $major = [int]$parts[0]
-    $minor = [int]$parts[1]
-
-    if ($major -eq 12) {
-        if ($minor -ge 8) { return "cu128" }
-        elseif ($minor -ge 6) { return "cu126" }
-        elseif ($minor -ge 4) { return "cu124" }
-        else { return "cu121" }
-    } elseif ($major -eq 11) {
-        return "cu118"
-    } else {
-        return "cu121"  # Default fallback
-    }
-}
-
-$CudaIndex = Get-TorchIndex -Cuda $CudaVersion
-$TorchIndexUrl = "https://download.pytorch.org/whl/$CudaIndex"
-Write-Host "  √ PyTorch index: $TorchIndexUrl"
+# Map CUDA to PyTorch index
+$major, $minor = $CudaVersion.Split(".") | ForEach-Object { [int]$_ }
+$CudaIndex = if ($major -eq 12) {
+    if ($minor -ge 8) { "cu128" } elseif ($minor -ge 6) { "cu126" } elseif ($minor -ge 4) { "cu124" } else { "cu121" }
+} elseif ($major -eq 11) { "cu118" } else { "cu121" }
+Write-Host "  [OK] PyTorch index: $CudaIndex"
 
 # =============================================================================
-# Setup MSVC Compiler
+# [2/5] MSVC Setup
 # =============================================================================
 
 Write-Host ""
-Write-Host "[2/6] Setting up MSVC compiler environment..." -ForegroundColor Yellow
+Write-Host "[2/5] Setting up MSVC..." -ForegroundColor Yellow
 
 # Find vcvarsall.bat
-$VcVarsAll = $null
-$VsPaths = @(
+$VcVarsAll = @(
     "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat",
     "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat",
-    "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvarsall.bat",
-    "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat",
-    "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat",
-    "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat"
-)
-
-foreach ($path in $VsPaths) {
-    if (Test-Path $path) {
-        $VcVarsAll = $path
-        break
-    }
-}
+    "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvarsall.bat"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 if (-not $VcVarsAll) {
     Write-Host "Error: Visual Studio Build Tools not found." -ForegroundColor Red
-    Write-Host "Install from: https://visualstudio.microsoft.com/visual-cpp-build-tools/"
-    Write-Host "Select 'Desktop development with C++'"
+    Write-Host "Install: https://visualstudio.microsoft.com/visual-cpp-build-tools/"
     exit 1
 }
 
 # Import MSVC environment
-$envBefore = @{}
-Get-ChildItem Env: | ForEach-Object { $envBefore[$_.Name] = $_.Value }
-
 cmd /c "`"$VcVarsAll`" x64 && set" | ForEach-Object {
     if ($_ -match "^([^=]+)=(.*)$") {
-        $name = $matches[1]
-        $value = $matches[2]
-        if ($envBefore[$name] -ne $value) {
-            [Environment]::SetEnvironmentVariable($name, $value, "Process")
-        }
+        [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
     }
 }
-Write-Host "  √ MSVC environment loaded"
 
-# Set DISTUTILS_USE_SDK
-[Environment]::SetEnvironmentVariable("DISTUTILS_USE_SDK", "1", "Process")
+# Fix PATH: Remove Git's link, ensure cl.exe is findable
+$env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notlike "*Git*usr*bin*" }) -join ';'
+$env:DISTUTILS_USE_SDK = "1"
+
+# Verify cl.exe is in PATH and add its directory explicitly
+$clExe = Get-Command cl.exe -ErrorAction SilentlyContinue
+if (-not $clExe) {
+    Write-Host "Error: cl.exe not found after MSVC setup" -ForegroundColor Red
+    exit 1
+}
+# Ensure MSVC bin is at front of PATH for child processes
+$msvcBin = Split-Path $clExe.Source
+$env:PATH = "$msvcBin;$env:PATH"
+Write-Host "  [OK] MSVC: $($clExe.Source)"
 
 # =============================================================================
-# Setup Installation Directory
+# [3/5] Install Dependencies
 # =============================================================================
 
 Write-Host ""
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+Write-Host "[3/5] Installing dependencies..." -ForegroundColor Yellow
 
 if ($InstallMode -eq "global") {
-    Write-Host "[3/6] Setting up global installation (~\.gsplay\)..." -ForegroundColor Yellow
-
     $InstallDir = "$env:USERPROFILE\.gsplay"
-    if (-not (Test-Path $InstallDir)) {
-        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-    }
-
-    # Create virtual environment
-    if (-not (Test-Path "$InstallDir\venv")) {
-        uv venv "$InstallDir\venv" --python 3.12
-    }
-
-    # Activate for this script
+    New-Item -ItemType Directory -Path $InstallDir -Force -ErrorAction SilentlyContinue | Out-Null
+    if (-not (Test-Path "$InstallDir\venv")) { uv venv "$InstallDir\venv" --python 3.12 }
     & "$InstallDir\venv\Scripts\Activate.ps1"
-
-    # Set UV_PROJECT_ENVIRONMENT
     $env:UV_PROJECT_ENVIRONMENT = "$InstallDir\venv"
-} else {
-    Write-Host "[3/6] Setting up local installation (.venv\)..." -ForegroundColor Yellow
-    $InstallDir = $ScriptDir
 }
 
-# =============================================================================
-# Install Dependencies
-# =============================================================================
-
-Write-Host ""
-Write-Host "[4/6] Installing PyTorch with CUDA $CudaVersion support..." -ForegroundColor Yellow
-uv pip install torch torchvision --index-url $TorchIndexUrl
+# PyTorch
+uv pip install torch torchvision --index-url "https://download.pytorch.org/whl/$CudaIndex"
 if ($LASTEXITCODE -ne 0) { throw "PyTorch installation failed" }
 
-Write-Host ""
-Write-Host "[5/6] Installing gsplay and dependencies..." -ForegroundColor Yellow
+# gsplay
 if ($InstallMode -eq "global") {
-    if (Test-Path "$ScriptDir\pyproject.toml") {
-        uv pip install -e $ScriptDir
-    } else {
-        uv pip install gsplay
-    }
+    uv pip install -e $ScriptDir
 } else {
     uv sync
 }
-if ($LASTEXITCODE -ne 0) { throw "gsplay installation failed" }
+
+# =============================================================================
+# [4/5] gsplat (CUDA compilation)
+# =============================================================================
 
 Write-Host ""
-Write-Host "[6/6] Installing gsplat (compiling CUDA extensions)..." -ForegroundColor Yellow
-Write-Host "  This may take a few minutes..."
-uv pip install jaxtyping ninja rich packaging numpy
+Write-Host "[4/5] Installing gsplat..." -ForegroundColor Yellow
+
+# Clear stale cache
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\torch_extensions\*\gsplat*" -ErrorAction SilentlyContinue
+
+# Set compilation flags
+$env:TORCH_CUDA_ARCH_LIST = "8.0;8.6;8.9;9.0+PTX"
+$env:MAX_JOBS = "4"
+
+# Install gsplat
 uv pip install gsplat --no-build-isolation --no-cache-dir
 if ($LASTEXITCODE -ne 0) { throw "gsplat installation failed" }
 
-# Trigger JIT compilation
-Write-Host "  Triggering JIT compilation..."
-if ($InstallMode -eq "global") {
-    python -c "from gsplat.cuda._backend import _C; print('  √ gsplat CUDA extensions compiled')"
-} else {
-    uv run python -c "from gsplat.cuda._backend import _C; print('  √ gsplat CUDA extensions compiled')"
+# Patch for MSVC (remove GCC-only -Wno-attributes flag)
+$backendPy = ".venv\Lib\site-packages\gsplat\cuda\_backend.py"
+if (Test-Path $backendPy) {
+    (Get-Content $backendPy -Raw) -replace `
+        'extra_cflags = \[opt_level, "-Wno-attributes"\]', `
+        'extra_cflags = [opt_level] if os.name == "nt" else [opt_level, "-Wno-attributes"]' |
+    Set-Content $backendPy -NoNewline
+    Write-Host "  [OK] Patched for MSVC"
 }
-if ($LASTEXITCODE -ne 0) { throw "gsplat CUDA compilation failed" }
+
+# Clear cache after patch and trigger JIT
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\torch_extensions\*\gsplat*" -ErrorAction SilentlyContinue
 
 # =============================================================================
-# Build Launcher Frontend (Optional)
+# [5/5] Verify & Frontend
 # =============================================================================
 
 Write-Host ""
-Write-Host "Building launcher frontend..." -ForegroundColor Yellow
-$DenoBin = $null
+Write-Host "[5/5] Verifying..." -ForegroundColor Yellow
 
-if (Get-Command deno -ErrorAction SilentlyContinue) {
-    $DenoBin = "deno"
-} elseif (Test-Path "$env:USERPROFILE\.deno\bin\deno.exe") {
-    $DenoBin = "$env:USERPROFILE\.deno\bin\deno.exe"
-}
+$runCmd = if ($InstallMode -eq "global") { "python" } else { "uv run python" }
+Invoke-Expression "$runCmd -c `"import torch; from gsplat.cuda._backend import _C; print('  [OK] PyTorch:', torch.__version__); print('  [OK] CUDA:', torch.cuda.is_available()); print('  [OK] gsplat: compiled')`""
+if ($LASTEXITCODE -ne 0) { throw "Verification failed" }
 
+# Optional: Build frontend
+$DenoBin = Get-Command deno -ErrorAction SilentlyContinue
 if ($DenoBin -and (Test-Path "$ScriptDir\launcher\frontend")) {
     Push-Location "$ScriptDir\launcher\frontend"
-    try {
-        & $DenoBin task build 2>$null
-        if ($LASTEXITCODE -eq 0 -and (Test-Path "dist")) {
-            Pop-Location
-            $StaticDir = "$ScriptDir\launcher\gsplay_launcher\static"
-            if (Test-Path $StaticDir) { Remove-Item -Recurse -Force $StaticDir }
-            New-Item -ItemType Directory -Path $StaticDir -Force | Out-Null
-            Copy-Item -Recurse "$ScriptDir\launcher\frontend\dist\*" $StaticDir
-            Write-Host "  √ Frontend built successfully"
-        } else {
-            Pop-Location
-            Write-Host "  ! Frontend build failed, using fallback dashboard" -ForegroundColor Yellow
-        }
-    } catch {
-        Pop-Location
-        Write-Host "  ! Frontend build failed, using fallback dashboard" -ForegroundColor Yellow
-    }
-} else {
-    Write-Host "  ! deno not found, skipping frontend build" -ForegroundColor Yellow
-    Write-Host "    Launcher will use fallback HTML dashboard"
-}
-
-# =============================================================================
-# PATH Integration (Global Install Only)
-# =============================================================================
-
-if ($InstallMode -eq "global") {
-    Write-Host ""
-    Write-Host "Setting up PATH integration..." -ForegroundColor Yellow
-
-    # Create wrapper scripts
-    $BinDir = "$env:USERPROFILE\.local\bin"
-    if (-not (Test-Path $BinDir)) {
-        New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
-    }
-
-    # gsplay.cmd
-    @"
-@echo off
-call "$env:USERPROFILE\.gsplay\venv\Scripts\activate.bat"
-python -m src.gsplay.core.main %*
-"@ | Out-File -FilePath "$BinDir\gsplay.cmd" -Encoding ASCII
-
-    # gsplay-launcher.cmd
-    @"
-@echo off
-call "$env:USERPROFILE\.gsplay\venv\Scripts\activate.bat"
-python -m gsplay_launcher %*
-"@ | Out-File -FilePath "$BinDir\gsplay-launcher.cmd" -Encoding ASCII
-
-    # Check if bin dir is in PATH
-    $UserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
-    if ($UserPath -notlike "*$BinDir*") {
-        Write-Host ""
-        Write-Host "To add gsplay to PATH, run:" -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "  `$env:PATH = `"$BinDir;`$env:PATH`""
-        Write-Host ""
-        Write-Host "Or add permanently via System Properties > Environment Variables"
-    } else {
-        Write-Host "  √ $BinDir is already in PATH"
+    $ErrorActionPreference = "Continue"
+    & deno task build *>&1 | Out-Null
+    $ErrorActionPreference = "Stop"
+    Pop-Location
+    if (Test-Path "$ScriptDir\launcher\frontend\dist") {
+        $StaticDir = "$ScriptDir\launcher\gsplay_launcher\static"
+        Remove-Item -Recurse -Force $StaticDir -ErrorAction SilentlyContinue
+        Copy-Item -Recurse "$ScriptDir\launcher\frontend\dist" $StaticDir
+        Write-Host "  [OK] Frontend built"
     }
 }
-
-# =============================================================================
-# Verification
-# =============================================================================
-
-Write-Host ""
-Write-Host "Verifying installation..." -ForegroundColor Yellow
-$verifyScript = @"
-import torch
-print(f'  √ PyTorch: {torch.__version__}')
-print(f'  √ CUDA available: {torch.cuda.is_available()}')
-if torch.cuda.is_available():
-    print(f'  √ GPU: {torch.cuda.get_device_name(0)}')
-from gsplat.cuda._backend import _C
-print('  √ gsplat: OK')
-"@
-
-if ($InstallMode -eq "global") {
-    python -c $verifyScript
-} else {
-    uv run python -c $verifyScript
-}
-if ($LASTEXITCODE -ne 0) { throw "Verification failed" }
 
 # =============================================================================
 # Done
@@ -340,15 +189,7 @@ Write-Host ""
 Write-Host "=== Installation Complete ===" -ForegroundColor Green
 Write-Host ""
 if ($InstallMode -eq "global") {
-    Write-Host "Run the viewer:" -ForegroundColor Cyan
-    Write-Host "  gsplay <path-to-ply-folder>"
-    Write-Host ""
-    Write-Host "Run the launcher:" -ForegroundColor Cyan
-    Write-Host "  gsplay-launcher --browse-path <path>"
+    Write-Host "Run: gsplay <path-to-ply-folder>" -ForegroundColor Cyan
 } else {
-    Write-Host "Run the viewer:" -ForegroundColor Cyan
-    Write-Host "  uv run gsplay <path-to-ply-folder>"
-    Write-Host ""
-    Write-Host "Run the launcher:" -ForegroundColor Cyan
-    Write-Host "  uv run -m gsplay_launcher --browse-path <path>"
+    Write-Host "Run: uv run gsplay <path-to-ply-folder>" -ForegroundColor Cyan
 }

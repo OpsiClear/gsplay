@@ -79,7 +79,7 @@ def run_setup(force: bool = False, yes: bool = False) -> bool:
     # Detect system CUDA
     cuda_version = detect_system_cuda()
     if cuda_version:
-        print(f"✓ Detected CUDA {cuda_version}")
+        print(f"[OK] Detected CUDA {cuda_version}")
     else:
         print("⚠ No CUDA detected (nvidia-smi not found)")
         print("  GSPlay requires an NVIDIA GPU with CUDA support.")
@@ -102,24 +102,24 @@ def run_setup(force: bool = False, yes: bool = False) -> bool:
     print()
     print("Current status:")
     if torch_status.available:
-        print(f"  • PyTorch: {torch_status.message}")
+        print(f"  - PyTorch: {torch_status.message}")
     else:
-        print(f"  • PyTorch: ✗ {torch_status.message}")
+        print(f"  - PyTorch: [X] {torch_status.message}")
 
     if triton_status.available:
-        print(f"  • triton: {triton_status.message}")
+        print(f"  - triton: {triton_status.message}")
     else:
-        print(f"  • triton: ✗ {triton_status.message}")
+        print(f"  - triton: [X] {triton_status.message}")
 
     if gsplat_status.available:
-        print(f"  • gsplat: {gsplat_status.message}")
+        print(f"  - gsplat: {gsplat_status.message}")
     else:
-        print(f"  • gsplat: ✗ {gsplat_status.message}")
+        print(f"  - gsplat: [X] {gsplat_status.message}")
 
     # Nothing to do?
     if not need_torch and not need_triton and not need_gsplat:
         print()
-        print("✓ All dependencies are installed!")
+        print("[OK] All dependencies are installed!")
         print("  Run: gsplay <path-to-ply-folder>")
         return True
 
@@ -129,15 +129,15 @@ def run_setup(force: bool = False, yes: bool = False) -> bool:
 
     index_url = get_torch_index_url(cuda_version)
     if need_torch:
-        print(f"  • PyTorch + torchvision (CUDA {cuda_version})")
+        print(f"  - PyTorch + torchvision (CUDA {cuda_version})")
         print(f"    Index: {index_url}")
 
     if need_triton:
         pkg = "triton-windows" if sys.platform == "win32" else "triton"
-        print(f"  • {pkg}")
+        print(f"  - {pkg}")
 
     if need_gsplat:
-        print("  • gsplat (requires compilation, may take a few minutes)")
+        print("  - gsplat (requires compilation, may take a few minutes)")
 
     # Confirm
     print()
@@ -152,13 +152,13 @@ def run_setup(force: bool = False, yes: bool = False) -> bool:
         print()
         print("Installing PyTorch...")
         if not install_package("torch", ["--index-url", index_url]):
-            print("✗ Failed to install torch")
+            print("[X] Failed to install torch")
             success = False
         elif not install_package("torchvision", ["--index-url", index_url]):
-            print("✗ Failed to install torchvision")
+            print("[X] Failed to install torchvision")
             success = False
         else:
-            print("✓ PyTorch installed")
+            print("[OK] PyTorch installed")
 
     # Install triton
     if need_triton and success:
@@ -166,18 +166,18 @@ def run_setup(force: bool = False, yes: bool = False) -> bool:
         pkg = "triton-windows" if sys.platform == "win32" else "triton"
         print(f"Installing {pkg}...")
         if not install_package(pkg):
-            print(f"✗ Failed to install {pkg}")
+            print(f"[X] Failed to install {pkg}")
             # triton is optional, don't fail setup
             print("  (continuing without triton - some optimizations unavailable)")
         else:
-            print(f"✓ {pkg} installed")
+            print(f"[OK] {pkg} installed")
 
     # Install gsplat
     if need_gsplat and success:
         print()
         print("Installing gsplat (this may take a few minutes)...")
         if not install_package("gsplat", ["--no-build-isolation"]):
-            print("✗ Failed to install gsplat")
+            print("[X] Failed to install gsplat")
             print()
             print("  Common fixes:")
             print("  - Ensure C++ compiler is installed")
@@ -185,17 +185,17 @@ def run_setup(force: bool = False, yes: bool = False) -> bool:
             print("  - Try: pip install ninja && pip install gsplat --no-build-isolation")
             success = False
         else:
-            print("✓ gsplat installed")
+            print("[OK] gsplat installed")
 
     # Summary
     print()
     print("=" * 50)
     if success:
-        print("✓ Setup complete!")
+        print("[OK] Setup complete!")
         print()
         print("  Run: gsplay <path-to-ply-folder>")
     else:
-        print("✗ Setup incomplete - some dependencies failed to install")
+        print("[X] Setup incomplete - some dependencies failed to install")
         print()
         print("  Run 'gsplay doctor' for diagnostics")
         print("  Or try 'gsplay setup' again after fixing the issues above")
